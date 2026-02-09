@@ -5,7 +5,7 @@
 ![GitHub License](https://img.shields.io/github/license/fini-net/gh-observer)
 ![GitHub watchers](https://img.shields.io/github/watchers/fini-net/gh-observer)
 
-A good starting place for something. (TODO)
+Watch github actions run
 
 ## Contributing
 
