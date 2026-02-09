@@ -84,7 +84,7 @@ Make sure you have either set up.
 
 ## Example Output
 
-```
+```ShellOuptut
 PR #123: Add new feature
 
 Startup Phase (37s elapsed):
