@@ -8,9 +8,7 @@ import? '.just/cue-verify.just'
 import? '.just/claude.just'
 import? '.just/copilot.just'
 import? '.just/repo-toml.just'
-import? '.just/testing.just'
 import? '.just/template-sync.just'
-import? '.just/clean-template.just'
 
 # list recipes (default works without naming it)
 [group('Utility')]

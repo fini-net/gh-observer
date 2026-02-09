@@ -3,8 +3,8 @@
 # TODO: mirrors later
 
 [about]
-description = "Automated GitHub workflow template: community standards, just recipes for PR lifecycle, AI reviews (Copilot/Claude), and template sync system"
-topics = ["github", "template", "compliance", "github-repository", "template-repository", "template-generic-repo"]
+description = "Automated GitHub workflow template: community standards, just recipes for PR lifecycle, AI reviews (Copilot/Claude),   and template sync system"
+topics = ["compliance", "github", "github-repository", "template", "template-generic-repo", "template-repository"]
 license = "GPL-2.0-only"
 
 [urls]

@@ -1,2 +1,0 @@
-- abc1234 Add task list
-- def5678 Complete tests
