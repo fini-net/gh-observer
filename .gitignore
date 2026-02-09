@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# gh-observer binary
+gh-observer
+
 # Test binary, built with `go test -c`
 *.test
 

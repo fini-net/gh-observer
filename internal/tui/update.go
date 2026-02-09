@@ -1,0 +1,169 @@
+package tui
+
+import (
+	"context"
+	"time"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/google/go-github/v58/github"
+	ghclient "github.com/fini-net/gh-observer/internal/github"
+)
+
+// Init initializes the model
+func (m Model) Init() tea.Cmd {
+	if m.err != nil {
+		return tea.Quit
+	}
+
+	return tea.Batch(
+		m.spinner.Tick,
+		fetchPRInfo(m.ctx, m.ghClient, m.owner, m.repo, m.prNumber),
+		tick(m.refreshInterval),
+	)
+}
+
+// Update handles messages
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "q", "ctrl+c":
+			m.quitting = true
+			return m, tea.Quit
+		}
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+
+	case TickMsg:
+		// Check rate limit before polling
+		if m.rateLimitRemaining < 10 {
+			// Back off if rate limited
+			return m, tick(m.refreshInterval * 3)
+		}
+
+		// Only poll if we have the PR SHA
+		if m.headSHA != "" {
+			return m, tea.Batch(
+				fetchCheckRuns(m.ctx, m.ghClient, m.owner, m.repo, m.headSHA),
+				tick(m.refreshInterval),
+			)
+		}
+
+		// Re-schedule tick even if we can't poll yet
+		return m, tick(m.refreshInterval)
+
+	case PRInfoMsg:
+		if msg.Err != nil {
+			m.err = msg.Err
+			return m, tea.Quit
+		}
+
+		m.prTitle = msg.Title
+		m.headSHA = msg.HeadSHA
+		m.prCreatedAt = msg.CreatedAt
+
+		// Start polling checks now that we have the SHA
+		return m, fetchCheckRuns(m.ctx, m.ghClient, m.owner, m.repo, m.headSHA)
+
+	case ChecksUpdateMsg:
+		if msg.Err != nil {
+			// Network errors shouldn't be fatal - continue polling
+			m.err = msg.Err
+			return m, nil
+		}
+
+		m.checkRuns = msg.CheckRuns
+		m.rateLimitRemaining = msg.RateLimitRemaining
+		m.lastUpdate = time.Now()
+		m.err = nil // Clear any previous errors
+
+		// Check if all checks are complete
+		if allChecksComplete(m.checkRuns) {
+			m.exitCode = determineExitCode(m.checkRuns)
+			m.quitting = true
+			return m, tea.Quit
+		}
+
+		return m, nil
+
+	case ErrorMsg:
+		m.err = msg.Err
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// tick creates a command that sends a TickMsg after duration d
+func tick(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg {
+		return TickMsg(t)
+	})
+}
+
+// fetchPRInfo fetches PR metadata
+func fetchPRInfo(ctx context.Context, client interface{}, owner, repo string, prNumber int) tea.Cmd {
+	return func() tea.Msg {
+		ghClient := client.(*github.Client)
+		prInfo, err := ghclient.FetchPRInfo(ctx, ghClient, owner, repo, prNumber)
+		if err != nil {
+			return PRInfoMsg{Err: err}
+		}
+
+		createdAt, _ := time.Parse("2006-01-02T15:04:05Z", prInfo.CreatedAt)
+
+		return PRInfoMsg{
+			Number:    prInfo.Number,
+			Title:     prInfo.Title,
+			HeadSHA:   prInfo.HeadSHA,
+			CreatedAt: createdAt,
+		}
+	}
+}
+
+// fetchCheckRuns fetches check runs for a commit
+func fetchCheckRuns(ctx context.Context, client interface{}, owner, repo, sha string) tea.Cmd {
+	return func() tea.Msg {
+		ghClient := client.(*github.Client)
+		result, err := ghclient.FetchCheckRuns(ctx, ghClient, owner, repo, sha)
+		if err != nil {
+			return ChecksUpdateMsg{Err: err}
+		}
+
+		return ChecksUpdateMsg{
+			CheckRuns:         result.CheckRuns,
+			RateLimitRemaining: result.RateLimitRemaining,
+		}
+	}
+}
+
+// allChecksComplete returns true if all checks have finished
+func allChecksComplete(checks []*github.CheckRun) bool {
+	if len(checks) == 0 {
+		return false
+	}
+
+	for _, check := range checks {
+		status := check.GetStatus()
+		if status != "completed" {
+			return false
+		}
+	}
+
+	return true
+}
+
+// determineExitCode returns 1 if any check failed, 0 otherwise
+func determineExitCode(checks []*github.CheckRun) int {
+	for _, check := range checks {
+		conclusion := check.GetConclusion()
+		if conclusion == "failure" || conclusion == "timed_out" || conclusion == "action_required" {
+			return 1
+		}
+	}
+	return 0
+}
