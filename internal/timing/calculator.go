@@ -79,5 +79,5 @@ func formatUnit(value int, unit string) string {
 	if value == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%d%s", value)
+	return fmt.Sprintf("%d%s", value, unit)
 }

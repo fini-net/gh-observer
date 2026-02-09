@@ -133,9 +133,8 @@ func (m Model) renderCheckRun(check *github.CheckRun) string {
 	case "queued":
 		icon = "⏸️"
 		style = m.styles.Queued
-		queueTime := timing.QueueLatency(m.prCreatedAt, check)
-		if queueTime > 0 {
-			timeText = fmt.Sprintf("[queued: %s]", timing.FormatDuration(time.Since(m.prCreatedAt)))
+		if check.CreatedAt != nil {
+			timeText = fmt.Sprintf("[queued: %s]", timing.FormatDuration(time.Since(check.CreatedAt.Time)))
 		} else {
 			timeText = "[queued]"
 		}
