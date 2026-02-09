@@ -15,3 +15,8 @@ import? '.just/template-sync.just'
 list:
 	just --list
 	@echo "{{GREEN}}Your justfile is waiting for more scripts and snippets{{NORMAL}}"
+
+# build the gh-observer binary
+[group('Build')]
+build:
+	go build -o gh-observer

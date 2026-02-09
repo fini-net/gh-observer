@@ -1,0 +1,12 @@
+# Example configuration for gh-observer
+# Copy to ~/.config/gh-observer/config.yaml to customize
+
+# Refresh interval for polling GitHub API
+refresh_interval: 5s
+
+# Color codes for terminal output (ANSI 256-color palette)
+colors:
+  success: 10  # Green - completed successfully
+  failure: 9   # Red - completed with failure
+  running: 11  # Yellow - currently in progress
+  queued: 8    # Gray - waiting to start

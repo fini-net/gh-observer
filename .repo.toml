@@ -3,13 +3,13 @@
 # TODO: mirrors later
 
 [about]
-description = "Automated GitHub workflow template: community standards, just recipes for PR lifecycle, AI reviews (Copilot/Claude),   and template sync system"
-topics = ["compliance", "github", "github-repository", "template", "template-generic-repo", "template-repository"]
+description = "Watch github actions run"
+topics = ["github-cli"]
 license = "GPL-2.0-only"
 
 [urls]
-git_ssh = "git@github.com:fini-net/template-repo.git"
-web_url = "https://github.com/fini-net/template-repo"
+git_ssh = "git@github.com:fini-net/gh-observer.git"
+web_url = "https://github.com/fini-net/gh-observer"
 
 [flags]
 claude = true
