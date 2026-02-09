@@ -1,0 +1,27 @@
+---
+name: CUE Validation
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+# global permissions
+permissions: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install CUE
+        uses: cue-lang/setup-cue@v1.0.1
+
+      - name: Verify CUE schemas
+        run: just cue-verify

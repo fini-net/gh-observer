@@ -1,0 +1,47 @@
+---
+name: Template Sync Tests
+
+on:
+  push:
+    paths:
+      - '.just/lib/*checksum*.sh'
+      - '.just/lib/template_*.sh'
+      - '.just/template-sync.just'
+      - '.just/test/fixtures/template_sync/**'
+      - '.github/workflows/template-sync.yml'
+  pull_request:
+    paths:
+      - '.just/lib/*checksum*.sh'
+      - '.just/lib/template_*.sh'
+      - '.just/template-sync.just'
+      - '.just/test/fixtures/template_sync/**'
+      - '.github/workflows/template-sync.yml'
+
+# global permissions
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for checksum generation
+
+      - name: Install just
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | \
+            bash -s -- --to /usr/local/bin
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Run template sync tests
+        run: just template_sync_test
+
+      - name: Generate checksums (validation)
+        run: just checksums_generate
+
+      - name: Verify checksums file is valid JSON
+        run: jq empty .just/CHECKSUMS.json

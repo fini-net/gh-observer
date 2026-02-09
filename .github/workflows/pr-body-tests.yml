@@ -1,0 +1,31 @@
+name: PR Body Update Tests
+
+on:
+  pull_request:
+    paths:
+      - '.just/lib/update_pr_body.sh'
+      - '.just/lib/pr_body_test.sh'
+      - '.just/test/fixtures/pr_bodies/**'
+  push:
+    branches: [main]
+    paths:
+      - '.just/lib/update_pr_body.sh'
+      - '.just/lib/pr_body_test.sh'
+      - '.just/test/fixtures/pr_bodies/**'
+
+# global permissions
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make scripts executable
+        run: |
+          chmod +x .just/lib/pr_body_test.sh
+          chmod +x .just/lib/update_pr_body.sh
+      - name: Run PR body tests
+        run: .just/lib/pr_body_test.sh
