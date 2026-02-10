@@ -33,12 +33,13 @@ func FinalDuration(check ghclient.CheckRunInfo) time.Duration {
 
 // FormatDuration formats a duration in human-readable form
 func FormatDuration(d time.Duration) string {
-	if d == 0 {
-		return "0s"
-	}
-
 	// Round to seconds
 	d = d.Round(time.Second)
+
+	// Handle zero or negative durations
+	if d <= 0 {
+		return "0s"
+	}
 
 	hours := d / time.Hour
 	d -= hours * time.Hour

@@ -188,7 +188,7 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 		name = name[:widths.NameWidth-1] + "…"
 	}
 
-	// Get column data
+	// Get column data (plain text)
 	queueText := m.formatQueueLatency(check)
 	durationText := m.formatDuration(check)
 
@@ -232,16 +232,34 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 		style = m.styles.Queued
 	}
 
-	// Format columns with proper padding (plain text first, then style)
-	// This ensures ANSI color codes don't interfere with alignment
-	queueCol := fmt.Sprintf("%*s", widths.QueueWidth, queueText)
-	nameCol := fmt.Sprintf("%-*s", widths.NameWidth, name)
-	durationCol := fmt.Sprintf("%*s", widths.DurationWidth, durationText)
+	// Build columns with explicit padding using strings.Repeat
+	// This avoids fmt.Sprintf format specifier issues with ANSI codes
 
-	// Apply styling after padding
+	// Right-align queue time
+	queuePadding := widths.QueueWidth - len(queueText)
+	if queuePadding < 0 {
+		queuePadding = 0
+	}
+	queueCol := strings.Repeat(" ", queuePadding) + queueText
+
+	// Left-align name (already correct length due to truncation logic above)
+	namePadding := widths.NameWidth - len(name)
+	if namePadding < 0 {
+		namePadding = 0
+	}
+	nameCol := name + strings.Repeat(" ", namePadding)
+
+	// Right-align duration
+	durationPadding := widths.DurationWidth - len(durationText)
+	if durationPadding < 0 {
+		durationPadding = 0
+	}
+	durationCol := strings.Repeat(" ", durationPadding) + durationText
+
+	// Apply styling to icon and duration
 	styledIcon := style.Render(icon)
 	styledDuration := style.Render(durationCol)
 
-	// Assemble the line with fixed spacing
-	return fmt.Sprintf("  %s  %s  %s  %s\n", queueCol, styledIcon, nameCol, styledDuration)
+	// Assemble line: [2 spaces][queue][2 spaces][icon][2 spaces][name][2 spaces][duration][newline]
+	return "  " + queueCol + "  " + styledIcon + "  " + nameCol + "  " + styledDuration + "\n"
 }
