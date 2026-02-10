@@ -2,6 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(.just/lib/pr_body_test.sh)",
+      "Bash(actionlint:*)",
       "Bash(cue export:*)",
       "Bash(gh copilot suggest:*)",
       "Bash(gh issue view:*)",
@@ -9,6 +10,7 @@
       "Bash(gh pr diff:*)",
       "Bash(gh pr list:*)",
       "Bash(gh pr view:*)",
+      "Bash(gh release list:*)",
       "Bash(gh run list:*)",
       "Bash(gh run view:*)",
       "Bash(git log:*)",
