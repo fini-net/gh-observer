@@ -5,7 +5,10 @@
 ![GitHub License](https://img.shields.io/github/license/fini-net/gh-observer)
 ![GitHub watchers](https://img.shields.io/github/watchers/fini-net/gh-observer)
 
-A GitHub PR check watcher that improves on `gh pr checks --watch` by showing runtime metrics, queue latency, and better handling of startup delays.
+A GitHub PR check watcher that improves on `gh pr checks --watch` by showing
+runtime metrics, queue latency, and better handling of startup delays.
+
+![project banner: abstract representation of code flowing through a pull request, using interconnected nodes and lines.](docs/gh-observer-banner.jpeg)
 
 ## Why?
 
