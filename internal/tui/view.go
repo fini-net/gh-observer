@@ -19,7 +19,14 @@ func (m Model) View() string {
 
 	// Header
 	if m.prTitle != "" {
-		b.WriteString(m.styles.Header.Render(fmt.Sprintf("PR #%d: %s\n", m.prNumber, m.prTitle)))
+		// Render PR info (bold and underlined)
+		prInfo := m.styles.Header.Render(fmt.Sprintf("PR #%d: %s", m.prNumber, m.prTitle))
+
+		// Get current UTC time (not bold)
+		utcTime := time.Now().UTC().Format("15:04:05 UTC")
+
+		// Combine: bold PR info + non-bold time
+		b.WriteString(fmt.Sprintf("%s %s\n", prInfo, utcTime))
 		b.WriteString("\n")
 	}
 
