@@ -42,7 +42,8 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:www.chicks.net)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(go doc:*)"
     ],
     "deny": [],
     "ask": []
