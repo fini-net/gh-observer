@@ -47,17 +47,20 @@ The TUI follows the Elm Architecture pattern (Model-View-Update):
 The `internal/github/graphql.go` module uses GraphQL to efficiently fetch check run data:
 
 **Query structure** - Follows `gh pr checks` pattern:
-```
+
+```ShellOutput
 Repository → PullRequest → Commits → StatusCheckRollup → CheckRun
   → CheckSuite → WorkflowRun → Workflow → Name
 ```
 
 **Key benefits**:
+
 - Single API call gets all data (workflow name + check status)
 - More efficient than REST API (fewer API calls, less rate limit usage)
 - Returns enriched `CheckRunInfo` with workflow name included
 
 **Display format** - Check names shown as "Workflow Name / Job Name":
+
 - "CUE Validation / verify"
 - "MarkdownLint / lint"
 - "Claude Code Review / claude-review"
@@ -123,6 +126,7 @@ The application returns meaningful exit codes:
 - **1** - Error during execution (authentication, network, etc.)
 
 Exit code determination happens in `internal/tui/update.go`:
+
 - `allChecksComplete()` checks if all checks have status `completed`
 - `determineExitCode()` scans for failure conclusions and returns 1 if any found
 - The TUI automatically quits when all checks complete
