@@ -232,11 +232,16 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 		style = m.styles.Queued
 	}
 
-	// Format with aligned columns: "  [queue]  [icon]  [name]  [duration]"
-	return fmt.Sprintf("  %*s  %s  %-*s  %*s\n",
-		widths.QueueWidth, queueText,                     // Right-aligned queue
-		style.Render(icon),                               // Icon with style
-		widths.NameWidth, name,                           // Left-aligned name
-		widths.DurationWidth, style.Render(durationText), // Right-aligned duration
-	)
+	// Format columns with proper padding (plain text first, then style)
+	// This ensures ANSI color codes don't interfere with alignment
+	queueCol := fmt.Sprintf("%*s", widths.QueueWidth, queueText)
+	nameCol := fmt.Sprintf("%-*s", widths.NameWidth, name)
+	durationCol := fmt.Sprintf("%*s", widths.DurationWidth, durationText)
+
+	// Apply styling after padding
+	styledIcon := style.Render(icon)
+	styledDuration := style.Render(durationCol)
+
+	// Assemble the line with fixed spacing
+	return fmt.Sprintf("  %s  %s  %s  %s\n", queueCol, styledIcon, nameCol, styledDuration)
 }
