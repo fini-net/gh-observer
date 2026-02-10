@@ -159,10 +159,15 @@ func (m Model) calculateColumnWidths() ColumnWidths {
 func (m Model) renderCheckRuns() string {
 	var b strings.Builder
 
-	b.WriteString(m.styles.Header.Render("Checks:\n"))
-
 	// Calculate column widths once
 	widths := m.calculateColumnWidths()
+
+	// Render column headers with matching alignment
+	headerQueue := strings.Repeat(" ", widths.QueueWidth-5) + "Queue"
+	headerName := "Check" + strings.Repeat(" ", widths.NameWidth-5)
+	headerDuration := strings.Repeat(" ", widths.DurationWidth-8) + "Duration"
+
+	b.WriteString(m.styles.Header.Render(fmt.Sprintf("  %s     %s  %s\n", headerQueue, headerName, headerDuration)))
 
 	// Render each check with aligned columns
 	for _, check := range m.checkRuns {
