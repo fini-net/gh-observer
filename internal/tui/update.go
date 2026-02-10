@@ -6,19 +6,14 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/google/go-github/v58/github"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
 // Init initializes the model
 func (m Model) Init() tea.Cmd {
-	if m.err != nil {
-		return tea.Quit
-	}
-
 	return tea.Batch(
 		m.spinner.Tick,
-		fetchPRInfo(m.ctx, m.ghClient, m.owner, m.repo, m.prNumber),
+		fetchPRInfo(m.ctx, m.token, m.owner, m.repo, m.prNumber),
 		tick(m.refreshInterval),
 	)
 }
@@ -45,13 +40,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tick(m.refreshInterval * 3)
 		}
 
-		// Only poll if we have the PR SHA
-		if m.headSHA != "" {
-			return m, tea.Batch(
-				fetchCheckRuns(m.ctx, m.ghClient, m.owner, m.repo, m.headSHA),
-				tick(m.refreshInterval),
-			)
-		}
+		// Only poll if we have the PR number
+		return m, tea.Batch(
+			fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber),
+			tick(m.refreshInterval),
+		)
 
 		// Re-schedule tick even if we can't poll yet
 		return m, tick(m.refreshInterval)
@@ -67,8 +60,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prCreatedAt = msg.CreatedAt
 		m.headCommitTime = msg.HeadCommitTime
 
-		// Start polling checks now that we have the SHA
-		return m, fetchCheckRuns(m.ctx, m.ghClient, m.owner, m.repo, m.headSHA)
+		// Start polling checks now that we have the PR info
+		return m, fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber)
 
 	case ChecksUpdateMsg:
 		if msg.Err != nil {
@@ -107,10 +100,15 @@ func tick(d time.Duration) tea.Cmd {
 }
 
 // fetchPRInfo fetches PR metadata
-func fetchPRInfo(ctx context.Context, client interface{}, owner, repo string, prNumber int) tea.Cmd {
+func fetchPRInfo(ctx context.Context, token, owner, repo string, prNumber int) tea.Cmd {
 	return func() tea.Msg {
-		ghClient := client.(*github.Client)
-		prInfo, err := ghclient.FetchPRInfo(ctx, ghClient, owner, repo, prNumber)
+		// Create temporary client for PR info (REST API)
+		client, err := ghclient.NewClient(ctx)
+		if err != nil {
+			return PRInfoMsg{Err: err}
+		}
+
+		prInfo, err := ghclient.FetchPRInfo(ctx, client, owner, repo, prNumber)
 		if err != nil {
 			return PRInfoMsg{Err: err}
 		}
@@ -128,31 +126,29 @@ func fetchPRInfo(ctx context.Context, client interface{}, owner, repo string, pr
 	}
 }
 
-// fetchCheckRuns fetches check runs for a commit
-func fetchCheckRuns(ctx context.Context, client interface{}, owner, repo, sha string) tea.Cmd {
+// fetchCheckRuns fetches check runs using GraphQL
+func fetchCheckRuns(ctx context.Context, token, owner, repo string, prNumber int) tea.Cmd {
 	return func() tea.Msg {
-		ghClient := client.(*github.Client)
-		result, err := ghclient.FetchCheckRuns(ctx, ghClient, owner, repo, sha)
+		checkRuns, rateLimit, err := ghclient.FetchCheckRunsGraphQL(ctx, token, owner, repo, prNumber)
 		if err != nil {
 			return ChecksUpdateMsg{Err: err}
 		}
 
 		return ChecksUpdateMsg{
-			CheckRuns:         result.CheckRuns,
-			RateLimitRemaining: result.RateLimitRemaining,
+			CheckRuns:          checkRuns,
+			RateLimitRemaining: rateLimit,
 		}
 	}
 }
 
 // allChecksComplete returns true if all checks have finished
-func allChecksComplete(checks []*github.CheckRun) bool {
+func allChecksComplete(checks []ghclient.CheckRunInfo) bool {
 	if len(checks) == 0 {
 		return false
 	}
 
 	for _, check := range checks {
-		status := check.GetStatus()
-		if status != "completed" {
+		if check.Status != "completed" {
 			return false
 		}
 	}
@@ -161,10 +157,9 @@ func allChecksComplete(checks []*github.CheckRun) bool {
 }
 
 // determineExitCode returns 1 if any check failed, 0 otherwise
-func determineExitCode(checks []*github.CheckRun) int {
+func determineExitCode(checks []ghclient.CheckRunInfo) int {
 	for _, check := range checks {
-		conclusion := check.GetConclusion()
-		if conclusion == "failure" || conclusion == "timed_out" || conclusion == "action_required" {
+		if check.Conclusion == "failure" || check.Conclusion == "timed_out" || check.Conclusion == "action_required" {
 			return 1
 		}
 	}

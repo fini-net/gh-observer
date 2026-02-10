@@ -42,6 +42,27 @@ The TUI follows the Elm Architecture pattern (Model-View-Update):
 - **View** (`internal/tui/view.go`) - Renders the terminal UI
 - **Messages** (`internal/tui/messages.go`) - Custom message types for async operations
 
+### GraphQL architecture
+
+The `internal/github/graphql.go` module uses GraphQL to efficiently fetch check run data:
+
+**Query structure** - Follows `gh pr checks` pattern:
+```
+Repository → PullRequest → Commits → StatusCheckRollup → CheckRun
+  → CheckSuite → WorkflowRun → Workflow → Name
+```
+
+**Key benefits**:
+- Single API call gets all data (workflow name + check status)
+- More efficient than REST API (fewer API calls, less rate limit usage)
+- Returns enriched `CheckRunInfo` with workflow name included
+
+**Display format** - Check names shown as "Workflow Name / Job Name":
+- "CUE Validation / verify"
+- "MarkdownLint / lint"
+- "Claude Code Review / claude-review"
+- "Checkov" (legacy checks without workflow show job name only)
+
 ### Key timing calculations
 
 The `internal/timing/calculator.go` module provides three core metrics:
@@ -59,19 +80,24 @@ The `internal/timing/calculator.go` module provides three core metrics:
 
 ### GitHub API client
 
-The `internal/github/` package provides three main functions:
+The `internal/github/` package provides API interaction with both REST and GraphQL:
 
-- `NewClient()` - Creates authenticated GitHub API client using:
+- `GetToken()` - Retrieves GitHub token using:
   1. `GITHUB_TOKEN` environment variable (first priority)
   2. `gh auth token` output (fallback)
+
+- `NewClient()` - Creates authenticated REST API client for PR metadata
 
 - `GetCurrentPR()` - Auto-detects PR number from current branch via `gh pr view`
 
 - `ParseOwnerRepo()` - Extracts owner/repo from git remote origin (supports SSH and HTTPS formats)
 
-- `FetchPRInfo()` - Retrieves PR metadata (title, SHA, timestamps) via GitHub API
+- `FetchPRInfo()` - Retrieves PR metadata (title, SHA, timestamps) via REST API
 
-- `FetchCheckRuns()` - Lists check runs for a commit SHA and tracks rate limit
+- `FetchCheckRunsGraphQL()` - Fetches check runs with workflow names via GraphQL
+  - Uses single GraphQL query for efficiency
+  - Returns `CheckRunInfo` with workflow name, job name, status, and timestamps
+  - Matches the approach used by `gh pr checks --watch`
 
 ### Configuration system
 
@@ -164,7 +190,8 @@ gh-observer && echo "All checks passed!"
 - `github.com/charmbracelet/bubbletea` - TUI framework (Elm Architecture)
 - `github.com/charmbracelet/lipgloss` - Terminal styling and layout
 - `github.com/charmbracelet/bubbles` - Reusable TUI components (spinner)
-- `github.com/google/go-github/v58` - GitHub API client
+- `github.com/google/go-github/v58` - GitHub REST API client (PR metadata)
+- `github.com/shurcooL/githubv4` - GitHub GraphQL API client (check runs)
 - `github.com/spf13/viper` - Configuration management
 - `golang.org/x/oauth2` - OAuth2 authentication for GitHub
 
@@ -172,6 +199,9 @@ gh-observer && echo "All checks passed!"
 
 - PR detection uses `gh pr view` command and parses JSON output
 - Owner/repo parsing supports both SSH (`git@github.com:owner/repo.git`) and HTTPS formats
+- Check runs fetched via **GraphQL** for efficiency (single query gets workflow names)
+- PR metadata fetched via **REST API** (simpler for basic PR info)
+- GraphQL status/conclusion values normalized to lowercase for consistency
 - All timestamps from GitHub API are parsed in RFC3339 format
 - The TUI uses a spinner for visual feedback during polling
 - Keyboard input is limited to 'q' and 'ctrl+c' for quitting

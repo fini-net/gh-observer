@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
+	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
-	"github.com/google/go-github/v58/github"
 )
 
 // View renders the current state
@@ -87,10 +87,15 @@ func (m Model) renderCheckRuns() string {
 }
 
 // renderCheckRun displays a single check run
-func (m Model) renderCheckRun(check *github.CheckRun) string {
-	status := check.GetStatus()
-	conclusion := check.GetConclusion()
-	name := check.GetName()
+func (m Model) renderCheckRun(check ghclient.CheckRunInfo) string {
+	status := check.Status
+	conclusion := check.Conclusion
+
+	// Format name as "Workflow / Job" or just "Job" if no workflow
+	name := check.Name
+	if check.WorkflowName != "" {
+		name = fmt.Sprintf("%s / %s", check.WorkflowName, check.Name)
+	}
 
 	var icon, timeText string
 	var style = m.styles.Queued

@@ -63,8 +63,15 @@ func run() int {
 		return 1
 	}
 
+	// Get GitHub token
+	token, err := ghclient.GetToken()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get GitHub token: %v\n", err)
+		return 1
+	}
+
 	// Create model
-	model := tui.NewModel(ctx, owner, repo, prNumber, cfg.RefreshInterval, styles)
+	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles)
 
 	// Run TUI
 	p := tea.NewProgram(model)
