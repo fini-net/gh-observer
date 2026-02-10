@@ -25,8 +25,12 @@ func (m Model) View() string {
 		// Get current UTC time (not bold)
 		utcTime := time.Now().UTC().Format("15:04:05 UTC")
 
-		// Combine: bold PR info + non-bold time
-		b.WriteString(fmt.Sprintf("%s %s\n", prInfo, utcTime))
+		// Get time since last update
+		timeSinceUpdate := time.Since(m.lastUpdate)
+		lastUpdated := fmt.Sprintf("Last updated: %s ago", timing.FormatDuration(timeSinceUpdate))
+
+		// Combine: bold PR info + non-bold time + last updated
+		b.WriteString(fmt.Sprintf("%s %s  %s\n", prInfo, utcTime, lastUpdated))
 		b.WriteString("\n")
 	}
 
@@ -40,8 +44,6 @@ func (m Model) View() string {
 
 	// Footer
 	b.WriteString("\n")
-	timeSinceUpdate := time.Since(m.lastUpdate)
-	b.WriteString(m.styles.Info.Render(fmt.Sprintf("Last updated: %s ago", timing.FormatDuration(timeSinceUpdate))))
 
 	if m.rateLimitRemaining < 100 {
 		b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
