@@ -11,11 +11,12 @@ type TickMsg time.Time
 
 // PRInfoMsg contains PR metadata
 type PRInfoMsg struct {
-	Number    int
-	Title     string
-	HeadSHA   string
-	CreatedAt time.Time
-	Err       error
+	Number         int
+	Title          string
+	HeadSHA        string
+	CreatedAt      time.Time
+	HeadCommitTime time.Time
+	Err            error
 }
 
 // ChecksUpdateMsg contains updated check runs

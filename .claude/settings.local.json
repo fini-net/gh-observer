@@ -11,6 +11,7 @@
       "Bash(gh run list:*)",
       "Bash(gh run view:*)",
       "Bash(git log:*)",
+      "Bash(go doc:*)",
       "Bash(go mod tidy:*)",
       "Bash(gum choose:*)",
       "Bash(gum confirm:*)",
