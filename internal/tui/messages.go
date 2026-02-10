@@ -3,7 +3,7 @@ package tui
 import (
 	"time"
 
-	"github.com/google/go-github/v58/github"
+	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
 // TickMsg is sent on each poll interval
@@ -21,9 +21,9 @@ type PRInfoMsg struct {
 
 // ChecksUpdateMsg contains updated check runs
 type ChecksUpdateMsg struct {
-	CheckRuns         []*github.CheckRun
+	CheckRuns          []ghclient.CheckRunInfo
 	RateLimitRemaining int
-	Err               error
+	Err                error
 }
 
 // ErrorMsg contains error information

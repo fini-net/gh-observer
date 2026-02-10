@@ -11,8 +11,8 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// NewClient creates a GitHub API client using GITHUB_TOKEN env var or gh CLI
-func NewClient(ctx context.Context) (*github.Client, error) {
+// GetToken retrieves the GitHub token from GITHUB_TOKEN env var or gh CLI
+func GetToken() (string, error) {
 	// Try GITHUB_TOKEN env var first
 	token := os.Getenv("GITHUB_TOKEN")
 
@@ -26,7 +26,17 @@ func NewClient(ctx context.Context) (*github.Client, error) {
 	}
 
 	if token == "" {
-		return nil, fmt.Errorf("authentication failed: set GITHUB_TOKEN or run `gh auth login`")
+		return "", fmt.Errorf("authentication failed: set GITHUB_TOKEN or run `gh auth login`")
+	}
+
+	return token, nil
+}
+
+// NewClient creates a GitHub API client using GITHUB_TOKEN env var or gh CLI
+func NewClient(ctx context.Context) (*github.Client, error) {
+	token, err := GetToken()
+	if err != nil {
+		return nil, err
 	}
 
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})

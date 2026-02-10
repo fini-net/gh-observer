@@ -4,31 +4,31 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/go-github/v58/github"
+	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
 // QueueLatency calculates the time from commit push to check start
-func QueueLatency(commitTime time.Time, check *github.CheckRun) time.Duration {
+func QueueLatency(commitTime time.Time, check ghclient.CheckRunInfo) time.Duration {
 	if check.StartedAt == nil || commitTime.IsZero() {
 		return 0
 	}
-	return check.StartedAt.Time.Sub(commitTime)
+	return check.StartedAt.Sub(commitTime)
 }
 
 // Runtime calculates elapsed time for in_progress checks
-func Runtime(check *github.CheckRun) time.Duration {
-	if check.GetStatus() != "in_progress" || check.StartedAt == nil {
+func Runtime(check ghclient.CheckRunInfo) time.Duration {
+	if check.Status != "in_progress" || check.StartedAt == nil {
 		return 0
 	}
-	return time.Since(check.StartedAt.Time)
+	return time.Since(*check.StartedAt)
 }
 
 // FinalDuration calculates the total runtime for completed checks
-func FinalDuration(check *github.CheckRun) time.Duration {
+func FinalDuration(check ghclient.CheckRunInfo) time.Duration {
 	if check.StartedAt == nil || check.CompletedAt == nil {
 		return 0
 	}
-	return check.CompletedAt.Time.Sub(check.StartedAt.Time)
+	return check.CompletedAt.Sub(*check.StartedAt)
 }
 
 // FormatDuration formats a duration in human-readable form

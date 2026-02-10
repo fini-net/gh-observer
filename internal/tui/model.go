@@ -5,14 +5,13 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/google/go-github/v58/github"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
 // Model holds the application state
 type Model struct {
-	ctx     context.Context
-	ghClient *github.Client
+	ctx      context.Context
+	token    string
 	owner    string
 	repo     string
 	prNumber int
@@ -24,7 +23,7 @@ type Model struct {
 	headCommitTime time.Time
 
 	// Check runs
-	checkRuns []*github.CheckRun
+	checkRuns []ghclient.CheckRunInfo
 
 	// Rate limiting
 	rateLimitRemaining int
@@ -45,15 +44,13 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles) Model {
-	client, err := ghclient.NewClient(ctx)
-
+func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
 	return Model{
 		ctx:             ctx,
-		ghClient:        client,
+		token:           token,
 		owner:           owner,
 		repo:            repo,
 		prNumber:        prNumber,
@@ -62,7 +59,6 @@ func NewModel(ctx context.Context, owner, repo string, prNumber int, refreshInte
 		lastUpdate:      time.Now(),
 		refreshInterval: refreshInterval,
 		styles:          styles,
-		err:             err,
 	}
 }
 
