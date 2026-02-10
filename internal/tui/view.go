@@ -163,9 +163,26 @@ func (m Model) renderCheckRuns() string {
 	widths := m.calculateColumnWidths()
 
 	// Render column headers with matching alignment
-	headerQueue := strings.Repeat(" ", widths.QueueWidth-5) + "Queue"
-	headerName := "Check" + strings.Repeat(" ", widths.NameWidth-5)
-	headerDuration := strings.Repeat(" ", widths.DurationWidth-8) + "Duration"
+	// Right-align "Queue" (5 chars)
+	queuePad := widths.QueueWidth - 5
+	if queuePad < 0 {
+		queuePad = 0
+	}
+	headerQueue := strings.Repeat(" ", queuePad) + "Queue"
+
+	// Left-align "Check" (5 chars)
+	namePad := widths.NameWidth - 5
+	if namePad < 0 {
+		namePad = 0
+	}
+	headerName := "Check" + strings.Repeat(" ", namePad)
+
+	// Right-align "Duration" (8 chars)
+	durationPad := widths.DurationWidth - 8
+	if durationPad < 0 {
+		durationPad = 0
+	}
+	headerDuration := strings.Repeat(" ", durationPad) + "Duration"
 
 	b.WriteString(m.styles.Header.Render(fmt.Sprintf("  %s     %s  %s\n", headerQueue, headerName, headerDuration)))
 
