@@ -27,10 +27,22 @@ func (m Model) View() string {
 
 		// Get time since last update
 		timeSinceUpdate := time.Since(m.lastUpdate)
-		lastUpdated := fmt.Sprintf("Last updated: %s ago", timing.FormatDuration(timeSinceUpdate))
 
-		// Combine: bold PR info + non-bold time + last updated
-		b.WriteString(fmt.Sprintf("%s %s  %s\n", prInfo, utcTime, lastUpdated))
+		// Get time since last push
+		var updatedLine string
+		if !m.headCommitTime.IsZero() {
+			timeSincePush := time.Since(m.headCommitTime)
+			updatedLine = fmt.Sprintf("Updated %s ago  •  Pushed %s ago",
+				timing.FormatDuration(timeSinceUpdate),
+				timing.FormatDuration(timeSincePush))
+		} else {
+			updatedLine = fmt.Sprintf("Updated %s ago", timing.FormatDuration(timeSinceUpdate))
+		}
+
+		// PR info and UTC time on first line
+		b.WriteString(fmt.Sprintf("%s %s\n", prInfo, utcTime))
+		// Last updated on second line
+		b.WriteString(fmt.Sprintf("%s\n", updatedLine))
 		b.WriteString("\n")
 	}
 
