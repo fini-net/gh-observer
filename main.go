@@ -322,7 +322,7 @@ func run() int {
 	// Create model
 	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles)
 
-	// Run TUI (without alternate screen to keep output visible after exit)
+	// Run TUI (keeps output visible after exit)
 	p := tea.NewProgram(model)
 	finalModel, err := p.Run()
 	if err != nil {
