@@ -16,6 +16,118 @@ This repo uses `just` for all development tasks:
 - `just merge` - Squash merge PR, delete branch, return to main, and pull latest
 - `just again` - Push changes, update PR description, and watch GHAs
 
+## Release Workflow
+
+gh-observer uses automated binary building for releases via GitHub Actions and `gh-extension-precompile`.
+
+### Creating a Release
+
+To create a new release:
+
+```bash
+just release v1.0.0
+```
+
+This command:
+
+1. Runs `gh release create v1.0.0 --generate-notes`
+2. Creates the GitHub release with auto-generated release notes
+3. Pushes the version tag to the repository
+4. Triggers `.github/workflows/release.yml` via the tag push
+
+### Automated Binary Building
+
+When a version tag (matching `v*`) is pushed, the release workflow automatically:
+
+1. **Builds cross-platform binaries** for 5 platforms:
+   - `gh-observer_<version>_darwin-amd64` - macOS Intel
+   - `gh-observer_<version>_darwin-arm64` - macOS Apple Silicon
+   - `gh-observer_<version>_linux-amd64` - Linux x86-64
+   - `gh-observer_<version>_linux-arm64` - Linux ARM64
+   - `gh-observer_<version>_windows-amd64.exe` - Windows
+
+2. **Generates checksums** (`gh-observer_<version>_checksums.txt`)
+
+3. **Creates build attestations** for supply chain security (verifiable via `gh attestation verify`)
+
+4. **Attaches all artifacts** to the GitHub release
+
+### Workflow Architecture
+
+The `.github/workflows/release.yml` workflow:
+
+- **Trigger**: Push of tags matching `v*` pattern
+- **Action**: Uses `cli/gh-extension-precompile@v2`
+- **Go Version**: Auto-detected from `go.mod` (currently 1.25.7) via `go_version_file` parameter
+- **Security**: Generates attestations with `generate_attestations: true`
+- **Permissions**: Requires `contents: write`, `id-token: write`, `attestations: write`
+
+### Testing with Prereleases
+
+To test the release workflow without committing to a stable version:
+
+```bash
+# Create a prerelease tag (tags with hyphens create prereleases automatically)
+git tag v0.1.0-rc.1
+git push origin v0.1.0-rc.1
+
+# Watch the workflow run
+gh run watch
+
+# Verify release assets were created
+gh release view v0.1.0-rc.1
+
+# Test installation
+gh extension install fini-net/gh-observer
+
+# Verify build attestation (macOS example)
+gh attestation verify gh-observer_v0.1.0-rc.1_darwin-arm64 --owner fini-net
+```
+
+### Post-Release Verification
+
+After running `just release`, you can verify the workflow completed successfully:
+
+```bash
+# Check workflow status
+just release_status
+
+# Or manually verify
+gh release view v1.0.0
+gh run list --workflow=release.yml --limit 5
+```
+
+### Installation for End Users
+
+Once released, users can install without the Go toolchain:
+
+```bash
+# Install latest version
+gh extension install fini-net/gh-observer
+
+# Install specific version
+gh extension install fini-net/gh-observer --pin v1.0.0
+
+# Upgrade to latest
+gh extension upgrade gh-observer
+```
+
+### Supply Chain Security
+
+All release binaries include build attestations:
+
+- Generated via GitHub Actions' built-in attestation feature
+- Provides cryptographic proof of build provenance
+- Can be verified using `gh attestation verify <binary> --owner fini-net`
+- Attestation files are automatically attached to releases
+
+### Design Decisions
+
+- **No GPG signing**: Build attestations provide equivalent security without secret management complexity
+- **Automatic Go version detection**: Uses `go_version_file: go.mod` to stay in sync with project requirements
+- **Standard build process**: No custom build scripts needed - `go build` works perfectly for this project
+- **Complementary workflows**: The `just release` command creates releases; the GitHub Action builds binaries. They work together, not as replacements.
+
 ## Architecture
 
 ### High-level structure

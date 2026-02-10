@@ -25,11 +25,31 @@ The existing `gh pr checks --watch` doesn't show how long checks have been runni
 
 ## Installation
 
+### Install precompiled binary
+
+The easiest way to install gh-observer is as a GitHub CLI extension:
+
+```bash
+gh extension install fini-net/gh-observer
+```
+
+This installs a precompiled binary for your platform - no Go toolchain required. To install a specific version:
+
+```bash
+gh extension install fini-net/gh-observer --pin v1.0.0
+```
+
+### Or install via go install
+
+If you prefer installing via Go:
+
 ```bash
 go install github.com/fini-net/gh-observer@latest
 ```
 
-Or build from source:
+### Or build from source
+
+To build from source:
 
 ```bash
 git clone https://github.com/fini-net/gh-observer.git
@@ -84,6 +104,16 @@ gh-observer uses GitHub authentication in this order:
 2. `gh` CLI authentication (`gh auth token`)
 
 Make sure you have either set up.
+
+## Supported Platforms
+
+Precompiled binaries are available for:
+
+- **macOS**: Intel (amd64) and Apple Silicon (arm64)
+- **Linux**: x86-64 (amd64) and ARM64
+- **Windows**: x86-64 (amd64)
+
+All binaries include supply chain security attestations for verification.
 
 ## Example Output
 
