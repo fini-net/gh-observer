@@ -73,38 +73,131 @@ func (m Model) renderStartupPhase() string {
 	return b.String()
 }
 
+// formatQueueLatency returns the queue time text or placeholder
+func (m Model) formatQueueLatency(check ghclient.CheckRunInfo) string {
+	if check.Status == "queued" {
+		// For queued checks, show time since commit
+		if !m.headCommitTime.IsZero() {
+			return timing.FormatDuration(time.Since(m.headCommitTime))
+		}
+		return "-"
+	}
+
+	// For non-queued checks, show actual queue latency
+	queueLatency := timing.QueueLatency(m.headCommitTime, check)
+	if queueLatency > 0 {
+		return timing.FormatDuration(queueLatency)
+	}
+	return "-"
+}
+
+// formatDuration returns the duration/runtime text or placeholder
+func (m Model) formatDuration(check ghclient.CheckRunInfo) string {
+	switch check.Status {
+	case "completed":
+		duration := timing.FinalDuration(check)
+		if duration > 0 {
+			return timing.FormatDuration(duration)
+		}
+		return "-"
+	case "in_progress":
+		runtime := timing.Runtime(check)
+		if runtime > 0 {
+			return timing.FormatDuration(runtime)
+		}
+		return "-"
+	default:
+		// For queued or unknown status
+		return "-"
+	}
+}
+
+// calculateColumnWidths scans all check runs and determines max width for each column
+func (m Model) calculateColumnWidths() ColumnWidths {
+	const (
+		minNameWidth = 20
+		maxNameWidth = 60
+		minTimeWidth = 5 // "1m 2s"
+	)
+
+	widths := ColumnWidths{
+		QueueWidth:    minTimeWidth,
+		NameWidth:     minNameWidth,
+		DurationWidth: minTimeWidth,
+	}
+
+	for _, check := range m.checkRuns {
+		// Measure queue latency text
+		queueText := m.formatQueueLatency(check)
+		if len(queueText) > widths.QueueWidth {
+			widths.QueueWidth = len(queueText)
+		}
+
+		// Measure name (Workflow / Job format)
+		name := check.Name
+		if check.WorkflowName != "" {
+			name = fmt.Sprintf("%s / %s", check.WorkflowName, check.Name)
+		}
+		nameLen := len(name)
+		if nameLen > widths.NameWidth && nameLen <= maxNameWidth {
+			widths.NameWidth = nameLen
+		} else if nameLen > maxNameWidth {
+			widths.NameWidth = maxNameWidth
+		}
+
+		// Measure duration text
+		durationText := m.formatDuration(check)
+		if len(durationText) > widths.DurationWidth {
+			widths.DurationWidth = len(durationText)
+		}
+	}
+
+	return widths
+}
+
 // renderCheckRuns displays all check runs with status and timing
 func (m Model) renderCheckRuns() string {
 	var b strings.Builder
 
 	b.WriteString(m.styles.Header.Render("Checks:\n"))
 
+	// Calculate column widths once
+	widths := m.calculateColumnWidths()
+
+	// Render each check with aligned columns
 	for _, check := range m.checkRuns {
-		b.WriteString(m.renderCheckRun(check))
+		b.WriteString(m.renderCheckRun(check, widths))
 	}
 
 	return b.String()
 }
 
-// renderCheckRun displays a single check run
-func (m Model) renderCheckRun(check ghclient.CheckRunInfo) string {
+// renderCheckRun displays a single check run with aligned columns
+func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) string {
 	status := check.Status
 	conclusion := check.Conclusion
 
-	// Format name as "Workflow / Job" or just "Job" if no workflow
+	// Format name as "Workflow / Job" or just "Job"
 	name := check.Name
 	if check.WorkflowName != "" {
 		name = fmt.Sprintf("%s / %s", check.WorkflowName, check.Name)
 	}
 
-	var icon, timeText string
+	// Truncate name if needed (with ellipsis)
+	if len(name) > widths.NameWidth {
+		name = name[:widths.NameWidth-1] + "…"
+	}
+
+	// Get column data
+	queueText := m.formatQueueLatency(check)
+	durationText := m.formatDuration(check)
+
+	// Determine icon and style
+	var icon string
 	var style = m.styles.Queued
 
 	switch status {
 	case "completed":
-		duration := timing.FinalDuration(check)
-		timeText = fmt.Sprintf("[completed in %s]", timing.FormatDuration(duration))
-
 		switch conclusion {
 		case "success":
 			icon = "✓"
@@ -128,41 +221,22 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo) string {
 			icon = "?"
 			style = m.styles.Queued
 		}
-
 	case "in_progress":
 		icon = "⏳"
 		style = m.styles.Running
-		runtime := timing.Runtime(check)
-		timeText = fmt.Sprintf("[running: %s]", timing.FormatDuration(runtime))
-
 	case "queued":
 		icon = "⏸️"
 		style = m.styles.Queued
-		if !m.headCommitTime.IsZero() {
-			timeText = fmt.Sprintf("[queued: %s]", timing.FormatDuration(time.Since(m.headCommitTime)))
-		} else {
-			timeText = "[queued]"
-		}
-
 	default:
 		icon = "?"
 		style = m.styles.Queued
-		timeText = fmt.Sprintf("[%s]", status)
 	}
 
-	// Queue latency (only show for completed/running)
-	var queueInfo string
-	if status != "queued" {
-		queueLatency := timing.QueueLatency(m.headCommitTime, check)
-		if queueLatency > 0 {
-			queueInfo = fmt.Sprintf("  (queued: %s)", timing.FormatDuration(queueLatency))
-		}
-	}
-
-	return fmt.Sprintf("  %s %-30s %s%s\n",
-		style.Render(icon),
-		name,
-		style.Render(timeText),
-		queueInfo,
+	// Format with aligned columns: "  [queue]  [icon]  [name]  [duration]"
+	return fmt.Sprintf("  %*s  %s  %-*s  %*s\n",
+		widths.QueueWidth, queueText,                     // Right-aligned queue
+		style.Render(icon),                               // Icon with style
+		widths.NameWidth, name,                           // Left-aligned name
+		widths.DurationWidth, style.Render(durationText), // Right-aligned duration
 	)
 }

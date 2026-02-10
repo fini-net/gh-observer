@@ -43,6 +43,13 @@ type Model struct {
 	err error
 }
 
+// ColumnWidths holds pre-calculated column widths for aligned rendering
+type ColumnWidths struct {
+	QueueWidth    int // Right-aligned queue latency
+	NameWidth     int // Left-aligned check name
+	DurationWidth int // Right-aligned duration
+}
+
 // NewModel creates a new TUI model
 func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles) Model {
 	s := spinner.New()
