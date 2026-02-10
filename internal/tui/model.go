@@ -18,9 +18,10 @@ type Model struct {
 	prNumber int
 
 	// PR metadata
-	prTitle     string
-	headSHA     string
-	prCreatedAt time.Time
+	prTitle        string
+	headSHA        string
+	prCreatedAt    time.Time
+	headCommitTime time.Time
 
 	// Check runs
 	checkRuns []*github.CheckRun

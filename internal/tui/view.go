@@ -133,8 +133,8 @@ func (m Model) renderCheckRun(check *github.CheckRun) string {
 	case "queued":
 		icon = "⏸️"
 		style = m.styles.Queued
-		if check.CheckSuite != nil && check.CheckSuite.CreatedAt != nil {
-			timeText = fmt.Sprintf("[queued: %s]", timing.FormatDuration(time.Since(check.CheckSuite.CreatedAt.Time)))
+		if !m.headCommitTime.IsZero() {
+			timeText = fmt.Sprintf("[queued: %s]", timing.FormatDuration(time.Since(m.headCommitTime)))
 		} else {
 			timeText = "[queued]"
 		}
@@ -148,7 +148,7 @@ func (m Model) renderCheckRun(check *github.CheckRun) string {
 	// Queue latency (only show for completed/running)
 	var queueInfo string
 	if status != "queued" {
-		queueLatency := timing.QueueLatency(check)
+		queueLatency := timing.QueueLatency(m.headCommitTime, check)
 		if queueLatency > 0 {
 			queueInfo = fmt.Sprintf("  (queued: %s)", timing.FormatDuration(queueLatency))
 		}

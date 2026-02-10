@@ -7,12 +7,12 @@ import (
 	"github.com/google/go-github/v58/github"
 )
 
-// QueueLatency calculates the time from check suite creation to check start
-func QueueLatency(check *github.CheckRun) time.Duration {
-	if check.StartedAt == nil || check.CheckSuite == nil || check.CheckSuite.CreatedAt == nil {
+// QueueLatency calculates the time from commit push to check start
+func QueueLatency(commitTime time.Time, check *github.CheckRun) time.Duration {
+	if check.StartedAt == nil || commitTime.IsZero() {
 		return 0
 	}
-	return check.StartedAt.Time.Sub(check.CheckSuite.CreatedAt.Time)
+	return check.StartedAt.Time.Sub(commitTime)
 }
 
 // Runtime calculates elapsed time for in_progress checks

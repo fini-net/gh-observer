@@ -65,6 +65,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prTitle = msg.Title
 		m.headSHA = msg.HeadSHA
 		m.prCreatedAt = msg.CreatedAt
+		m.headCommitTime = msg.HeadCommitTime
 
 		// Start polling checks now that we have the SHA
 		return m, fetchCheckRuns(m.ctx, m.ghClient, m.owner, m.repo, m.headSHA)
@@ -115,12 +116,14 @@ func fetchPRInfo(ctx context.Context, client interface{}, owner, repo string, pr
 		}
 
 		createdAt, _ := time.Parse("2006-01-02T15:04:05Z", prInfo.CreatedAt)
+		headCommitTime, _ := time.Parse("2006-01-02T15:04:05Z", prInfo.HeadCommitDate)
 
 		return PRInfoMsg{
-			Number:    prInfo.Number,
-			Title:     prInfo.Title,
-			HeadSHA:   prInfo.HeadSHA,
-			CreatedAt: createdAt,
+			Number:         prInfo.Number,
+			Title:          prInfo.Title,
+			HeadSHA:        prInfo.HeadSHA,
+			CreatedAt:      createdAt,
+			HeadCommitTime: headCommitTime,
 		}
 	}
 }
