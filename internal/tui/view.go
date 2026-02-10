@@ -11,10 +11,6 @@ import (
 
 // View renders the current state
 func (m Model) View() string {
-	if m.quitting {
-		return ""
-	}
-
 	if m.err != nil {
 		return m.styles.Error.Render(fmt.Sprintf("Error: %v\n", m.err))
 	}
@@ -44,8 +40,12 @@ func (m Model) View() string {
 		b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
 	}
 
-	b.WriteString("\n\n")
-	b.WriteString("Press q to quit\n")
+	b.WriteString("\n")
+
+	// Only show quit message if not quitting
+	if !m.quitting {
+		b.WriteString("\nPress q to quit\n")
+	}
 
 	return b.String()
 }
