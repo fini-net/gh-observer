@@ -185,6 +185,7 @@ func (m Model) renderCheckRuns() string {
 	headerDuration := strings.Repeat(" ", durationPad) + "Duration"
 
 	b.WriteString(m.styles.Header.Render(fmt.Sprintf("  %s     %s  %s\n", headerQueue, headerName, headerDuration)))
+	b.WriteString("\n")
 
 	// Render each check with aligned columns
 	for _, check := range m.checkRuns {
