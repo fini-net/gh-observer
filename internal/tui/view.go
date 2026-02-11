@@ -51,135 +51,6 @@ func (m Model) View() string {
 		return b.String() + m.renderStartupPhase()
 	}
 
-	// Render check runs
-	b.WriteString(m.renderCheckRuns())
-
-	// Footer
-	b.WriteString("\n")
-
-	if m.rateLimitRemaining < 100 {
-		b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
-	}
-
-	b.WriteString("\n")
-
-	// Only show quit message if not quitting
-	if !m.quitting {
-		b.WriteString("\nPress q to quit\n")
-	}
-
-	return b.String()
-}
-
-// renderStartupPhase shows helpful message during GitHub Actions startup delay
-func (m Model) renderStartupPhase() string {
-	sinceStart := time.Since(m.startTime)
-
-	var b strings.Builder
-
-	if sinceStart < 2*time.Minute {
-		b.WriteString(fmt.Sprintf("%s ", m.spinner.View()))
-		b.WriteString(m.styles.Running.Render(fmt.Sprintf("Startup Phase (%s elapsed):\n", timing.FormatDuration(sinceStart))))
-		b.WriteString("  ⏳ Waiting for Actions to start...\n")
-		b.WriteString("  💡 GitHub typically takes 30-90s to queue jobs after PR creation\n")
-	} else if sinceStart < 3*time.Minute {
-		b.WriteString(fmt.Sprintf("%s ", m.spinner.View()))
-		b.WriteString(m.styles.Running.Render(fmt.Sprintf("Still waiting (%s elapsed)...\n", timing.FormatDuration(sinceStart))))
-		b.WriteString("  ⏳ Checks may be delayed or not configured for this PR\n")
-	} else {
-		b.WriteString(m.styles.Queued.Render("No checks found.\n"))
-		b.WriteString("  This PR may not have workflows configured, or they may have been skipped.\n")
-	}
-
-	return b.String()
-}
-
-// formatQueueLatency returns the queue time text or placeholder
-func (m Model) formatQueueLatency(check ghclient.CheckRunInfo) string {
-	if check.Status == "queued" {
-		// For queued checks, show time since commit
-		if !m.headCommitTime.IsZero() {
-			return timing.FormatDuration(time.Since(m.headCommitTime))
-		}
-		return "-"
-	}
-
-	// For non-queued checks, show actual queue latency
-	queueLatency := timing.QueueLatency(m.headCommitTime, check)
-	if queueLatency > 0 {
-		return timing.FormatDuration(queueLatency)
-	}
-	return "-"
-}
-
-// formatDuration returns the duration/runtime text or placeholder
-func (m Model) formatDuration(check ghclient.CheckRunInfo) string {
-	switch check.Status {
-	case "completed":
-		duration := timing.FinalDuration(check)
-		if duration > 0 {
-			return timing.FormatDuration(duration)
-		}
-		return "-"
-	case "in_progress":
-		runtime := timing.Runtime(check)
-		if runtime > 0 {
-			return timing.FormatDuration(runtime)
-		}
-		return "-"
-	default:
-		// For queued or unknown status
-		return "-"
-	}
-}
-
-// calculateColumnWidths scans all check runs and determines max width for each column
-func (m Model) calculateColumnWidths() ColumnWidths {
-	const (
-		minNameWidth = 20
-		maxNameWidth = 60
-		minTimeWidth = 5 // "1m 2s"
-	)
-
-	widths := ColumnWidths{
-		QueueWidth:    minTimeWidth,
-		NameWidth:     minNameWidth,
-		DurationWidth: minTimeWidth,
-	}
-
-	for _, check := range m.checkRuns {
-		// Measure queue latency text
-		queueText := m.formatQueueLatency(check)
-		if len(queueText) > widths.QueueWidth {
-			widths.QueueWidth = len(queueText)
-		}
-
-		// Measure name (Workflow / Job format)
-		name := check.Name
-		if check.WorkflowName != "" {
-			name = fmt.Sprintf("%s / %s", check.WorkflowName, check.Name)
-		}
-		nameLen := len(name)
-		if nameLen > widths.NameWidth && nameLen <= maxNameWidth {
-			widths.NameWidth = nameLen
-		} else if nameLen > maxNameWidth {
-			widths.NameWidth = maxNameWidth
-		}
-
-		// Measure duration text
-		durationText := m.formatDuration(check)
-		if len(durationText) > widths.DurationWidth {
-			widths.DurationWidth = len(durationText)
-		}
-	}
-
-	return widths
-}
-
-// renderCheckRuns displays all check runs with status and timing
-func (m Model) renderCheckRuns() string {
-	var b strings.Builder
-
 	// Calculate column widths once
 	widths := m.calculateColumnWidths()
 
@@ -208,9 +79,69 @@ func (m Model) renderCheckRuns() string {
 	b.WriteString(m.styles.Header.Render(fmt.Sprintf("  %s     %s  %s\n", headerQueue, headerName, headerDuration)))
 	b.WriteString("\n")
 
-	// Render each check with aligned columns
+	// Render each check with aligned columns and error boxes
 	for _, check := range m.checkRuns {
-		b.WriteString(m.renderCheckRun(check, widths))
+		checkLine := m.renderCheckRun(check, widths)
+		b.WriteString(checkLine)
+
+		// Render error annotations box for failed jobs
+		if (check.Conclusion == "failure" || check.Conclusion == "timed_out") && len(check.Annotations) > 0 {
+			b.WriteString(m.renderErrorBox(check, widths))
+		}
+	}
+
+	// Footer
+	b.WriteString("\n")
+
+	if m.rateLimitRemaining < 100 {
+		b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
+	}
+
+	b.WriteString("\n")
+
+	// Only show quit message if not quitting
+	if !m.quitting {
+		b.WriteString("\nPress q to quit\n")
+	}
+
+	return b.String()
+}
+
+// renderErrorBox displays error annotations for failed checks
+func (m Model) renderErrorBox(check ghclient.CheckRunInfo, widths ColumnWidths) string {
+	var b strings.Builder
+
+	for _, ann := range check.Annotations {
+		// Format the error message
+		var errorMsg string
+		if ann.Message != "" {
+			errorMsg = ann.Message
+			if ann.Title != "" {
+				errorMsg = ann.Title + ": " + errorMsg
+			}
+		} else if ann.Title != "" {
+			errorMsg = ann.Title
+		} else {
+			continue
+		}
+
+		// Add file path if available
+		if ann.Path != "" {
+			if ann.StartLine > 0 {
+				errorMsg = fmt.Sprintf("%s:%d - %s", ann.Path, ann.StartLine, errorMsg)
+			} else {
+				errorMsg = fmt.Sprintf("%s - %s", ann.Path, errorMsg)
+			}
+		}
+
+		b.WriteString("  ")
+		b.WriteString(m.styles.ErrorBox.Render(errorMsg))
+		b.WriteString("\n")
+	}
+
+	// Add spacing if we rendered any errors
+	if b.Len() > 0 {
+		b.WriteString("\n")
 	}
 
 	return b.String()
@@ -312,4 +243,109 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 
 	// Assemble line: [2 spaces][queue][2 spaces][icon][2 spaces][name][2 spaces][duration][newline]
 	return "  " + queueCol + "  " + styledIcon + "  " + styledName + "  " + styledDuration + "\n"
+}
+
+// formatQueueLatency returns the queue time text or placeholder
+func (m Model) formatQueueLatency(check ghclient.CheckRunInfo) string {
+	if check.Status == "queued" {
+		// For queued checks, show time since commit
+		if !m.headCommitTime.IsZero() {
+			return timing.FormatDuration(time.Since(m.headCommitTime))
+		}
+		return "-"
+	}
+
+	// For non-queued checks, show actual queue latency
+	queueLatency := timing.QueueLatency(m.headCommitTime, check)
+	if queueLatency > 0 {
+		return timing.FormatDuration(queueLatency)
+	}
+	return "-"
+}
+
+// formatDuration returns the duration/runtime text or placeholder
+func (m Model) formatDuration(check ghclient.CheckRunInfo) string {
+	switch check.Status {
+	case "completed":
+		duration := timing.FinalDuration(check)
+		if duration > 0 {
+			return timing.FormatDuration(duration)
+		}
+		return "-"
+	case "in_progress":
+		runtime := timing.Runtime(check)
+		if runtime > 0 {
+			return timing.FormatDuration(runtime)
+		}
+		return "-"
+	default:
+		// For queued or unknown status
+		return "-"
+	}
+}
+
+// calculateColumnWidths scans all check runs and determines max width for each column
+func (m Model) calculateColumnWidths() ColumnWidths {
+	const (
+		minNameWidth = 20
+		maxNameWidth = 60
+		minTimeWidth = 5 // "1m 2s"
+	)
+
+	widths := ColumnWidths{
+		QueueWidth:    minTimeWidth,
+		NameWidth:     minNameWidth,
+		DurationWidth: minTimeWidth,
+	}
+
+	for _, check := range m.checkRuns {
+		// Measure queue latency text
+		queueText := m.formatQueueLatency(check)
+		if len(queueText) > widths.QueueWidth {
+			widths.QueueWidth = len(queueText)
+		}
+
+		// Measure name (Workflow / Job format)
+		name := check.Name
+		if check.WorkflowName != "" {
+			name = fmt.Sprintf("%s / %s", check.WorkflowName, check.Name)
+		}
+		nameLen := len(name)
+		if nameLen > widths.NameWidth && nameLen <= maxNameWidth {
+			widths.NameWidth = nameLen
+		} else if nameLen > maxNameWidth {
+			widths.NameWidth = maxNameWidth
+		}
+
+		// Measure duration text
+		durationText := m.formatDuration(check)
+		if len(durationText) > widths.DurationWidth {
+			widths.DurationWidth = len(durationText)
+		}
+	}
+
+	return widths
+}
+
+// renderStartupPhase shows helpful message during GitHub Actions startup delay
+func (m Model) renderStartupPhase() string {
+	sinceStart := time.Since(m.startTime)
+
+	var b strings.Builder
+
+	if sinceStart < 2*time.Minute {
+		b.WriteString(fmt.Sprintf("%s ", m.spinner.View()))
+		b.WriteString(m.styles.Running.Render(fmt.Sprintf("Startup Phase (%s elapsed):\n", timing.FormatDuration(sinceStart))))
+		b.WriteString("  ⏳ Waiting for Actions to start...\n")
+		b.WriteString("  💡 GitHub typically takes 30-90s to queue jobs after PR creation\n")
+	} else if sinceStart < 3*time.Minute {
+		b.WriteString(fmt.Sprintf("%s ", m.spinner.View()))
+		b.WriteString(m.styles.Running.Render(fmt.Sprintf("Still waiting (%s elapsed)...\n", timing.FormatDuration(sinceStart))))
+		b.WriteString("  ⏳ Checks may be delayed or not configured for this PR\n")
+	} else {
+		b.WriteString(m.styles.Queued.Render("No checks found.\n"))
+		b.WriteString("  This PR may not have workflows configured, or they may have been skipped.\n")
+	}
+
+	return b.String()
 }

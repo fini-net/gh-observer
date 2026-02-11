@@ -8,13 +8,14 @@ import (
 
 // Styles holds all lipgloss styles for rendering
 type Styles struct {
-	Success lipgloss.Style
-	Failure lipgloss.Style
-	Running lipgloss.Style
-	Queued  lipgloss.Style
-	Error   lipgloss.Style
-	Header  lipgloss.Style
-	Info    lipgloss.Style
+	Success  lipgloss.Style
+	Failure  lipgloss.Style
+	Running  lipgloss.Style
+	Queued   lipgloss.Style
+	Error    lipgloss.Style
+	Header   lipgloss.Style
+	Info     lipgloss.Style
+	ErrorBox lipgloss.Style
 }
 
 // NewStyles creates styled renderers based on config colors
@@ -27,5 +28,10 @@ func NewStyles(successColor, failureColor, runningColor, queuedColor int) Styles
 		Error:   lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true), // Red
 		Header:  lipgloss.NewStyle().Bold(true).Underline(true),
 		Info:    lipgloss.NewStyle().Foreground(lipgloss.Color("12")), // Blue
+		ErrorBox: lipgloss.NewStyle().
+			BorderLeft(true).
+			BorderForeground(lipgloss.Color("9")).
+			PaddingLeft(1).
+			Foreground(lipgloss.Color("243")), // Dimmed gray
 	}
 }

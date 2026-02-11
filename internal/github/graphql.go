@@ -9,6 +9,15 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// Annotation represents a check run annotation (error/warning)
+type Annotation struct {
+	Message         string
+	Path            string
+	StartLine       int
+	Title           string
+	AnnotationLevel string
+}
+
 // CheckRunInfo contains enriched check run data with workflow name
 type CheckRunInfo struct {
 	Name         string
@@ -18,6 +27,7 @@ type CheckRunInfo struct {
 	StartedAt    *time.Time
 	CompletedAt  *time.Time
 	DetailsURL   string
+	Annotations  []Annotation
 }
 
 // GraphQL query structure matching gh pr checks
@@ -32,12 +42,21 @@ type pullRequestQuery struct {
 								Nodes []struct {
 									Typename        string `graphql:"__typename"`
 									CheckRunContext struct {
-										Name       string
-										Status     string
-										Conclusion string
-										StartedAt  githubv4.DateTime
+										Name        string
+										Status      string
+										Conclusion  string
+										StartedAt   githubv4.DateTime
 										CompletedAt githubv4.DateTime
-										DetailsURL string `graphql:"detailsUrl"`
+										DetailsURL  string `graphql:"detailsUrl"`
+										Annotations struct {
+											Nodes []struct {
+												Message         string
+												Path            string
+												StartLine       int
+												Title           string
+												AnnotationLevel string
+											}
+										} `graphql:"annotations(first: 5)"`
 										CheckSuite struct {
 											WorkflowRun struct {
 												Workflow struct {
@@ -110,6 +129,18 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 				completedAt = &t
 			}
 
+			// Extract annotations (error/warning messages)
+			var annotations []Annotation
+			for _, ann := range checkRun.Annotations.Nodes {
+				annotations = append(annotations, Annotation{
+					Message:         ann.Message,
+					Path:            ann.Path,
+					StartLine:       ann.StartLine,
+					Title:           ann.Title,
+					AnnotationLevel: strings.ToLower(ann.AnnotationLevel),
+				})
+			}
+
 			checkRuns = append(checkRuns, CheckRunInfo{
 				Name:         checkRun.Name,
 				WorkflowName: workflowName,
@@ -118,6 +149,7 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 				StartedAt:    startedAt,
 				CompletedAt:  completedAt,
 				DetailsURL:   checkRun.DetailsURL,
+				Annotations:  annotations,
 			})
 		}
 	}
