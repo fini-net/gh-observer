@@ -76,7 +76,7 @@ func (m Model) View() string {
 	}
 	headerDuration := strings.Repeat(" ", durationPad) + "Duration"
 
-	b.WriteString(m.styles.Header.Render(fmt.Sprintf("%s     %s  %s\n", headerQueue, headerName, headerDuration)))
+	b.WriteString(m.styles.Header.Render(fmt.Sprintf("%s   %s  %s\n", headerQueue, headerName, headerDuration)))
 	b.WriteString("\n")
 
 	// Render each check with aligned columns and error boxes
@@ -241,8 +241,8 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 		styledName = style.Render(nameCol)
 	}
 
-	// Assemble line: [queue][2 spaces][icon][2 spaces][name][2 spaces][duration][newline]
-	return queueCol + "  " + styledIcon + "  " + styledName + "  " + styledDuration + "\n"
+	// Assemble line: [queue][1 space][icon][1 space][name][2 spaces][duration][newline]
+	return queueCol + " " + styledIcon + " " + styledName + "  " + styledDuration + "\n"
 }
 
 // formatQueueLatency returns the queue time text or placeholder
