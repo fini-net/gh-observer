@@ -143,11 +143,17 @@ Startup   Workflow/Job                                Duration
 Press q to quit
 ```
 
-## Example Animation
+## Example Animations
 
 Thanks to [asciinema](https://asciinema.org/) we can show you:
 
-TODO: include animation
+### PR that was already merged
+
+![animation of checking the GHA status on a merged PR](docs/gh-observer-merged-pr.gif)
+
+### PR that was just created
+
+![animation of watching checks after creating a PR](docs/gh-observer-active-pr.gif)
 
 ## Development
 
