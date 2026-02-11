@@ -54,6 +54,11 @@ type pullRequestQuery struct {
 												Path            string
 												Title           string
 												AnnotationLevel string
+												Location        struct {
+													Start struct {
+														Line int
+													} `graphql:"start"`
+												} `graphql:"location"`
 											}
 										} `graphql:"annotations(first: 5)"`
 										CheckSuite struct {
@@ -134,6 +139,7 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 				annotations = append(annotations, Annotation{
 					Message:         ann.Message,
 					Path:            ann.Path,
+					StartLine:       ann.Location.Start.Line,
 					Title:           ann.Title,
 					AnnotationLevel: strings.ToLower(ann.AnnotationLevel),
 				})
