@@ -157,8 +157,7 @@ Thanks to [asciinema](https://asciinema.org/) we can show you:
 
 This was sped up 2x for your viewing pleasure.
 
-The Claude failure was expected - I was out of my weekly quota.  But it also shows
-how the error log output is attractively integrated in with the list of jobs.
+In this example, the Claude check fails, illustrating how error log output is integrated alongside the list of jobs.
 
 ## Development
 
