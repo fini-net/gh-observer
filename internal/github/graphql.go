@@ -52,7 +52,6 @@ type pullRequestQuery struct {
 											Nodes []struct {
 												Message         string
 												Path            string
-												StartLine       int
 												Title           string
 												AnnotationLevel string
 											}
@@ -135,7 +134,6 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 				annotations = append(annotations, Annotation{
 					Message:         ann.Message,
 					Path:            ann.Path,
-					StartLine:       ann.StartLine,
 					Title:           ann.Title,
 					AnnotationLevel: strings.ToLower(ann.AnnotationLevel),
 				})

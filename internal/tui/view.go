@@ -112,20 +112,14 @@ func (m Model) renderErrorBox(check ghclient.CheckRunInfo, widths ColumnWidths) 
 	var b strings.Builder
 
 	for _, ann := range check.Annotations {
-		// Format the error message
-		var errorMsg string
-		if ann.Message != "" {
-			errorMsg = ann.Message
-			if ann.Title != "" {
-				errorMsg = ann.Title + ": " + errorMsg
-			}
-		} else if ann.Title != "" {
-			errorMsg = ann.Title
-		} else {
+		errorMsg := ann.Message
+		if errorMsg == "" && ann.Title == "" {
 			continue
 		}
+		if ann.Title != "" {
+			errorMsg = ann.Title + ": " + errorMsg
+		}
 
-		// Add file path if available
 		if ann.Path != "" {
 			if ann.StartLine > 0 {
 				errorMsg = fmt.Sprintf("%s:%d - %s", ann.Path, ann.StartLine, errorMsg)
