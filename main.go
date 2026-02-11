@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -63,34 +62,26 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int) i
 	}
 
 	// Calculate column widths
-	widths := calculateSnapshotWidths(checkRuns, headCommitTime)
+	widths := tui.CalculateColumnWidths(checkRuns, headCommitTime)
 
 	// Print column headers
-	queuePad := widths.queueWidth - 7
-	if queuePad < 0 {
-		queuePad = 0
-	}
-	headerQueue := strings.Repeat(" ", queuePad) + "Startup"
-
-	// Left-align "Workflow/Job" (12 chars)
-	namePad := widths.nameWidth - 12
-	if namePad < 0 {
-		namePad = 0
-	}
-	headerName := "Workflow/Job" + strings.Repeat(" ", namePad)
-
-	durationPad := widths.durationWidth - 8
-	if durationPad < 0 {
-		durationPad = 0
-	}
-	headerDuration := strings.Repeat(" ", durationPad) + "Duration"
-
+	headerQueue, headerName, headerDuration := tui.FormatHeaderColumns(widths)
 	fmt.Printf("%s   %s  %s\n\n", headerQueue, headerName, headerDuration)
 
 	// Print each check
 	exitCode := 0
 	for _, check := range checkRuns {
-		printCheckRun(check, headCommitTime, widths)
+		// Format check data
+		name := tui.FormatCheckNameWithTruncate(check, widths.NameWidth)
+		queueText := tui.FormatQueueLatency(check, headCommitTime)
+		durationText := tui.FormatDuration(check)
+		icon := tui.GetCheckIcon(check.Status, check.Conclusion)
+
+		// Format columns
+		queueCol, nameCol, durationCol := tui.FormatAlignedColumns(queueText, name, durationText, widths)
+
+		// Print line without colors (plain text for non-terminal)
+		fmt.Printf("%s %s %s  %s\n", queueCol, icon, nameCol, durationCol)
 
 		// Determine exit code based on conclusions
 		if check.Status == "completed" {
@@ -102,163 +93,6 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int) i
 	}
 
 	return exitCode
-}
-
-// snapshotWidths stores calculated column widths for snapshot mode
-type snapshotWidths struct {
-	queueWidth    int
-	nameWidth     int
-	durationWidth int
-}
-
-// calculateSnapshotWidths determines column widths based on check run data
-func calculateSnapshotWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime time.Time) snapshotWidths {
-	const (
-		minNameWidth = 20
-		maxNameWidth = 60
-		minTimeWidth = 5
-	)
-
-	widths := snapshotWidths{
-		queueWidth:    minTimeWidth,
-		nameWidth:     minNameWidth,
-		durationWidth: minTimeWidth,
-	}
-
-	for _, check := range checkRuns {
-		// Measure queue latency text
-		queueText := formatSnapshotQueueLatency(check, headCommitTime)
-		if len(queueText) > widths.queueWidth {
-			widths.queueWidth = len(queueText)
-		}
-
-		// Measure name (Workflow / Job format)
-		name := check.Name
-		if check.WorkflowName != "" {
-			name = fmt.Sprintf("%s / %s", check.WorkflowName, check.Name)
-		}
-		nameLen := len(name)
-		if nameLen > widths.nameWidth && nameLen <= maxNameWidth {
-			widths.nameWidth = nameLen
-		} else if nameLen > maxNameWidth {
-			widths.nameWidth = maxNameWidth
-		}
-
-		// Measure duration text
-		durationText := formatSnapshotDuration(check)
-		if len(durationText) > widths.durationWidth {
-			widths.durationWidth = len(durationText)
-		}
-	}
-
-	return widths
-}
-
-// formatSnapshotQueueLatency formats queue time for a check
-func formatSnapshotQueueLatency(check ghclient.CheckRunInfo, headCommitTime time.Time) string {
-	if check.Status == "queued" {
-		if !headCommitTime.IsZero() {
-			return timing.FormatDuration(time.Since(headCommitTime))
-		}
-		return "-"
-	}
-
-	queueLatency := timing.QueueLatency(headCommitTime, check)
-	if queueLatency > 0 {
-		return timing.FormatDuration(queueLatency)
-	}
-	return "-"
-}
-
-// formatSnapshotDuration formats duration/runtime for a check
-func formatSnapshotDuration(check ghclient.CheckRunInfo) string {
-	switch check.Status {
-	case "completed":
-		duration := timing.FinalDuration(check)
-		if duration > 0 {
-			return timing.FormatDuration(duration)
-		}
-		return "-"
-	case "in_progress":
-		runtime := timing.Runtime(check)
-		if runtime > 0 {
-			return timing.FormatDuration(runtime)
-		}
-		return "-"
-	default:
-		return "-"
-	}
-}
-
-// printCheckRun prints a single check run with aligned columns
-func printCheckRun(check ghclient.CheckRunInfo, headCommitTime time.Time, widths snapshotWidths) {
-	status := check.Status
-	conclusion := check.Conclusion
-
-	// Format name as "Workflow / Job" or just "Job"
-	name := check.Name
-	if check.WorkflowName != "" {
-		name = fmt.Sprintf("%s / %s", check.WorkflowName, check.Name)
-	}
-
-	// Truncate name if needed
-	if len(name) > widths.nameWidth {
-		name = name[:widths.nameWidth-1] + "…"
-	}
-
-	// Get column data
-	queueText := formatSnapshotQueueLatency(check, headCommitTime)
-	durationText := formatSnapshotDuration(check)
-
-	// Determine icon
-	var icon string
-	switch status {
-	case "completed":
-		switch conclusion {
-		case "success":
-			icon = "✓"
-		case "failure":
-			icon = "✗"
-		case "cancelled":
-			icon = "⊗"
-		case "skipped":
-			icon = "⊘"
-		case "timed_out":
-			icon = "⏱"
-		case "action_required":
-			icon = "!"
-		default:
-			icon = "?"
-		}
-	case "in_progress":
-		icon = "◐"
-	case "queued":
-		icon = "⏸"
-	default:
-		icon = "?"
-	}
-
-	// Build columns with padding
-	queuePadding := widths.queueWidth - len(queueText)
-	if queuePadding < 0 {
-		queuePadding = 0
-	}
-	queueCol := strings.Repeat(" ", queuePadding) + queueText
-
-	namePadding := widths.nameWidth - len(name)
-	if namePadding < 0 {
-		namePadding = 0
-	}
-	nameCol := name + strings.Repeat(" ", namePadding)
-
-	durationPadding := widths.durationWidth - len(durationText)
-	if durationPadding < 0 {
-		durationPadding = 0
-	}
-	durationCol := strings.Repeat(" ", durationPadding) + durationText
-
-	// Print line without colors (plain text for non-terminal) [queue][1 space][icon][1 space][name][2 spaces][duration][newline]
-	fmt.Printf("%s %s %s  %s\n", queueCol, icon, nameCol, durationCol)
 }
 
 func run() int {
