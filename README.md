@@ -155,6 +155,11 @@ Thanks to [asciinema](https://asciinema.org/) we can show you:
 
 ![animation of watching checks after creating a PR](docs/gh-observer-active-pr.gif)
 
+This was sped up 2x for your viewing pleasure.
+
+The Claude failure was expected - I was out of my weekly quota.  But it also shows
+how the error log output is attractively integrated in with the list of jobs.
+
 ## Development
 
 This project uses [just](https://github.com/casey/just) for task automation:
