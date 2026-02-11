@@ -55,19 +55,19 @@ func (m Model) View() string {
 	widths := m.calculateColumnWidths()
 
 	// Render column headers with matching alignment
-	// Right-align "Queue" (5 chars)
-	queuePad := widths.QueueWidth - 5
+	// Right-align "Startup" (7 chars)
+	queuePad := widths.QueueWidth - 7
 	if queuePad < 0 {
 		queuePad = 0
 	}
-	headerQueue := strings.Repeat(" ", queuePad) + "Queue"
+	headerQueue := strings.Repeat(" ", queuePad) + "Startup"
 
-	// Left-align "Check" (5 chars)
-	namePad := widths.NameWidth - 5
+	// Left-align "Workflow/Job" (13 chars)
+	namePad := widths.NameWidth - 13
 	if namePad < 0 {
 		namePad = 0
 	}
-	headerName := "Check" + strings.Repeat(" ", namePad)
+	headerName := "Workflow/Job" + strings.Repeat(" ", namePad)
 
 	// Right-align "Duration" (8 chars)
 	durationPad := widths.DurationWidth - 8

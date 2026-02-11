@@ -66,17 +66,17 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int) i
 	widths := calculateSnapshotWidths(checkRuns, headCommitTime)
 
 	// Print column headers
-	queuePad := widths.queueWidth - 5
+	queuePad := widths.queueWidth - 7
 	if queuePad < 0 {
 		queuePad = 0
 	}
-	headerQueue := strings.Repeat(" ", queuePad) + "Queue"
+	headerQueue := strings.Repeat(" ", queuePad) + "Startup"
 
-	namePad := widths.nameWidth - 5
+	namePad := widths.nameWidth - 13
 	if namePad < 0 {
 		namePad = 0
 	}
-	headerName := "Check" + strings.Repeat(" ", namePad)
+	headerName := "Workflow/Job" + strings.Repeat(" ", namePad)
 
 	durationPad := widths.durationWidth - 8
 	if durationPad < 0 {
