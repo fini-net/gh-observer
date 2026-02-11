@@ -84,7 +84,7 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int) i
 	}
 	headerDuration := strings.Repeat(" ", durationPad) + "Duration"
 
-	fmt.Printf("  %s     %s  %s\n\n", headerQueue, headerName, headerDuration)
+	fmt.Printf("%s     %s  %s\n\n", headerQueue, headerName, headerDuration)
 
 	// Print each check
 	exitCode := 0
@@ -257,7 +257,7 @@ func printCheckRun(check ghclient.CheckRunInfo, headCommitTime time.Time, widths
 	durationCol := strings.Repeat(" ", durationPadding) + durationText
 
 	// Print line without colors (plain text for non-terminal)
-	fmt.Printf("  %s  %s  %s  %s\n", queueCol, icon, nameCol, durationCol)
+	fmt.Printf("%s  %s  %s  %s\n", queueCol, icon, nameCol, durationCol)
 }
 
 func run() int {
