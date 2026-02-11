@@ -230,9 +230,9 @@ func printCheckRun(check ghclient.CheckRunInfo, headCommitTime time.Time, widths
 			icon = "?"
 		}
 	case "in_progress":
-		icon = "⏳"
+		icon = "◐"
 	case "queued":
-		icon = "⏸️"
+		icon = "⏸"
 	default:
 		icon = "?"
 	}

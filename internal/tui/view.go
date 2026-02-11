@@ -266,10 +266,10 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 			style = m.styles.Queued
 		}
 	case "in_progress":
-		icon = "⏳"
+		icon = "◐"
 		style = m.styles.Running
 	case "queued":
-		icon = "⏸️"
+		icon = "⏸"
 		style = m.styles.Queued
 	default:
 		icon = "?"
