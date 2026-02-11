@@ -16,12 +16,12 @@ The existing `gh pr checks --watch` doesn't show how long checks have been runni
 
 ## Features
 
-- **Real-time status updates** - Poll GitHub API every 5s (configurable)
-- **Runtime metrics** - Shows elapsed time for running checks
-- **Queue latency** - Displays how long checks waited before starting
-- **Startup phase handling** - Helpful messages during GitHub Actions startup delay
-- **Rate limit awareness** - Backs off automatically if approaching limits
-- **Exit codes** - Returns 0 for success, 1 for any failures
+- ⏱️ **Runtime metrics** - Shows elapsed time: `3m 52s` tells you exactly how long checks have been running
+- ⏳ **Queue latency** - Displays wait time: `15s` shows how long GitHub queued the job before starting
+- 🔄 **Real-time updates** - Auto-refreshes every 5s (configurable) without manual polling
+- ⚡ **Startup phases** - Helpful messages like "Waiting for Actions to start..." during the 30-90s GitHub delay
+- 🛡️ **Rate limits** - Backs off automatically when approaching API limits to avoid interruptions
+- ✅ **CI-friendly** - Returns exit codes (0=success, 1=failure) for script automation
 
 ## Installation
 
