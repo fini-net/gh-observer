@@ -66,17 +66,18 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int) i
 	widths := calculateSnapshotWidths(checkRuns, headCommitTime)
 
 	// Print column headers
-	queuePad := widths.queueWidth - 5
+	queuePad := widths.queueWidth - 7
 	if queuePad < 0 {
 		queuePad = 0
 	}
-	headerQueue := strings.Repeat(" ", queuePad) + "Queue"
+	headerQueue := strings.Repeat(" ", queuePad) + "Startup"
 
-	namePad := widths.nameWidth - 5
+	// Left-align "Workflow/Job" (12 chars)
+	namePad := widths.nameWidth - 12
 	if namePad < 0 {
 		namePad = 0
 	}
-	headerName := "Check" + strings.Repeat(" ", namePad)
+	headerName := "Workflow/Job" + strings.Repeat(" ", namePad)
 
 	durationPad := widths.durationWidth - 8
 	if durationPad < 0 {
@@ -84,7 +85,7 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int) i
 	}
 	headerDuration := strings.Repeat(" ", durationPad) + "Duration"
 
-	fmt.Printf("  %s     %s  %s\n\n", headerQueue, headerName, headerDuration)
+	fmt.Printf("%s   %s  %s\n\n", headerQueue, headerName, headerDuration)
 
 	// Print each check
 	exitCode := 0
@@ -256,8 +257,8 @@ func printCheckRun(check ghclient.CheckRunInfo, headCommitTime time.Time, widths
 	}
 	durationCol := strings.Repeat(" ", durationPadding) + durationText
 
-	// Print line without colors (plain text for non-terminal)
-	fmt.Printf("  %s  %s  %s  %s\n", queueCol, icon, nameCol, durationCol)
+	// Print line without colors (plain text for non-terminal) [queue][1 space][icon][1 space][name][2 spaces][duration][newline]
+	fmt.Printf("%s %s %s  %s\n", queueCol, icon, nameCol, durationCol)
 }
 
 func run() int {

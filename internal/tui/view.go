@@ -55,19 +55,19 @@ func (m Model) View() string {
 	widths := m.calculateColumnWidths()
 
 	// Render column headers with matching alignment
-	// Right-align "Queue" (5 chars)
-	queuePad := widths.QueueWidth - 5
+	// Right-align "Startup" (7 chars)
+	queuePad := widths.QueueWidth - 7
 	if queuePad < 0 {
 		queuePad = 0
 	}
-	headerQueue := strings.Repeat(" ", queuePad) + "Queue"
+	headerQueue := strings.Repeat(" ", queuePad) + "Startup"
 
-	// Left-align "Check" (5 chars)
-	namePad := widths.NameWidth - 5
+	// Left-align "Workflow/Job" (12 chars)
+	namePad := widths.NameWidth - 12
 	if namePad < 0 {
 		namePad = 0
 	}
-	headerName := "Check" + strings.Repeat(" ", namePad)
+	headerName := "Workflow/Job" + strings.Repeat(" ", namePad)
 
 	// Right-align "Duration" (8 chars)
 	durationPad := widths.DurationWidth - 8
@@ -76,7 +76,7 @@ func (m Model) View() string {
 	}
 	headerDuration := strings.Repeat(" ", durationPad) + "Duration"
 
-	b.WriteString(m.styles.Header.Render(fmt.Sprintf("  %s     %s  %s\n", headerQueue, headerName, headerDuration)))
+	b.WriteString(m.styles.Header.Render(fmt.Sprintf("%s   %s  %s\n", headerQueue, headerName, headerDuration)))
 	b.WriteString("\n")
 
 	// Render each check with aligned columns and error boxes
@@ -241,8 +241,8 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 		styledName = style.Render(nameCol)
 	}
 
-	// Assemble line: [2 spaces][queue][2 spaces][icon][2 spaces][name][2 spaces][duration][newline]
-	return "  " + queueCol + "  " + styledIcon + "  " + styledName + "  " + styledDuration + "\n"
+	// Assemble line: [queue][1 space][icon][1 space][name][2 spaces][duration][newline]
+	return queueCol + " " + styledIcon + " " + styledName + "  " + styledDuration + "\n"
 }
 
 // formatQueueLatency returns the queue time text or placeholder
