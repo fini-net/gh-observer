@@ -52,30 +52,10 @@ func (m Model) View() string {
 	}
 
 	// Calculate column widths once
-	widths := m.calculateColumnWidths()
+	widths := CalculateColumnWidths(m.checkRuns, m.headCommitTime)
 
 	// Render column headers with matching alignment
-	// Right-align "Startup" (7 chars)
-	queuePad := widths.QueueWidth - 7
-	if queuePad < 0 {
-		queuePad = 0
-	}
-	headerQueue := strings.Repeat(" ", queuePad) + "Startup"
-
-	// Left-align "Workflow/Job" (12 chars)
-	namePad := widths.NameWidth - 12
-	if namePad < 0 {
-		namePad = 0
-	}
-	headerName := "Workflow/Job" + strings.Repeat(" ", namePad)
-
-	// Right-align "Duration" (8 chars)
-	durationPad := widths.DurationWidth - 8
-	if durationPad < 0 {
-		durationPad = 0
-	}
-	headerDuration := strings.Repeat(" ", durationPad) + "Duration"
-
+	headerQueue, headerName, headerDuration := FormatHeaderColumns(widths)
 	b.WriteString(m.styles.Header.Render(fmt.Sprintf("%s   %s  %s\n", headerQueue, headerName, headerDuration)))
 	b.WriteString("\n")
 
@@ -152,84 +132,40 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 	status := check.Status
 	conclusion := check.Conclusion
 
-	// Format name as "Workflow / Job" or just "Job"
-	name := check.Name
-	if check.WorkflowName != "" {
-		name = fmt.Sprintf("%s / %s", check.WorkflowName, check.Name)
-	}
-
-	// Truncate name if needed (with ellipsis)
-	if len(name) > widths.NameWidth {
-		name = name[:widths.NameWidth-1] + "…"
-	}
+	// Format name with truncation
+	name := FormatCheckNameWithTruncate(check, widths.NameWidth)
 
 	// Get column data (plain text)
-	queueText := m.formatQueueLatency(check)
-	durationText := m.formatDuration(check)
+	queueText := FormatQueueLatency(check, m.headCommitTime)
+	durationText := FormatDuration(check)
 
 	// Determine icon and style
-	var icon string
+	icon := GetCheckIcon(status, conclusion)
 	var style = m.styles.Queued
 
 	switch status {
 	case "completed":
 		switch conclusion {
 		case "success":
-			icon = "✓"
 			style = m.styles.Success
-		case "failure":
-			icon = "✗"
+		case "failure", "timed_out":
 			style = m.styles.Failure
-		case "cancelled":
-			icon = "⊗"
+		case "cancelled", "skipped":
 			style = m.styles.Queued
-		case "skipped":
-			icon = "⊘"
-			style = m.styles.Queued
-		case "timed_out":
-			icon = "⏱"
-			style = m.styles.Failure
 		case "action_required":
-			icon = "!"
 			style = m.styles.Running
 		default:
-			icon = "?"
 			style = m.styles.Queued
 		}
 	case "in_progress":
-		icon = "◐"
 		style = m.styles.Running
 	case "queued":
-		icon = "⏸"
-		style = m.styles.Queued
-	default:
-		icon = "?"
 		style = m.styles.Queued
 	}
 
 	// Build columns with explicit padding using strings.Repeat
 	// This avoids fmt.Sprintf format specifier issues with ANSI codes
-
-	// Right-align queue time
-	queuePadding := widths.QueueWidth - len(queueText)
-	if queuePadding < 0 {
-		queuePadding = 0
-	}
-	queueCol := strings.Repeat(" ", queuePadding) + queueText
-
-	// Left-align name (already correct length due to truncation logic above)
-	namePadding := widths.NameWidth - len(name)
-	if namePadding < 0 {
-		namePadding = 0
-	}
-	nameCol := name + strings.Repeat(" ", namePadding)
-
-	// Right-align duration
-	durationPadding := widths.DurationWidth - len(durationText)
-	if durationPadding < 0 {
-		durationPadding = 0
-	}
-	durationCol := strings.Repeat(" ", durationPadding) + durationText
+	queueCol, nameCol, durationCol := FormatAlignedColumns(queueText, name, durationText, widths)
 
 	// Apply styling to icon and duration
 	styledIcon := style.Render(icon)
@@ -243,88 +179,6 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 
 	// Assemble line: [queue][1 space][icon][1 space][name][2 spaces][duration][newline]
 	return queueCol + " " + styledIcon + " " + styledName + "  " + styledDuration + "\n"
-}
-
-// formatQueueLatency returns the queue time text or placeholder
-func (m Model) formatQueueLatency(check ghclient.CheckRunInfo) string {
-	if check.Status == "queued" {
-		// For queued checks, show time since commit
-		if !m.headCommitTime.IsZero() {
-			return timing.FormatDuration(time.Since(m.headCommitTime))
-		}
-		return "-"
-	}
-
-	// For non-queued checks, show actual queue latency
-	queueLatency := timing.QueueLatency(m.headCommitTime, check)
-	if queueLatency > 0 {
-		return timing.FormatDuration(queueLatency)
-	}
-	return "-"
-}
-
-// formatDuration returns the duration/runtime text or placeholder
-func (m Model) formatDuration(check ghclient.CheckRunInfo) string {
-	switch check.Status {
-	case "completed":
-		duration := timing.FinalDuration(check)
-		if duration > 0 {
-			return timing.FormatDuration(duration)
-		}
-		return "-"
-	case "in_progress":
-		runtime := timing.Runtime(check)
-		if runtime > 0 {
-			return timing.FormatDuration(runtime)
-		}
-		return "-"
-	default:
-		// For queued or unknown status
-		return "-"
-	}
-}
-
-// calculateColumnWidths scans all check runs and determines max width for each column
-func (m Model) calculateColumnWidths() ColumnWidths {
-	const (
-		minNameWidth = 20
-		maxNameWidth = 60
-		minTimeWidth = 5 // "1m 2s"
-	)
-
-	widths := ColumnWidths{
-		QueueWidth:    minTimeWidth,
-		NameWidth:     minNameWidth,
-		DurationWidth: minTimeWidth,
-	}
-
-	for _, check := range m.checkRuns {
-		// Measure queue latency text
-		queueText := m.formatQueueLatency(check)
-		if len(queueText) > widths.QueueWidth {
-			widths.QueueWidth = len(queueText)
-		}
-
-		// Measure name (Workflow / Job format)
-		name := check.Name
-		if check.WorkflowName != "" {
-			name = fmt.Sprintf("%s / %s", check.WorkflowName, check.Name)
-		}
-		nameLen := len(name)
-		if nameLen > widths.NameWidth && nameLen <= maxNameWidth {
-			widths.NameWidth = nameLen
-		} else if nameLen > maxNameWidth {
-			widths.NameWidth = maxNameWidth
-		}
-
-		// Measure duration text
-		durationText := m.formatDuration(check)
-		if len(durationText) > widths.DurationWidth {
-			widths.DurationWidth = len(durationText)
-		}
-	}
-
-	return widths
 }
 
 // renderStartupPhase shows helpful message during GitHub Actions startup delay
