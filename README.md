@@ -124,17 +124,30 @@ Startup Phase (37s elapsed):
   ⏳ Waiting for Actions to start...
   💡 GitHub typically takes 30-90s to queue jobs after PR creation
 
-Checks:
-  ✓ markdownlint          [completed in 12s]        (queued: 41s)
-  ✓ shellcheck            [completed in 8s]         (queued: 41s)
-  ⏳ go-test              [running: 2m 34s]         (queued: 45s)
-  ⏳ integration-tests    [running: 1m 12s]         (queued: 52s)
-  ⏸️  deploy-preview      [queued: 3m 15s]
+PR #5: 🔶 [claude] /init 21:04:15 UTC
+Updated 0s ago  •  Pushed 43h 8m 11s ago
 
-Last updated: 2s ago
+Startup   Workflow/Job                                Duration
+
+  15s ✗ MarkdownLint / lint                             5s
+   .github:13 - Failed with exit code: 1
+   CLAUDE.md:100 - Lists should be surrounded by blank lines: CLAUDE.md:100 MD032/blanks-around-lists Lists should be surr
+
+  15s ✓ Auto Assign / run                               5s
+  15s ✓ CUE Validation / verify                         6s
+  15s ✓ Checkov / scan                                 27s
+  15s ✓ Claude Code Review / claude-review          3m 52s
+  15s ✓ Lint GitHub Actions workflows / actionlint      8s
+  39s ✓ Checkov                                         2s
 
 Press q to quit
 ```
+
+## Example Animation
+
+Thanks to [asciinema](https://asciinema.org/) we can show you:
+
+TODO: include animation
 
 ## Development
 
