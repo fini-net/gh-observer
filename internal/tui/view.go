@@ -304,6 +304,12 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 	styledIcon := style.Render(icon)
 	styledDuration := style.Render(durationCol)
 
+	// Apply styling to name only if it failed
+	styledName := nameCol
+	if conclusion == "failure" || conclusion == "timed_out" {
+		styledName = style.Render(nameCol)
+	}
+
 	// Assemble line: [2 spaces][queue][2 spaces][icon][2 spaces][name][2 spaces][duration][newline]
-	return "  " + queueCol + "  " + styledIcon + "  " + nameCol + "  " + styledDuration + "\n"
+	return "  " + queueCol + "  " + styledIcon + "  " + styledName + "  " + styledDuration + "\n"
 }
