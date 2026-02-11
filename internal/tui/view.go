@@ -62,8 +62,8 @@ func (m Model) View() string {
 	}
 	headerQueue := strings.Repeat(" ", queuePad) + "Startup"
 
-	// Left-align "Workflow/Job" (13 chars)
-	namePad := widths.NameWidth - 13
+	// Left-align "Workflow/Job" (12 chars)
+	namePad := widths.NameWidth - 12
 	if namePad < 0 {
 		namePad = 0
 	}

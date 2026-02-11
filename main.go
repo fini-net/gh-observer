@@ -72,7 +72,8 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int) i
 	}
 	headerQueue := strings.Repeat(" ", queuePad) + "Startup"
 
-	namePad := widths.nameWidth - 13
+	// Left-align "Workflow/Job" (12 chars)
+	namePad := widths.nameWidth - 12
 	if namePad < 0 {
 		namePad = 0
 	}
