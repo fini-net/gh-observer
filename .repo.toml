@@ -3,7 +3,7 @@
 # TODO: mirrors later
 
 [about]
-description = "Watch github actions run"
+description = "🔎 Watch github actions run"
 topics = ["error-logs", "gh-extension", "github-actions", "github-cli", "latency-monitor", "pull-requests", "tui-app"]
 license = "GPL-2.0-only"
 
