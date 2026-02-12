@@ -20,8 +20,7 @@ list:
 [group('Build')]
 build:
 	go build -o gh-observer
-	gh ext remove observer
-	gh ext install .
+	gh ext install . --force
 
 # check release workflow status and list binaries
 [group('Process')]
