@@ -182,6 +182,23 @@ func FormatAlignedColumns(queueText, nameText, durationText string, widths Colum
 	return queueCol, nameCol, durationCol
 }
 
+// FormatQueueDurationColumns formats queue and duration columns with proper padding
+func FormatQueueDurationColumns(queueText, durationText string, widths ColumnWidths) (string, string) {
+	queuePadding := widths.QueueWidth - len(queueText)
+	if queuePadding < 0 {
+		queuePadding = 0
+	}
+	queueCol := strings.Repeat(" ", queuePadding) + queueText
+
+	durationPadding := widths.DurationWidth - len(durationText)
+	if durationPadding < 0 {
+		durationPadding = 0
+	}
+	durationCol := strings.Repeat(" ", durationPadding) + durationText
+
+	return queueCol, durationCol
+}
+
 // FormatHeaderColumns formats the column headers with proper padding
 func FormatHeaderColumns(widths ColumnWidths) (string, string, string) {
 	queuePad := widths.QueueWidth - 7

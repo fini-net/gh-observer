@@ -165,18 +165,25 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 
 	// Build columns with explicit padding using strings.Repeat
 	// This avoids fmt.Sprintf format specifier issues with ANSI codes
-	queueCol, nameCol, durationCol := FormatAlignedColumns(queueText, name, durationText, widths)
+	queueCol, durationCol := FormatQueueDurationColumns(queueText, durationText, widths)
 
 	// Apply styling to icon and duration
 	styledIcon := style.Render(icon)
 	styledDuration := style.Render(durationCol)
 
-	// Apply styling to name only if it failed
 	// Make name clickable with OSC 8 hyperlink (URL is hidden, only name shows)
-	nameWithLink := FormatLink(nameCol, check.DetailsURL)
+	// Apply link ONLY to the name text, not the padding
+	nameWithLink := FormatLink(name, check.DetailsURL)
+
+	// Apply styling to name only if it failed, then add padding
 	styledName := nameWithLink
 	if conclusion == "failure" || conclusion == "timed_out" {
 		styledName = style.Render(nameWithLink)
+	}
+	// Add padding after the styled name
+	namePadding := widths.NameWidth - len(name)
+	if namePadding > 0 {
+		styledName += strings.Repeat(" ", namePadding)
 	}
 
 	// Assemble line: [queue][1 space][icon][1 space][name][2 spaces][duration][newline]
