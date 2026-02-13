@@ -13,9 +13,17 @@ import (
 var supportsOSC8 = checkOSC8Support()
 
 func checkOSC8Support() bool {
+	// Allow user to force-enable OSC8 via environment variable
+	if os.Getenv("GH_OBSERVER_OSC8") == "1" {
+		return true
+	}
+
 	term := os.Getenv("TERM")
 	termProgram := os.Getenv("TERM_PROGRAM")
 
+	// Terminals that natively support OSC8
+	// Note: tmux requires "set-option -p allow-passthrough on" to pass OSC8 through,
+	// so we don't include it here by default. Use GH_OBSERVER_OSC8=1 to force-enable.
 	termPrograms := []string{"iTerm.app", "WezTerm", "kitty", "Alacritty", "vscode"}
 	for _, tp := range termPrograms {
 		if strings.Contains(termProgram, tp) {
@@ -23,9 +31,11 @@ func checkOSC8Support() bool {
 		}
 	}
 
-	termTerms := []string{"xterm-256color", "screen-256color", "tmux-256color"}
+	// For xterm-256color and screen-256color, OSC8 typically works
+	// But tmux-256color does NOT pass OSC8 through by default
+	termTerms := []string{"xterm-256color", "screen-256color"}
 	for _, t := range termTerms {
-		if strings.HasPrefix(term, t) {
+		if term == t {
 			return true
 		}
 	}
@@ -67,10 +77,15 @@ func FormatDuration(check ghclient.CheckRunInfo) string {
 		}
 		return "-"
 	case "in_progress":
+		if check.StartedAt == nil {
+			return "-"
+		}
 		runtime := timing.Runtime(check)
 		if runtime > 0 {
 			return timing.FormatDuration(runtime)
 		}
+		return "-"
+	case "queued":
 		return "-"
 	default:
 		return "-"
