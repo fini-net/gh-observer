@@ -172,9 +172,11 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 	styledDuration := style.Render(durationCol)
 
 	// Apply styling to name only if it failed
-	styledName := nameCol
+	// Make name clickable with OSC 8 hyperlink (URL is hidden, only name shows)
+	nameWithLink := FormatLink(nameCol, check.DetailsURL)
+	styledName := nameWithLink
 	if conclusion == "failure" || conclusion == "timed_out" {
-		styledName = style.Render(nameCol)
+		styledName = style.Render(nameWithLink)
 	}
 
 	// Assemble line: [queue][1 space][icon][1 space][name][2 spaces][duration][newline]

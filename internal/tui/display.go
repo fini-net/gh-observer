@@ -2,12 +2,43 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
 )
+
+var supportsOSC8 = checkOSC8Support()
+
+func checkOSC8Support() bool {
+	term := os.Getenv("TERM")
+	termProgram := os.Getenv("TERM_PROGRAM")
+
+	termPrograms := []string{"iTerm.app", "WezTerm", "kitty", "Alacritty", "vscode"}
+	for _, tp := range termPrograms {
+		if strings.Contains(termProgram, tp) {
+			return true
+		}
+	}
+
+	termTerms := []string{"xterm-256color", "screen-256color", "tmux-256color"}
+	for _, t := range termTerms {
+		if strings.HasPrefix(term, t) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func FormatLink(text, url string) string {
+	if url == "" || !supportsOSC8 {
+		return text
+	}
+	return fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", url, text)
+}
 
 // FormatQueueLatency returns the queue time text or placeholder
 func FormatQueueLatency(check ghclient.CheckRunInfo, headCommitTime time.Time) string {
