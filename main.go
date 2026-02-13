@@ -12,12 +12,27 @@ import (
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
 	"github.com/fini-net/gh-observer/internal/tui"
+	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
 func main() {
-	exitCode := run()
-	os.Exit(exitCode)
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+var rootCmd = &cobra.Command{
+	Use:   "gh-observer [PR_NUMBER]",
+	Short: "Watch GitHub PR checks with runtime metrics",
+	Long: `gh-observer is a GitHub PR check watcher CLI tool that improves on 
+'gh pr checks --watch' by showing runtime metrics, queue latency, 
+and better handling of startup delays.`,
+	Args: cobra.MaximumNArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		exitCode := run(args)
+		os.Exit(exitCode)
+	},
 }
 
 // runSnapshot prints a one-time snapshot of PR check status (non-interactive mode)
@@ -95,7 +110,7 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int) i
 	return exitCode
 }
 
-func run() int {
+func run(args []string) int {
 	ctx := context.Background()
 
 	// Load configuration
@@ -115,11 +130,11 @@ func run() int {
 
 	// Parse arguments
 	var prNumber int
-	if len(os.Args) > 1 {
+	if len(args) > 0 {
 		// PR number provided as argument
-		n, err := strconv.Atoi(os.Args[1])
+		n, err := strconv.Atoi(args[0])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Invalid PR number: %s\n", os.Args[1])
+			fmt.Fprintf(os.Stderr, "Invalid PR number: %s\n", args[0])
 			return 1
 		}
 		prNumber = n
