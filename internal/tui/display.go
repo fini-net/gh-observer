@@ -8,6 +8,7 @@ import (
 
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
+	"golang.org/x/term"
 )
 
 var supportsOSC8 = checkOSC8Support()
@@ -33,10 +34,25 @@ func checkOSC8Support() bool {
 	return false
 }
 
+func getTerminalWidth() int {
+	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		return 80
+	}
+	return width
+}
+
 func FormatLink(text, url string) string {
 	if url == "" || !supportsOSC8 {
 		return text
 	}
+
+	width := getTerminalWidth()
+	osc8Overhead := len(url) + 15
+	if width < 160 && osc8Overhead > 50 {
+		return text
+	}
+
 	return fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", url, text)
 }
 
