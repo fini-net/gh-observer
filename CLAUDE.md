@@ -160,6 +160,7 @@ gh-observer follows a clean architecture with distinct layers:
 The application operates in two modes based on whether stdout is a terminal:
 
 **Interactive mode** (default when running in a terminal):
+
 - Uses Bubbletea TUI with live updates
 - Polls GitHub API every 5s (configurable)
 - Shows spinner and real-time status changes
@@ -167,6 +168,7 @@ The application operates in two modes based on whether stdout is a terminal:
 - Supports keyboard input (q to quit)
 
 **Snapshot mode** (when stdout is not a terminal, e.g., in scripts or CI):
+
 - Implemented in `runSnapshot()` function in `main.go`
 - Prints a single snapshot of current check status
 - Plain text output without colors or TUI
