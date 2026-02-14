@@ -41,6 +41,3 @@ go.work.sum
 /.opencode/plans/
 /.opencode/bun.lock
 /.opencode/package.json
-
-# screen captures
-error*
