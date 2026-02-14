@@ -22,7 +22,7 @@ test2cast pr="25": build
 	asciinema record -c "./gh-observer {{ pr }}" --overwrite ".cache/pr-{{ pr }}.cast"
 
 # run unit tests
-[group('Build')]
+[group('Testing')]
 test:
 	go test ./...
 
