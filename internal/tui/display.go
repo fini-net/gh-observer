@@ -7,6 +7,7 @@ import (
 
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
+	"github.com/muesli/termenv"
 )
 
 // FormatQueueLatency returns the queue time text or placeholder
@@ -87,6 +88,18 @@ func FormatCheckNameWithTruncate(check ghclient.CheckRunInfo, maxWidth int) stri
 	name := FormatCheckName(check)
 	if len(name) > maxWidth {
 		return name[:maxWidth-1] + "…"
+	}
+	return name
+}
+
+// FormatCheckNameWithLink formats the check name with a clickable hyperlink
+func FormatCheckNameWithLink(check ghclient.CheckRunInfo, maxWidth int, enableLinks bool) string {
+	name := FormatCheckName(check)
+	if maxWidth > 0 && len(name) > maxWidth {
+		name = name[:maxWidth-1] + "…"
+	}
+	if enableLinks && check.DetailsURL != "" {
+		return termenv.Hyperlink(check.DetailsURL, name)
 	}
 	return name
 }

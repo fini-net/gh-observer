@@ -132,8 +132,8 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 	status := check.Status
 	conclusion := check.Conclusion
 
-	// Format name with truncation
-	name := FormatCheckNameWithTruncate(check, widths.NameWidth)
+	// Format name with clickable link
+	name := FormatCheckNameWithLink(check, widths.NameWidth, m.enableLinks)
 
 	// Get column data (plain text)
 	queueText := FormatQueueLatency(check, m.headCommitTime)

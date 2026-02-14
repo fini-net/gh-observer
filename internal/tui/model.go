@@ -34,6 +34,7 @@ type Model struct {
 	lastUpdate      time.Time
 	refreshInterval time.Duration
 	styles          Styles
+	enableLinks     bool
 
 	// Exit tracking
 	exitCode int
@@ -51,7 +52,7 @@ type ColumnWidths struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles) Model {
+func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
@@ -66,6 +67,7 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 		lastUpdate:      time.Now(),
 		refreshInterval: refreshInterval,
 		styles:          styles,
+		enableLinks:     enableLinks,
 	}
 }
 
@@ -73,4 +75,3 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 func (m Model) ExitCode() int {
 	return m.exitCode
 }
-
