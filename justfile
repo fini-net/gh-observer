@@ -17,6 +17,11 @@ list:
 	@echo "{{GREEN}}Your justfile is waiting for more scripts and snippets{{NORMAL}}"
 
 # build the gh-observer binary and install locally
+[group('Testing')]
+test2cast pr="25": build
+	asciinema record -c "./gh-observer {{ pr }}" --overwrite ".cache/pr-{{ pr }}.cast"
+
+# build the gh-observer binary and install locally
 [group('Build')]
 build:
 	go build -o gh-observer
