@@ -5,8 +5,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
+	"github.com/muesli/termenv"
 )
 
 // FormatQueueLatency returns the queue time text or placeholder
@@ -91,8 +93,19 @@ func FormatCheckNameWithTruncate(check ghclient.CheckRunInfo, maxWidth int) stri
 	return name
 }
 
+func FormatCheckNameWithLink(check ghclient.CheckRunInfo, maxWidth int, enableLinks bool) string {
+	name := FormatCheckName(check)
+	if maxWidth > 0 && len(name) > maxWidth {
+		name = name[:maxWidth-1] + "…"
+	}
+	if enableLinks && check.DetailsURL != "" {
+		return termenv.Hyperlink(check.DetailsURL, name)
+	}
+	return name
+}
+
 // CalculateColumnWidths scans all check runs and determines max width for each column
-func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime time.Time) ColumnWidths {
+func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime time.Time, enableLinks bool) ColumnWidths {
 	const (
 		minNameWidth = 20
 		maxNameWidth = 60
@@ -111,11 +124,11 @@ func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime tim
 			widths.QueueWidth = len(queueText)
 		}
 
-		name := FormatCheckName(check)
-		nameLen := len(name)
-		if nameLen > widths.NameWidth && nameLen <= maxNameWidth {
-			widths.NameWidth = nameLen
-		} else if nameLen > maxNameWidth {
+		visibleName := FormatCheckName(check)
+		visibleLen := len(visibleName)
+		if visibleLen > widths.NameWidth && visibleLen <= maxNameWidth {
+			widths.NameWidth = visibleLen
+		} else if visibleLen > maxNameWidth {
 			widths.NameWidth = maxNameWidth
 		}
 
@@ -136,7 +149,8 @@ func FormatAlignedColumns(queueText, nameText, durationText string, widths Colum
 	}
 	queueCol := strings.Repeat(" ", queuePadding) + queueText
 
-	namePadding := widths.NameWidth - len(nameText)
+	nameWidth := lipgloss.Width(nameText)
+	namePadding := widths.NameWidth - nameWidth
 	if namePadding < 0 {
 		namePadding = 0
 	}
