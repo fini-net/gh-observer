@@ -20,15 +20,27 @@ func Runtime(check ghclient.CheckRunInfo) time.Duration {
 	if check.Status != "in_progress" || check.StartedAt == nil {
 		return 0
 	}
-	return time.Since(*check.StartedAt)
+	elapsed := time.Since(*check.StartedAt)
+	if elapsed < 0 {
+		return 0
+	}
+	return elapsed
 }
 
 // FinalDuration calculates the total runtime for completed checks
 func FinalDuration(check ghclient.CheckRunInfo) time.Duration {
-	if check.StartedAt == nil || check.CompletedAt == nil {
+	if check.StartedAt == nil {
 		return 0
 	}
-	return check.CompletedAt.Sub(*check.StartedAt)
+	if check.CompletedAt != nil {
+		return check.CompletedAt.Sub(*check.StartedAt)
+	}
+	// Fallback: if completed but CompletedAt is nil, calculate from StartedAt to now
+	// This can happen briefly when a job first transitions to completed
+	if check.Status == "completed" {
+		return time.Since(*check.StartedAt)
+	}
+	return 0
 }
 
 // FormatDuration formats a duration in human-readable form

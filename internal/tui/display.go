@@ -2,12 +2,54 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
 )
+
+var supportsOSC8 = checkOSC8Support()
+
+func checkOSC8Support() bool {
+	// Allow user to force-enable OSC8 via environment variable
+	if os.Getenv("GH_OBSERVER_OSC8") == "1" {
+		return true
+	}
+
+	term := os.Getenv("TERM")
+	termProgram := os.Getenv("TERM_PROGRAM")
+
+	// Terminals that natively support OSC8
+	// Note: tmux requires "set-option -p allow-passthrough on" to pass OSC8 through,
+	// so we don't include it here by default. Use GH_OBSERVER_OSC8=1 to force-enable.
+	termPrograms := []string{"iTerm.app", "WezTerm", "kitty", "Alacritty", "vscode"}
+	for _, tp := range termPrograms {
+		if strings.Contains(termProgram, tp) {
+			return true
+		}
+	}
+
+	// For xterm-256color and screen-256color, OSC8 typically works
+	// But tmux-256color does NOT pass OSC8 through by default
+	termTerms := []string{"xterm-256color", "screen-256color"}
+	for _, t := range termTerms {
+		if term == t {
+			return true
+		}
+	}
+
+	return false
+}
+
+func FormatLink(text, url string) string {
+	if url == "" || !supportsOSC8 {
+		return text
+	}
+
+	return fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", url, text)
+}
 
 // FormatQueueLatency returns the queue time text or placeholder
 func FormatQueueLatency(check ghclient.CheckRunInfo, headCommitTime time.Time) string {
@@ -35,10 +77,15 @@ func FormatDuration(check ghclient.CheckRunInfo) string {
 		}
 		return "-"
 	case "in_progress":
+		if check.StartedAt == nil {
+			return "-"
+		}
 		runtime := timing.Runtime(check)
 		if runtime > 0 {
 			return timing.FormatDuration(runtime)
 		}
+		return "-"
+	case "queued":
 		return "-"
 	default:
 		return "-"
@@ -149,6 +196,23 @@ func FormatAlignedColumns(queueText, nameText, durationText string, widths Colum
 	durationCol := strings.Repeat(" ", durationPadding) + durationText
 
 	return queueCol, nameCol, durationCol
+}
+
+// FormatQueueDurationColumns formats queue and duration columns with proper padding
+func FormatQueueDurationColumns(queueText, durationText string, widths ColumnWidths) (string, string) {
+	queuePadding := widths.QueueWidth - len(queueText)
+	if queuePadding < 0 {
+		queuePadding = 0
+	}
+	queueCol := strings.Repeat(" ", queuePadding) + queueText
+
+	durationPadding := widths.DurationWidth - len(durationText)
+	if durationPadding < 0 {
+		durationPadding = 0
+	}
+	durationCol := strings.Repeat(" ", durationPadding) + durationText
+
+	return queueCol, durationCol
 }
 
 // FormatHeaderColumns formats the column headers with proper padding

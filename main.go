@@ -93,10 +93,13 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int) i
 		icon := tui.GetCheckIcon(check.Status, check.Conclusion)
 
 		// Format columns
-		queueCol, nameCol, durationCol := tui.FormatAlignedColumns(queueText, name, durationText, widths)
+		queueCol, _, durationCol := tui.FormatAlignedColumns(queueText, name, durationText, widths)
+
+		// Make name clickable with OSC 8 hyperlink
+		nameWithLink := tui.FormatLink(name, check.DetailsURL)
 
 		// Print line without colors (plain text for non-terminal)
-		fmt.Printf("%s %s %s  %s\n", queueCol, icon, nameCol, durationCol)
+		fmt.Printf("%s %s %s  %s\n", queueCol, icon, nameWithLink, durationCol)
 
 		// Determine exit code based on conclusions
 		if check.Status == "completed" {
