@@ -21,6 +21,11 @@ list:
 test2cast pr="25": build
 	asciinema record -c "./gh-observer {{ pr }}" --overwrite ".cache/pr-{{ pr }}.cast"
 
+# run unit tests
+[group('Build')]
+test:
+	go test ./...
+
 # build the gh-observer binary and install locally
 [group('Build')]
 build:
