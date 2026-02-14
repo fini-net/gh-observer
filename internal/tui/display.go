@@ -107,10 +107,16 @@ func FormatCheckNameWithLink(check ghclient.CheckRunInfo, maxWidth int, enableLi
 // CalculateColumnWidths scans all check runs and determines max width for each column
 func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime time.Time, enableLinks bool) ColumnWidths {
 	const (
-		minNameWidth = 20
-		maxNameWidth = 60
 		minTimeWidth = 5
 	)
+
+	minNameWidth := 20
+	maxNameWidth := 60
+
+	if enableLinks {
+		maxNameWidth = 38
+		minNameWidth = 15
+	}
 
 	widths := ColumnWidths{
 		QueueWidth:    minTimeWidth,
