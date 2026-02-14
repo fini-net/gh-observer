@@ -10,11 +10,26 @@ gh-observer is a GitHub PR check watcher CLI tool that improves on `gh pr checks
 
 This repo uses `just` for all development tasks:
 
-- `just build` - Build the `gh-observer` binary
+### Common development commands
+
+- `just build` - Build the `gh-observer` binary and install locally as gh extension
 - `just branch <name>` - Create a new feature branch (format: `$USER/YYYY-MM-DD-<name>`)
 - `just pr` - Create PR, push changes, and watch checks
+- `just again` - Push changes, update PR description, and watch GHAs (most common iterative workflow)
 - `just merge` - Squash merge PR, delete branch, return to main, and pull latest
-- `just again` - Push changes, update PR description, and watch GHAs
+- `just sync` - Return to main branch, pull latest, and check status
+
+### Other useful commands
+
+- `just prweb` - Open current PR in web browser
+- `just pr_update` - Update PR description with current commits (done automatically by `again`)
+- `just test2cast <pr>` - Record asciinema demo of watching a specific PR
+- `just release_status` - Check release workflow status and list binaries
+- `just release_age` - Check how long ago the last release was
+
+### Testing
+
+Currently, there are no automated tests in this repository. Testing is done manually by running `just build` and testing the binary against real PRs.
 
 ## Release Workflow
 
@@ -134,11 +149,32 @@ All release binaries include build attestations:
 
 gh-observer follows a clean architecture with distinct layers:
 
-1. **Main entry point** (`main.go`) - Handles command-line arguments, configuration loading, and TUI initialization
+1. **Main entry point** (`main.go`) - Handles command-line arguments using Cobra, configuration loading, and mode selection (TUI vs snapshot)
 2. **GitHub client layer** (`internal/github/`) - Abstracts GitHub API interactions
-3. **TUI layer** (`internal/tui/`) - Implements Bubbletea model/view/update pattern
+3. **TUI layer** (`internal/tui/`) - Implements Bubbletea model/view/update pattern for interactive mode
 4. **Configuration** (`internal/config/`) - Loads user config from `~/.config/gh-observer/config.yaml`
 5. **Timing utilities** (`internal/timing/`) - Calculates queue latency, runtime, and formats durations
+
+### Execution modes
+
+The application operates in two modes based on whether stdout is a terminal:
+
+**Interactive mode** (default when running in a terminal):
+
+- Uses Bubbletea TUI with live updates
+- Polls GitHub API every 5s (configurable)
+- Shows spinner and real-time status changes
+- Automatically quits when all checks complete
+- Supports keyboard input (q to quit)
+
+**Snapshot mode** (when stdout is not a terminal, e.g., in scripts or CI):
+
+- Implemented in `runSnapshot()` function in `main.go`
+- Prints a single snapshot of current check status
+- Plain text output without colors or TUI
+- Exits immediately after printing
+- Returns appropriate exit code based on check results
+- Useful for scripting: `gh-observer && echo "All checks passed!"`
 
 ### Bubbletea TUI architecture
 
@@ -308,8 +344,10 @@ gh-observer && echo "All checks passed!"
 - `github.com/charmbracelet/bubbles` - Reusable TUI components (spinner)
 - `github.com/google/go-github/v58` - GitHub REST API client (PR metadata)
 - `github.com/shurcooL/githubv4` - GitHub GraphQL API client (check runs)
+- `github.com/spf13/cobra` - CLI framework for command-line argument parsing
 - `github.com/spf13/viper` - Configuration management
 - `golang.org/x/oauth2` - OAuth2 authentication for GitHub
+- `golang.org/x/term` - Terminal detection for snapshot vs interactive mode
 
 ## Important implementation notes
 
@@ -323,3 +361,5 @@ gh-observer && echo "All checks passed!"
 - Keyboard input is limited to 'q' and 'ctrl+c' for quitting
 - Network errors during polling are non-fatal (stored in `m.err` but polling continues)
 - The application polls every 5s by default, configurable via `refresh_interval`
+- Terminal detection uses `term.IsTerminal(os.Stdout.Fd())` to switch between TUI and snapshot modes
+- `.repo.toml` file configures repo metadata and feature flags (used by just recipes for Claude/Copilot reviews)
