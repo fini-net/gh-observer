@@ -3,7 +3,7 @@
 # TODO: mirrors later
 
 [about]
-description = "🔎 Watch github actions run"
+description = "🔎 Terminal UI for watching GitHub Actions CI/CD workflows with runtime metrics, queue times, and check status - alternative to gh pr checks --watch"
 topics = ["error-logs", "gh-extension", "github-actions", "github-cli", "latency-monitor", "pull-requests", "tui-app"]
 license = "GPL-2.0-only"
 
