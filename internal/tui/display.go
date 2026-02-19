@@ -5,8 +5,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
+	"github.com/muesli/termenv"
 )
 
 // FormatQueueLatency returns the queue time text or placeholder
@@ -91,6 +93,26 @@ func FormatCheckNameWithTruncate(check ghclient.CheckRunInfo, maxWidth int) stri
 	return name
 }
 
+// FormatLink wraps text in an OSC 8 terminal hyperlink
+func FormatLink(url, text string) string {
+	if url == "" {
+		return text
+	}
+	return termenv.Hyperlink(url, text)
+}
+
+// FormatCheckNameWithLink formats and truncates the check name, then optionally wraps it in a hyperlink
+func FormatCheckNameWithLink(check ghclient.CheckRunInfo, maxWidth int, enableLinks bool) string {
+	name := FormatCheckName(check)
+	if len(name) > maxWidth {
+		name = name[:maxWidth-1] + "…"
+	}
+	if enableLinks && check.DetailsURL != "" {
+		return FormatLink(check.DetailsURL, name)
+	}
+	return name
+}
+
 // CalculateColumnWidths scans all check runs and determines max width for each column
 func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime time.Time) ColumnWidths {
 	const (
@@ -136,7 +158,7 @@ func FormatAlignedColumns(queueText, nameText, durationText string, widths Colum
 	}
 	queueCol := strings.Repeat(" ", queuePadding) + queueText
 
-	namePadding := widths.NameWidth - len(nameText)
+	namePadding := widths.NameWidth - lipgloss.Width(nameText)
 	if namePadding < 0 {
 		namePadding = 0
 	}
