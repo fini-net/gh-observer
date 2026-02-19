@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
 	"github.com/muesli/termenv"
@@ -101,16 +100,17 @@ func FormatLink(url, text string) string {
 	return termenv.Hyperlink(url, text)
 }
 
-// FormatCheckNameWithLink formats and truncates the check name, then optionally wraps it in a hyperlink
-func FormatCheckNameWithLink(check ghclient.CheckRunInfo, maxWidth int, enableLinks bool) string {
-	name := FormatCheckName(check)
-	if len(name) > maxWidth {
-		name = name[:maxWidth-1] + "…"
-	}
+// BuildNameColumn returns a left-aligned name column of exactly widths.NameWidth visible
+// characters. If enableLinks is true and the check has a DetailsURL, the visible text is
+// wrapped in an OSC 8 hyperlink; padding spaces are appended outside the link so that
+// len()-based width measurement stays accurate for the rest of the line.
+func BuildNameColumn(check ghclient.CheckRunInfo, widths ColumnWidths, enableLinks bool) string {
+	name := FormatCheckNameWithTruncate(check, widths.NameWidth)
+	padding := strings.Repeat(" ", widths.NameWidth-len(name))
 	if enableLinks && check.DetailsURL != "" {
-		return FormatLink(check.DetailsURL, name)
+		return FormatLink(check.DetailsURL, name) + padding
 	}
-	return name
+	return name + padding
 }
 
 // CalculateColumnWidths scans all check runs and determines max width for each column
@@ -158,7 +158,7 @@ func FormatAlignedColumns(queueText, nameText, durationText string, widths Colum
 	}
 	queueCol := strings.Repeat(" ", queuePadding) + queueText
 
-	namePadding := widths.NameWidth - lipgloss.Width(nameText)
+	namePadding := widths.NameWidth - len(nameText)
 	if namePadding < 0 {
 		namePadding = 0
 	}

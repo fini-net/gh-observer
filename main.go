@@ -86,14 +86,14 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 	// Print each check
 	exitCode := 0
 	for _, check := range checkRuns {
-		// Format check data
-		name := tui.FormatCheckNameWithLink(check, widths.NameWidth, enableLinks)
+		// Build name column with correct padding outside any hyperlink
+		nameCol := tui.BuildNameColumn(check, widths, enableLinks)
 		queueText := tui.FormatQueueLatency(check, headCommitTime)
 		durationText := tui.FormatDuration(check)
 		icon := tui.GetCheckIcon(check.Status, check.Conclusion)
 
-		// Format columns
-		queueCol, nameCol, durationCol := tui.FormatAlignedColumns(queueText, name, durationText, widths)
+		// Compute queue and duration columns; discard name since BuildNameColumn owns it
+		queueCol, _, durationCol := tui.FormatAlignedColumns(queueText, tui.FormatCheckNameWithTruncate(check, widths.NameWidth), durationText, widths)
 
 		// Print line without colors (plain text for non-terminal)
 		fmt.Printf("%s %s %s  %s\n", queueCol, icon, nameCol, durationCol)
