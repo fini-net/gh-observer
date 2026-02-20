@@ -29,7 +29,10 @@ This repo uses `just` for all development tasks:
 
 ### Testing
 
-Currently, there are no automated tests in this repository. Testing is done manually by running `just build` and testing the binary against real PRs.
+- `just test` or `go test ./...` - Run all unit tests
+- `go test ./internal/timing/...` - Run timing tests only
+
+Unit tests live in `internal/timing/calculator_test.go` and cover queue latency, runtime, final duration, and duration formatting. The rest of the app (TUI, GitHub API interactions) is tested manually by running `just build` and pointing the binary at a real PR.
 
 ## Release Workflow
 
@@ -188,6 +191,8 @@ The TUI follows the Elm Architecture pattern (Model-View-Update):
   - `ChecksUpdateMsg` - Check run status updates
   - `tea.KeyMsg` - Keyboard input (q to quit)
 - **View** (`internal/tui/view.go`) - Renders the terminal UI
+- **Display** (`internal/tui/display.go`) - Column formatting, alignment widths, URL building for check hyperlinks
+- **Styles** (`internal/tui/styles.go`) - Lipgloss color scheme and styling
 - **Messages** (`internal/tui/messages.go`) - Custom message types for async operations
 
 ### GraphQL architecture
@@ -329,7 +334,7 @@ gh-observer && echo "All checks passed!"
 
 ### Required tools
 
-- `go` 1.21+ - Go programming language
+- `go` 1.25+ - Go programming language
 - `gh` - GitHub CLI (for auth and PR detection)
 - `git` - Version control
 
