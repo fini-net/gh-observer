@@ -26,6 +26,12 @@ test2cast pr="25": build
 test:
 	go test ./...
 
+# update Go dependencies and tidy go.mod/go.sum
+[group('Build')]
+deps-update:
+	go get -u ./...
+	go mod tidy
+
 # build the gh-observer binary and install locally
 [group('Build')]
 build:
