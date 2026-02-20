@@ -36,7 +36,7 @@ and better handling of startup delays.`,
 }
 
 // runSnapshot prints a one-time snapshot of PR check status (non-interactive mode)
-func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int) int {
+func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, enableLinks bool) int {
 	// Create GitHub client for PR info
 	client, err := ghclient.NewClient(ctx)
 	if err != nil {
@@ -86,14 +86,14 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int) i
 	// Print each check
 	exitCode := 0
 	for _, check := range checkRuns {
-		// Format check data
-		name := tui.FormatCheckNameWithTruncate(check, widths.NameWidth)
+		// Build name column with correct padding outside any hyperlink
+		nameCol := tui.BuildNameColumn(check, widths, enableLinks)
 		queueText := tui.FormatQueueLatency(check, headCommitTime)
 		durationText := tui.FormatDuration(check)
 		icon := tui.GetCheckIcon(check.Status, check.Conclusion)
 
-		// Format columns
-		queueCol, nameCol, durationCol := tui.FormatAlignedColumns(queueText, name, durationText, widths)
+		// Compute queue and duration columns; discard name since BuildNameColumn owns it
+		queueCol, _, durationCol := tui.FormatAlignedColumns(queueText, tui.FormatCheckNameWithTruncate(check, widths.NameWidth), durationText, widths)
 
 		// Print line without colors (plain text for non-terminal)
 		fmt.Printf("%s %s %s  %s\n", queueCol, icon, nameCol, durationCol)
@@ -166,11 +166,11 @@ func run(args []string) int {
 	// Check if running in a terminal
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
 		// Non-interactive mode: print snapshot and exit
-		return runSnapshot(ctx, token, owner, repo, prNumber)
+		return runSnapshot(ctx, token, owner, repo, prNumber, cfg.EnableLinks)
 	}
 
 	// Create model
-	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles)
+	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks)
 
 	// Run TUI (keeps output visible after exit)
 	p := tea.NewProgram(model)

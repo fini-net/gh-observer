@@ -132,8 +132,7 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 	status := check.Status
 	conclusion := check.Conclusion
 
-	// Format name with truncation
-	name := FormatCheckNameWithTruncate(check, widths.NameWidth)
+	nameCol := BuildNameColumn(check, widths, m.enableLinks)
 
 	// Get column data (plain text)
 	queueText := FormatQueueLatency(check, m.headCommitTime)
@@ -163,9 +162,9 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 		style = m.styles.Queued
 	}
 
-	// Build columns with explicit padding using strings.Repeat
-	// This avoids fmt.Sprintf format specifier issues with ANSI codes
-	queueCol, nameCol, durationCol := FormatAlignedColumns(queueText, name, durationText, widths)
+	// Compute queue and duration columns; discard the name return value since
+	// nameCol was already built correctly by BuildNameColumn above.
+	queueCol, _, durationCol := FormatAlignedColumns(queueText, FormatCheckNameWithTruncate(check, widths.NameWidth), durationText, widths)
 
 	// Apply styling to icon and duration
 	styledIcon := style.Render(icon)

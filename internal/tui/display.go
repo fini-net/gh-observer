@@ -7,6 +7,7 @@ import (
 
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
+	"github.com/muesli/termenv"
 )
 
 // FormatQueueLatency returns the queue time text or placeholder
@@ -89,6 +90,27 @@ func FormatCheckNameWithTruncate(check ghclient.CheckRunInfo, maxWidth int) stri
 		return name[:maxWidth-1] + "…"
 	}
 	return name
+}
+
+// FormatLink wraps text in an OSC 8 terminal hyperlink
+func FormatLink(url, text string) string {
+	if url == "" {
+		return text
+	}
+	return termenv.Hyperlink(url, text)
+}
+
+// BuildNameColumn returns a left-aligned name column of exactly widths.NameWidth visible
+// characters. If enableLinks is true and the check has a DetailsURL, the visible text is
+// wrapped in an OSC 8 hyperlink; padding spaces are appended outside the link so that
+// len()-based width measurement stays accurate for the rest of the line.
+func BuildNameColumn(check ghclient.CheckRunInfo, widths ColumnWidths, enableLinks bool) string {
+	name := FormatCheckNameWithTruncate(check, widths.NameWidth)
+	padding := strings.Repeat(" ", widths.NameWidth-len(name))
+	if enableLinks && check.DetailsURL != "" {
+		return FormatLink(check.DetailsURL, name) + padding
+	}
+	return name + padding
 }
 
 // CalculateColumnWidths scans all check runs and determines max width for each column
