@@ -132,9 +132,11 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 	status := check.Status
 	conclusion := check.Conclusion
 
-	// Build name column: plain truncated text + padding, with optional OSC 8 hyperlink
-	// wrapping only the visible text so that len()-based measurement stays accurate.
-	nameCol := BuildNameColumn(check, widths, m.enableLinks)
+	// Hyperlinks are disabled in TUI mode: muesli/reflow's ANSI FSM (used by
+	// Bubbletea v0.25's renderer) counts OSC 8 URL bytes as visible characters,
+	// causing lines to appear wider than they are and be truncated prematurely.
+	// Hyperlinks remain enabled in snapshot mode (runSnapshot in main.go).
+	nameCol := BuildNameColumn(check, widths, false)
 
 	// Get column data (plain text)
 	queueText := FormatQueueLatency(check, m.headCommitTime)
