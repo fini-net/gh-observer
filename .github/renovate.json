@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "schedule": ["every weekday"],
+  "gomod": {
+    "enabled": true
+  },
+  "github-actions": {
+    "enabled": true
+  },
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["patch"],
+      "groupName": "patches",
+      "automerge": true
+    },
+    {
+      "matchUpdateTypes": ["minor"],
+      "groupName": "minor updates",
+      "automerge": true
+    }
+  ]
+}
