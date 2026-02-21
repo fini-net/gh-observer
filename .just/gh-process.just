@@ -219,7 +219,7 @@ release rel_version:
 pr_checks: _wait_for_checks && claude_review
     #!/usr/bin/env bash
 
-    gh observer
+    gh pr checks --watch -i 5
     echo "" # blank line for visual space
 
     # Load repo metadata for conditional display
