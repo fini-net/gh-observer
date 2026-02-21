@@ -45,18 +45,21 @@ func ParseOwnerRepo() (string, string, error) {
 		return "", "", fmt.Errorf("failed to get git remote: %w", err)
 	}
 
-	url := strings.TrimSpace(string(output))
+	return parseOwnerRepoFromURL(strings.TrimSpace(string(output)))
+}
 
+// parseOwnerRepoFromURL extracts owner and repo from a remote URL string
+func parseOwnerRepoFromURL(url string) (string, string, error) {
 	// Parse SSH format: git@github.com:owner/repo.git
-	sshPattern := regexp.MustCompile(`git@github\.com:([^/]+)/(.+?)(?:\.git)?$`)
+	sshPattern := regexp.MustCompile(`git@github\.com:([^/]+)/(.+?)(?:\.git)?/?$`)
 	if matches := sshPattern.FindStringSubmatch(url); len(matches) == 3 {
-		return matches[1], matches[2], nil
+		return matches[1], strings.TrimSuffix(matches[2], "/"), nil
 	}
 
 	// Parse HTTPS format: https://github.com/owner/repo or https://github.com/owner/repo.git
-	httpsPattern := regexp.MustCompile(`https://github\.com/([^/]+)/(.+?)(?:\.git)?$`)
+	httpsPattern := regexp.MustCompile(`https://github\.com/([^/]+)/(.+?)(?:\.git)?/?$`)
 	if matches := httpsPattern.FindStringSubmatch(url); len(matches) == 3 {
-		return matches[1], matches[2], nil
+		return matches[1], strings.TrimSuffix(matches[2], "/"), nil
 	}
 
 	return "", "", fmt.Errorf("unable to parse owner/repo from remote URL: %s", url)
@@ -105,8 +108,8 @@ func GetCurrentPRFull() (*PRInfo, error) {
 		HeadRefOid string `json:"headRefOid"`
 		CreatedAt  string `json:"createdAt"`
 		Commits    []struct {
-			Oid               string `json:"oid"`
-			CommittedDate     string `json:"committedDate"`
+			Oid           string `json:"oid"`
+			CommittedDate string `json:"committedDate"`
 		} `json:"commits"`
 	}
 

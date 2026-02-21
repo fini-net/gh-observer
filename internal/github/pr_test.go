@@ -1,12 +1,10 @@
 package github
 
 import (
-	"fmt"
-	"regexp"
 	"testing"
 )
 
-func TestParseOwnerRepo(t *testing.T) {
+func TestParseOwnerRepoFromURL(t *testing.T) {
 	tests := []struct {
 		name      string
 		url       string
@@ -46,7 +44,7 @@ func TestParseOwnerRepo(t *testing.T) {
 			name:      "HTTPS format with trailing slash",
 			url:       "https://github.com/owner/repo/",
 			wantOwner: "owner",
-			wantRepo:  "repo/",
+			wantRepo:  "repo",
 			wantErr:   false,
 		},
 		{
@@ -73,6 +71,13 @@ func TestParseOwnerRepo(t *testing.T) {
 			wantRepo:  "repo.name",
 			wantErr:   false,
 		},
+		{
+			name:      "SSH with trailing slash",
+			url:       "git@github.com:owner/repo/",
+			wantOwner: "owner",
+			wantRepo:  "repo",
+			wantErr:   false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -96,21 +101,4 @@ func TestParseOwnerRepo(t *testing.T) {
 			}
 		})
 	}
-}
-
-// parseOwnerRepoFromURL extracts owner/repo from a URL string (for testing)
-func parseOwnerRepoFromURL(url string) (string, string, error) {
-	sshPattern := `git@github\.com:([^/]+)/(.+?)(?:\.git)?$`
-	sshRe := regexp.MustCompile(sshPattern)
-	if matches := sshRe.FindStringSubmatch(url); len(matches) == 3 {
-		return matches[1], matches[2], nil
-	}
-
-	httpsPattern := `https://github\.com/([^/]+)/(.+?)(?:\.git)?$`
-	httpsRe := regexp.MustCompile(httpsPattern)
-	if matches := httpsRe.FindStringSubmatch(url); len(matches) == 3 {
-		return matches[1], matches[2], nil
-	}
-
-	return "", "", fmt.Errorf("unable to parse owner/repo from URL: %s", url)
 }
