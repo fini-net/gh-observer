@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/go-github/v58/github"
+	"github.com/google/go-github/v83/github"
 )
 
 // PRInfo contains metadata about a pull request
