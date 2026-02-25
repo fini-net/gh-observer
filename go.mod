@@ -4,7 +4,7 @@ go 1.25.7
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
-	github.com/charmbracelet/bubbletea/v2 v2.0.0
+	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/google/go-github/v58 v58.0.0
 	github.com/muesli/termenv v0.16.0
@@ -53,5 +53,3 @@ require (
 	golang.org/x/text v0.34.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 )
-
-replace github.com/charmbracelet/bubbles/v2 => charm.land/bubbles/v2 v2.0.0
