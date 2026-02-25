@@ -3,12 +3,12 @@ package github
 import (
 	"context"
 
-	"github.com/google/go-github/v58/github"
+	"github.com/google/go-github/v83/github"
 )
 
 // CheckRunsResult contains check runs and rate limit info
 type CheckRunsResult struct {
-	CheckRuns         []*github.CheckRun
+	CheckRuns          []*github.CheckRun
 	RateLimitRemaining int
 }
 
@@ -30,7 +30,7 @@ func FetchCheckRuns(ctx context.Context, client *github.Client, owner, repo, sha
 	}
 
 	return &CheckRunsResult{
-		CheckRuns:         result.CheckRuns,
+		CheckRuns:          result.CheckRuns,
 		RateLimitRemaining: remaining,
 	}, nil
 }
