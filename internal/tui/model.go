@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
+	"charm.land/bubbles/v2/spinner"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
@@ -55,8 +55,7 @@ type ColumnWidths struct {
 
 // NewModel creates a new TUI model
 func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool) Model {
-	s := spinner.New()
-	s.Spinner = spinner.Dot
+	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	return Model{
 		ctx:             ctx,
@@ -77,4 +76,3 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 func (m Model) ExitCode() int {
 	return m.exitCode
 }
-

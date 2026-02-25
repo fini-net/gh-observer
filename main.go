@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/fini-net/gh-observer/internal/config"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
