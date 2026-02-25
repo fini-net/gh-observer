@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 

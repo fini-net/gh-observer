@@ -5,30 +5,24 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
 )
 
 // View renders the current state
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	if m.err != nil {
-		return m.styles.Error.Render(fmt.Sprintf("Error: %v\n", m.err))
+		return tea.NewView(m.styles.Error.Render(fmt.Sprintf("Error: %v\n", m.err)))
 	}
 
 	var b strings.Builder
 
-	// Header
 	if m.prTitle != "" {
-		// Render PR info (bold and underlined)
 		prInfo := m.styles.Header.Render(fmt.Sprintf("PR #%d: %s", m.prNumber, m.prTitle))
-
-		// Get current UTC time (not bold)
 		utcTime := time.Now().UTC().Format("15:04:05 UTC")
-
-		// Get time since last update
 		timeSinceUpdate := time.Since(m.lastUpdate)
 
-		// Get time since last push
 		var updatedLine string
 		if !m.headCommitTime.IsZero() {
 			timeSincePush := time.Since(m.headCommitTime)
@@ -39,38 +33,30 @@ func (m Model) View() string {
 			updatedLine = fmt.Sprintf("Updated %s ago", timing.FormatDuration(timeSinceUpdate))
 		}
 
-		// PR info and UTC time on first line
 		b.WriteString(fmt.Sprintf("%s %s\n", prInfo, utcTime))
-		// Last updated on second line
 		b.WriteString(fmt.Sprintf("%s\n", updatedLine))
 		b.WriteString("\n")
 	}
 
-	// Startup phase handling
 	if len(m.checkRuns) == 0 {
-		return b.String() + m.renderStartupPhase()
+		return tea.NewView(b.String() + m.renderStartupPhase())
 	}
 
-	// Calculate column widths once
 	widths := CalculateColumnWidths(m.checkRuns, m.headCommitTime)
 
-	// Render column headers with matching alignment
 	headerQueue, headerName, headerDuration := FormatHeaderColumns(widths)
 	b.WriteString(m.styles.Header.Render(fmt.Sprintf("%s   %s  %s\n", headerQueue, headerName, headerDuration)))
 	b.WriteString("\n")
 
-	// Render each check with aligned columns and error boxes
 	for _, check := range m.checkRuns {
 		checkLine := m.renderCheckRun(check, widths)
 		b.WriteString(checkLine)
 
-		// Render error annotations box for failed jobs
 		if (check.Conclusion == "failure" || check.Conclusion == "timed_out") && len(check.Annotations) > 0 {
 			b.WriteString(m.renderErrorBox(check, widths))
 		}
 	}
 
-	// Footer
 	b.WriteString("\n")
 
 	if m.rateLimitRemaining < 100 {
@@ -79,12 +65,11 @@ func (m Model) View() string {
 
 	b.WriteString("\n")
 
-	// Only show quit message if not quitting
 	if !m.quitting {
 		b.WriteString("\nPress q to quit\n")
 	}
 
-	return b.String()
+	return tea.NewView(b.String())
 }
 
 // renderErrorBox displays error annotations for failed checks
