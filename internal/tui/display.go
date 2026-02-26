@@ -87,7 +87,12 @@ func FormatCheckName(check ghclient.CheckRunInfo) string {
 func FormatCheckNameWithTruncate(check ghclient.CheckRunInfo, maxWidth int) string {
 	name := FormatCheckName(check)
 	if len(name) > maxWidth {
-		return name[:maxWidth-1] + "…"
+		ellipsis := "…"
+		truncateAt := maxWidth - len(ellipsis)
+		if truncateAt < 0 {
+			truncateAt = 0
+		}
+		return name[:truncateAt] + ellipsis
 	}
 	return name
 }
@@ -106,7 +111,11 @@ func FormatLink(url, text string) string {
 // len()-based width measurement stays accurate for the rest of the line.
 func BuildNameColumn(check ghclient.CheckRunInfo, widths ColumnWidths, enableLinks bool) string {
 	name := FormatCheckNameWithTruncate(check, widths.NameWidth)
-	padding := strings.Repeat(" ", widths.NameWidth-len(name))
+	paddingLen := widths.NameWidth - len(name)
+	if paddingLen < 0 {
+		paddingLen = 0
+	}
+	padding := strings.Repeat(" ", paddingLen)
 	if enableLinks && check.DetailsURL != "" {
 		return FormatLink(check.DetailsURL, name) + padding
 	}
