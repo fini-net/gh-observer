@@ -58,7 +58,7 @@ func (m Model) View() tea.View {
 
 		fmt.Fprintf(debugWriter, "DEBUG view %q summary=%q\n", check.Name, check.Summary)
 
-		if check.Summary != "" {
+		if check.Summary != "" && (check.Conclusion == "failure" || check.Conclusion == "timed_out") {
 			b.WriteString(m.renderSummary(check, widths))
 		}
 
