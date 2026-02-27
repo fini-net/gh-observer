@@ -2,8 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -11,8 +9,6 @@ import (
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
 )
-
-var debugWriter io.Writer = os.Stderr
 
 // View renders the current state
 func (m Model) View() tea.View {
@@ -55,8 +51,6 @@ func (m Model) View() tea.View {
 	for _, check := range m.checkRuns {
 		checkLine := m.renderCheckRun(check, widths)
 		b.WriteString(checkLine)
-
-		fmt.Fprintf(debugWriter, "DEBUG view %q summary=%q\n", check.Name, check.Summary)
 
 		if check.Summary != "" && (check.Conclusion == "failure" || check.Conclusion == "timed_out") {
 			b.WriteString(m.renderSummary(check, widths))
