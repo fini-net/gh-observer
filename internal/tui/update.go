@@ -65,7 +65,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ChecksUpdateMsg:
 		if msg.Err != nil {
-			// Network errors shouldn't be fatal - continue polling
 			m.err = msg.Err
 			return m, nil
 		}
@@ -73,9 +72,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.checkRuns = msg.CheckRuns
 		m.rateLimitRemaining = msg.RateLimitRemaining
 		m.lastUpdate = time.Now()
-		m.err = nil // Clear any previous errors
+		m.err = nil
 
-		// Check if all checks are complete
 		if allChecksComplete(m.checkRuns) {
 			m.exitCode = determineExitCode(m.checkRuns)
 			m.quitting = true

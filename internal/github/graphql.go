@@ -22,7 +22,7 @@ type Annotation struct {
 type CheckRunInfo struct {
 	Name         string
 	WorkflowName string
-	Description  string
+	Summary      string
 	Status       string
 	Conclusion   string
 	StartedAt    *time.Time
@@ -44,7 +44,7 @@ type pullRequestQuery struct {
 									Typename        string `graphql:"__typename"`
 									CheckRunContext struct {
 										Name        string
-										Description string
+										Summary     string
 										Status      string
 										Conclusion  string
 										StartedAt   githubv4.DateTime
@@ -71,6 +71,12 @@ type pullRequestQuery struct {
 											}
 										}
 									} `graphql:"... on CheckRun"`
+									StatusContext struct {
+										Context     string
+										Description string
+										State       string
+										TargetURL   string `graphql:"targetUrl"`
+									} `graphql:"... on StatusContext"`
 								}
 							} `graphql:"contexts(first: 100)"`
 						}
@@ -112,7 +118,36 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 		contexts := commit.Commit.StatusCheckRollup.Contexts.Nodes
 
 		for _, context := range contexts {
-			// Only process CheckRun types (not StatusContext)
+			if context.Typename == "StatusContext" {
+				statusContext := context.StatusContext
+				state := strings.ToLower(statusContext.State)
+
+				var status, conclusion string
+				switch state {
+				case "success":
+					status = "completed"
+					conclusion = "success"
+				case "error", "failure":
+					status = "completed"
+					conclusion = "failure"
+				case "pending":
+					status = "queued"
+					conclusion = ""
+				default:
+					status = "queued"
+					conclusion = ""
+				}
+
+				checkRuns = append(checkRuns, CheckRunInfo{
+					Name:       statusContext.Context,
+					Summary:    statusContext.Description,
+					Status:     status,
+					Conclusion: conclusion,
+					DetailsURL: statusContext.TargetURL,
+				})
+				continue
+			}
+
 			if context.Typename != "CheckRun" {
 				continue
 			}
@@ -120,7 +155,6 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 			checkRun := context.CheckRunContext
 			workflowName := ""
 
-			// Extract workflow name if available
 			if checkRun.CheckSuite.WorkflowRun.Workflow.Name != "" {
 				workflowName = checkRun.CheckSuite.WorkflowRun.Workflow.Name
 			}
@@ -135,7 +169,6 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 				completedAt = &t
 			}
 
-			// Extract annotations (error/warning messages)
 			var annotations []Annotation
 			for _, ann := range checkRun.Annotations.Nodes {
 				annotations = append(annotations, Annotation{
@@ -150,7 +183,7 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 			checkRuns = append(checkRuns, CheckRunInfo{
 				Name:         checkRun.Name,
 				WorkflowName: workflowName,
-				Description:  checkRun.Description,
+				Summary:      checkRun.Summary,
 				Status:       strings.ToLower(checkRun.Status),
 				Conclusion:   strings.ToLower(checkRun.Conclusion),
 				StartedAt:    startedAt,
