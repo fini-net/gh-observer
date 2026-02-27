@@ -22,6 +22,7 @@ type Annotation struct {
 type CheckRunInfo struct {
 	Name         string
 	WorkflowName string
+	Description  string
 	Status       string
 	Conclusion   string
 	StartedAt    *time.Time
@@ -43,6 +44,7 @@ type pullRequestQuery struct {
 									Typename        string `graphql:"__typename"`
 									CheckRunContext struct {
 										Name        string
+										Description string
 										Status      string
 										Conclusion  string
 										StartedAt   githubv4.DateTime
@@ -148,6 +150,7 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 			checkRuns = append(checkRuns, CheckRunInfo{
 				Name:         checkRun.Name,
 				WorkflowName: workflowName,
+				Description:  checkRun.Description,
 				Status:       strings.ToLower(checkRun.Status),
 				Conclusion:   strings.ToLower(checkRun.Conclusion),
 				StartedAt:    startedAt,
