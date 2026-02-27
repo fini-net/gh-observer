@@ -27,5 +27,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VALIDATE_GO: false
+          VALIDATE_GO_MODULES: false
           VALIDATE_CHECKOV: false
-          VALIDATE_PRETTIER: false
+          VALIDATE_JSON_PRETTIER: false
+          VALIDATE_MARKDOWN_PRETTIER: false
+          VALIDATE_YAML_PRETTIER: false
