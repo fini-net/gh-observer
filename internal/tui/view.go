@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -9,6 +11,8 @@ import (
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
 )
+
+var debugWriter io.Writer = os.Stderr
 
 // View renders the current state
 func (m Model) View() tea.View {
@@ -52,6 +56,12 @@ func (m Model) View() tea.View {
 		checkLine := m.renderCheckRun(check, widths)
 		b.WriteString(checkLine)
 
+		fmt.Fprintf(debugWriter, "DEBUG view %q summary=%q\n", check.Name, check.Summary)
+
+		if check.Summary != "" {
+			b.WriteString(m.renderSummary(check, widths))
+		}
+
 		if (check.Conclusion == "failure" || check.Conclusion == "timed_out") && len(check.Annotations) > 0 {
 			b.WriteString(m.renderErrorBox(check, widths))
 		}
@@ -77,7 +87,6 @@ func (m Model) renderErrorBox(check ghclient.CheckRunInfo, widths ColumnWidths) 
 	var b strings.Builder
 
 	for _, ann := range check.Annotations {
-		// Format the error message
 		var errorMsg string
 		if ann.Message != "" {
 			errorMsg = ann.Message
@@ -90,7 +99,6 @@ func (m Model) renderErrorBox(check ghclient.CheckRunInfo, widths ColumnWidths) 
 			continue
 		}
 
-		// Add file path if available
 		if ann.Path != "" {
 			if ann.StartLine > 0 {
 				errorMsg = fmt.Sprintf("%s:%d - %s", ann.Path, ann.StartLine, errorMsg)
@@ -104,12 +112,20 @@ func (m Model) renderErrorBox(check ghclient.CheckRunInfo, widths ColumnWidths) 
 		b.WriteString("\n")
 	}
 
-	// Add spacing if we rendered any errors
 	if b.Len() > 0 {
 		b.WriteString("\n")
 	}
 
 	return b.String()
+}
+
+// renderDescription displays check description as a dimmed line below the check
+func (m Model) renderSummary(check ghclient.CheckRunInfo, widths ColumnWidths) string {
+	if check.Summary == "" {
+		return ""
+	}
+	indent := widths.QueueWidth + 3
+	return fmt.Sprintf("%s%s\n", strings.Repeat(" ", indent), m.styles.Description.Render(check.Summary))
 }
 
 // renderCheckRun displays a single check run with aligned columns

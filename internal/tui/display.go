@@ -204,3 +204,19 @@ func FormatHeaderColumns(widths ColumnWidths) (string, string, string) {
 
 	return headerQueue, headerName, headerDuration
 }
+
+// FormatDescription truncates description to fit within the total visual width
+func FormatDescription(description string, widths ColumnWidths) string {
+	if description == "" {
+		return ""
+	}
+	totalWidth := widths.QueueWidth + 1 + 1 + widths.NameWidth + 2 + widths.DurationWidth
+	maxLen := totalWidth - 4
+	if maxLen < 20 {
+		maxLen = 20
+	}
+	if len(description) > maxLen {
+		return description[:maxLen-1] + "…"
+	}
+	return description
+}
