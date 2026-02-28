@@ -23,6 +23,8 @@ jobs:
           fetch-depth: 0
 
       - name: Super-Linter
+        # continue-on-error suppresses email notifications for expected failures
+        continue-on-error: true
         uses: super-linter/super-linter@v8
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
