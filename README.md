@@ -23,6 +23,50 @@ The existing `gh pr checks --watch` doesn't show how long checks have been runni
 - 🛡️ **Rate limits** - Backs off automatically when approaching API limits to avoid interruptions
 - ✅ **CI-friendly** - Returns exit codes (0=success, 1=failure) for script automation
 
+## Example Output
+
+```ShellOuptut
+PR #123: Add new feature
+
+Startup Phase (37s elapsed):
+  ⏳ Waiting for Actions to start...
+  💡 GitHub typically takes 30-90s to queue jobs after PR creation
+
+PR #5: 🔶 [claude] /init 21:04:15 UTC
+Updated 0s ago  •  Pushed 43h 8m 11s ago
+
+Startup   Workflow/Job                                Duration
+
+  15s ✗ MarkdownLint / lint                             5s
+   .github:13 - Failed with exit code: 1
+   CLAUDE.md:100 - Lists should be surrounded by blank lines: CLAUDE.md:100 MD032/blanks-around-lists Lists should be surr
+
+  15s ✓ Auto Assign / run                               5s
+  15s ✓ CUE Validation / verify                         6s
+  15s ✓ Checkov / scan                                 27s
+  15s ✓ Claude Code Review / claude-review          3m 52s
+  15s ✓ Lint GitHub Actions workflows / actionlint      8s
+  39s ✓ Checkov                                         2s
+
+Press q to quit
+```
+
+## Example Animations
+
+Thanks to [asciinema](https://asciinema.org/) we can show you:
+
+### PR that was already merged
+
+![animation of checking the GHA status on a merged PR](docs/gh-observer-merged-pr.gif)
+
+### PR that was just created
+
+![animation of watching checks after creating a PR](docs/gh-observer-active-pr.gif)
+
+This was sped up 2x for your viewing pleasure.
+
+In this example, the Claude check fails, illustrating how error log output is integrated alongside the list of jobs.
+
 ## Installation
 
 ### Install precompiled binary
@@ -114,50 +158,6 @@ Precompiled binaries are available for:
 - **Windows**: x86-64 (amd64)
 
 All binaries include supply chain security attestations for verification.
-
-## Example Output
-
-```ShellOuptut
-PR #123: Add new feature
-
-Startup Phase (37s elapsed):
-  ⏳ Waiting for Actions to start...
-  💡 GitHub typically takes 30-90s to queue jobs after PR creation
-
-PR #5: 🔶 [claude] /init 21:04:15 UTC
-Updated 0s ago  •  Pushed 43h 8m 11s ago
-
-Startup   Workflow/Job                                Duration
-
-  15s ✗ MarkdownLint / lint                             5s
-   .github:13 - Failed with exit code: 1
-   CLAUDE.md:100 - Lists should be surrounded by blank lines: CLAUDE.md:100 MD032/blanks-around-lists Lists should be surr
-
-  15s ✓ Auto Assign / run                               5s
-  15s ✓ CUE Validation / verify                         6s
-  15s ✓ Checkov / scan                                 27s
-  15s ✓ Claude Code Review / claude-review          3m 52s
-  15s ✓ Lint GitHub Actions workflows / actionlint      8s
-  39s ✓ Checkov                                         2s
-
-Press q to quit
-```
-
-## Example Animations
-
-Thanks to [asciinema](https://asciinema.org/) we can show you:
-
-### PR that was already merged
-
-![animation of checking the GHA status on a merged PR](docs/gh-observer-merged-pr.gif)
-
-### PR that was just created
-
-![animation of watching checks after creating a PR](docs/gh-observer-active-pr.gif)
-
-This was sped up 2x for your viewing pleasure.
-
-In this example, the Claude check fails, illustrating how error log output is integrated alongside the list of jobs.
 
 ## Development
 
