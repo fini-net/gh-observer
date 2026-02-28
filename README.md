@@ -25,7 +25,7 @@ The existing `gh pr checks --watch` doesn't show how long checks have been runni
 
 ## Example Output
 
-```ShellOuptut
+```ShellOutput
 PR #123: Add new feature
 
 Startup Phase (37s elapsed):
