@@ -186,7 +186,9 @@ Built with:
 - [go-github](https://github.com/google/go-github) - GitHub API client
 - [Viper](https://github.com/spf13/viper) - Configuration management
 
-See `CLAUDE.md` for detailed implementation notes.
+See `CLAUDE.md` for detailed implementation notes.  Read the [linear walkthrough](docs/linear-walkthrough.md)
+to get a detailed walkthrough of the code and to learn why some
+of the design choices were made.
 
 ## Contributing
 
