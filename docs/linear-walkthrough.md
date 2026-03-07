@@ -67,6 +67,7 @@ Calls `internal/config/config.go:24` which:
 5. Unmarshals into `Config` struct
 
 **Config Structure** (`internal/config/config.go:18-22`):
+
 ```go
 type Config struct {
     RefreshInterval time.Duration `mapstructure:"refresh_interval"`
@@ -93,17 +94,20 @@ Creates Lipgloss styles for rendering colored output. See [`internal/tui/styles.
 Two scenarios:
 
 **Explicit PR Number** (provided as argument):
+
 ```go
 n, err := strconv.Atoi(args[0])
 prNumber = n
 ```
 
 **Auto-detection** (no argument):
+
 ```go
 n, err := ghclient.GetCurrentPR()
 ```
 
 Calls `internal/github/pr.go:25` which runs:
+
 ```bash
 gh pr view --json number --jq .number
 ```
@@ -125,6 +129,7 @@ Located at `internal/github/pr.go:41`. Workflow:
 3. Returns `(owner, repo, error)`
 
 **Implementation Detail** (`internal/github/pr.go:52-66`):
+
 - Uses two regex patterns with optional `.git` suffix
 - Trims trailing slashes for normalization
 - Returns clear error if URL format unrecognized
@@ -235,6 +240,7 @@ checkRuns, _, err := ghclient.FetchCheckRunsGraphQL(ctx, token, owner, repo, prN
 ```
 
 Returns `[]CheckRunInfo` with enriched data (see `internal/github/graphql.go:22-32`):
+
 ```go
 type CheckRunInfo struct {
     Name         string
@@ -303,7 +309,8 @@ for _, check := range checkRuns {
 ```
 
 **Output Format**:
-```
+
+```text
 Startup     Workflow/Job        Duration
 
 42s    ✓ Build / test          2m 15s
@@ -313,6 +320,7 @@ Startup     Workflow/Job        Duration
 #### Step 6: Exit Code Determination
 
 Snapshot mode returns:
+
 - **0**: All checks passed, no checks, or not all checks complete
 - **1**: Any check has conclusion `failure`, `timed_out`, or `action_required`
 
@@ -413,6 +421,7 @@ func (m Model) Init() tea.Cmd {
 ```
 
 Returns three commands that run concurrently:
+
 1. **Spinner tick**: Animates the loading indicator
 2. **PR info fetch**: Gets PR title, SHA, timestamps (REST API call)
 3. **Tick timer**: Schedules periodic polling
@@ -487,6 +496,7 @@ case TickMsg:
 **Rate Limiting**: If remaining API calls < 10, triple the poll interval to avoid hitting rate limits.
 
 **Two commands returned**:
+
 1. Fetch check runs (GraphQL)
 2. Schedule next tick
 
@@ -533,6 +543,7 @@ case ChecksUpdateMsg:
 ```
 
 **Critical Logic**:
+
 1. Stores updated check runs
 2. Triggers render (via return)
 3. **Automatically exits** when all checks complete
@@ -575,6 +586,7 @@ func determineExitCode(checks []ghclient.CheckRunInfo) int {
 ```
 
 **Failure Conditions**:
+
 - `failure`: Check explicitly failed
 - `timed_out`: Check exceeded time limit
 - `action_required`: Manual approval needed (treated as failure for CI purposes)
@@ -685,6 +697,7 @@ commit, _, err := client.Repositories.GetCommit(ctx, owner, repo, headSHA, nil)
 ```
 
 **Why two API calls?** PR metadata doesn't include commit timestamps. We need to:
+
 1. Get PR info (title, SHA, creation time)
 2. Get commit info (committer timestamp)
 
@@ -720,6 +733,7 @@ func QueueLatency(commitTime time.Time, check ghclient.CheckRunInfo) time.Durati
 **Measures**: Time from commit push to check start.
 
 **Example**:
+
 - User pushes commit at 12:00:00
 - GitHub queues the job
 - Check starts running at 12:00:42
@@ -741,6 +755,7 @@ func Runtime(check ghclient.CheckRunInfo) time.Duration {
 **Measures**: Elapsed time for currently running checks.
 
 **Example**:
+
 - Check started at 12:01:00
 - Current time is 12:03:15
 - Runtime = 2m 15s (updates every render)
@@ -761,6 +776,7 @@ func FinalDuration(check ghclient.CheckRunInfo) time.Duration {
 **Measures**: Total runtime for completed checks.
 
 **Example**:
+
 - Check started at 12:01:00
 - Check completed at 12:03:30
 - Final duration = 2m 30s (static value)
@@ -792,6 +808,7 @@ func FormatDuration(d time.Duration) string {
 ```
 
 **Output Examples**:
+
 - 45s → `45s`
 - 125s → `2m 5s`
 - 3725s → `1h 2m 5s`
@@ -895,6 +912,7 @@ func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime tim
 ```
 
 **Algorithm**:
+
 1. Start with minimum widths
 2. Scan all check runs
 3. Expand columns to fit longest values
@@ -914,10 +932,12 @@ func FormatCheckName(check ghclient.CheckRunInfo) string {
 ```
 
 **Display Patterns**:
+
 - Modern check run: `"CI / test"` (workflow: CI, job: test)
 - Legacy check run: `"Travis CI"` (no workflow, just name)
 
 **Truncation** (`display.go:87-98`):
+
 ```go
 func FormatCheckNameWithTruncate(check ghclient.CheckRunInfo, maxWidth int) string {
     name := FormatCheckName(check)
@@ -958,6 +978,7 @@ func GetCheckIcon(status, conclusion string) string {
 ```
 
 **Icon Rationale**:
+
 - ✓ (checkmark): Success
 - ✗ (cross mark): Failure
 - ⊗ (circled times): Cancelled
@@ -1003,6 +1024,7 @@ func BuildNameColumn(check ghclient.CheckRunInfo, widths ColumnWidths, enableLin
 ```
 
 **Critical Detail**: Padding is added **outside** the hyperlink. This ensures:
+
 - Visible text is exactly `widths.NameWidth` characters
 - Terminal hyperlink only wraps the name, not the trailing spaces
 - Alignment works correctly with OSC 8 sequences
@@ -1037,12 +1059,14 @@ func FormatAlignedColumns(queueText, nameText, durationText string, widths Colum
 ```
 
 **Column Alignment**:
+
 - Queue latency: Right-aligned (numbers line up on right)
 - Name: Left-aligned (text flows naturally)
 - Duration: Right-aligned (numbers line up on right)
 
 **Output Format**:
-```
+
+```text
 Queue     Name                     Duration
 ─────────────────────────────────────────────
   42s  ✓  Build / test           2m 15s
@@ -1086,7 +1110,8 @@ func (m Model) renderErrorBox(check ghclient.CheckRunInfo, widths ColumnWidths) 
 ```
 
 **Example Output**:
-```
+
+```text
 1m 5s  ✗  Test Suite / unit tests  5m 30s
   ┃ src/parser_test.go:42 - undefined: TestData
   ┃ src/parser_test.go:57 - unused variable 'result'
@@ -1121,6 +1146,7 @@ func (m Model) renderStartupPhase() string {
 ```
 
 **Phased Messaging**:
+
 1. **0-2 minutes**: Helpful "Startup Phase" with spinner
 2. **2-3 minutes**: "Still waiting" warning
 3. **>3 minutes**: "No checks found" (likely no workflows)
@@ -1173,6 +1199,7 @@ if err != nil {
 ```
 
 **Causes**:
+
 - Not on a PR branch (local branch with no PR)
 - `gh` CLI not installed
 - Not authenticated with `gh auth login`
@@ -1186,6 +1213,7 @@ if err != nil {
 **TUI mode**: Shows "Startup Phase" message with helpful guidance.
 
 **Why treat as success?** Empty check list isn't a failure condition. The PR might:
+
 - Be brand new (checks starting up)
 - Have no workflows (legitimate configuration)
 - Have skipped workflows (workflow conditions not met)
@@ -1203,6 +1231,7 @@ if m.rateLimitRemaining < 10 {
 **Why 10?** Provides buffer to avoid hitting 0, which would cause errors.
 
 **Rate Limit Display** (`view.go:66-69`):
+
 ```go
 if m.rateLimitRemaining < 100 {
     b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
@@ -1243,7 +1272,7 @@ func QueueLatency(commitTime time.Time, check ghclient.CheckRunInfo) time.Durati
 
 ### Snapshot Mode Flow
 
-```
+```text
 main.go:113 run()
     │
     ├── config.Load()                               [internal/config/config.go:24]
@@ -1295,7 +1324,7 @@ main.go:113 run()
 
 ### TUI Mode Flow
 
-```
+```text
 main.go:173 (TUI mode)
     │
     ├── tui.NewModel()                              [internal/tui/model.go:57]
@@ -1345,7 +1374,7 @@ main.go:173 (TUI mode)
 
 ### State Transitions
 
-```
+```text
 Initial State (Model created)
     │
     ├─> Loading PR Info (Init() → fetchPRInfo())
@@ -1392,7 +1421,7 @@ return 0  // Fallback if type assertion fails
 **Exit Code Semantics**:
 
 | Code | Meaning | Example |
-|------|---------|---------|
+| ---- | ------- | ------- |
 | 0 | Success | All checks passed |
 | 0 | No checks | PR has no workflows (snapshot mode) |
 | 0 | Incomplete checks | Checks still running (snapshot mode) |
@@ -1401,13 +1430,13 @@ return 0  // Fallback if type assertion fails
 | 1 | Network error | Failed to fetch PR info (TUI mode initialization) |
 | 1 | Invalid input | Bad PR number argument |
 
-### Exit Code Determination (`internal/tui/update.go:158-165`)
+### Exit Code Determination for TUI Mode
 
 ```go
 func determineExitCode(checks []ghclient.CheckRunInfo) int {
     for _, check := range checks {
-        if check.Conclusion == "failure" || 
-           check.Conclusion == "timed_out" || 
+        if check.Conclusion == "failure" ||
+           check.Conclusion == "timed_out" ||
            check.Conclusion == "action_required" {
             return 1
         }
@@ -1417,11 +1446,13 @@ func determineExitCode(checks []ghclient.CheckRunInfo) int {
 ```
 
 **Failure Conditions**:
+
 - `failure`: Test failures, build errors, etc.
 - `timed_out`: GitHub Actions timeout (default 6 hours)
 - `action_required`: Waiting for manual approval (e.g., environment protection rules)
 
 **Success Conditions**:
+
 - `success`: All steps passed
 - `cancelled`: User manually cancelled (treated as non-failure)
 - `skipped`: Job skipped due to conditions (treated as non-failure)
@@ -1448,6 +1479,7 @@ func allChecksComplete(checks []ghclient.CheckRunInfo) bool {
 **Critical Edge Case**: Empty check list returns `false`, preventing premature exit during startup phase.
 
 **Status Values**:
+
 - `queued`: Job is waiting to run
 - `in_progress`: Job is currently running
 - `completed`: Job finished (check conclusion for result)
