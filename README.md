@@ -71,9 +71,9 @@ error log output is integrated alongside the list of jobs.
 ![animation of watching checks after creating a PR with GHAs that use descriptions](docs/gh-observer-descriptions.gif)
 
 The [Super-Linter](https://github.com/super-linter/super-linter) and a few other
-Github Actions utilize the description field to convey success or failure.  Our
+GitHub Actions utilize the description field to convey success or failure.  Our
 extension doesn't show descriptions for successful checks and displays them for
-cases with errors to be consistant with the Github Actions that make it easier
+cases with errors to be consistent with the GitHub Actions that make it easier
 to show the right bit of the logs.  Since we don't try to show the logs for
 super-linter, you're "stuck" clicking on the title of the job in your terminal
 and it will open up in your favorite web browser.
