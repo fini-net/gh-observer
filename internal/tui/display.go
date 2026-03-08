@@ -86,15 +86,38 @@ func FormatCheckName(check ghclient.CheckRunInfo) string {
 // FormatCheckNameWithTruncate formats the check name and truncates if needed
 func FormatCheckNameWithTruncate(check ghclient.CheckRunInfo, maxWidth int) string {
 	name := FormatCheckName(check)
-	if len(name) > maxWidth {
-		ellipsis := "…"
-		truncateAt := maxWidth - len(ellipsis)
-		if truncateAt < 0 {
-			truncateAt = 0
-		}
-		return name[:truncateAt] + ellipsis
+	if len(name) <= maxWidth {
+		return name
 	}
-	return name
+
+	ellipsis := "…"
+
+	// If there's a workflow name, try to preserve "Workflow / " structure
+	if check.WorkflowName != "" {
+		prefix := check.WorkflowName + " / "
+		prefixLen := len(prefix)
+
+		// If even the prefix alone exceeds maxWidth, truncate the whole string
+		if prefixLen >= maxWidth {
+			if maxWidth <= 1 {
+				return ellipsis[:maxWidth]
+			}
+			return name[:maxWidth-1] + ellipsis
+		}
+
+		// Truncate just the job name part, leaving room for ellipsis
+		availableWidth := maxWidth - prefixLen - 1 // -1 for ellipsis display cell
+		if availableWidth <= 0 {
+			return prefix[:maxWidth-1] + ellipsis
+		}
+		return prefix + check.Name[:availableWidth] + ellipsis
+	}
+
+	// No workflow name - simple truncation
+	if maxWidth <= 1 {
+		return ellipsis[:maxWidth]
+	}
+	return name[:maxWidth-1] + ellipsis
 }
 
 // FormatLink wraps text in an OSC 8 terminal hyperlink
