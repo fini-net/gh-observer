@@ -9,7 +9,6 @@ keywords = ["github-actions", "github-cli-extension"]
 tags = ["github", "programming"]
 ShowToc = true
 +++
-# 
 
 Look, I know what you're thinking: "Another dev scratched their own itch and
 now they want to tell me about it." Guilty. But hear me out, because this
