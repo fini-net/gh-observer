@@ -188,7 +188,7 @@ func FormatHeaderColumns(widths ColumnWidths) (string, string, string) {
 	if queuePad < 0 {
 		queuePad = 0
 	}
-	headerQueue := strings.Repeat(" ", queuePad) + "Startup"
+	headerQueue := strings.Repeat(" ", queuePad) + "Start"
 
 	namePad := widths.NameWidth - 12
 	if namePad < 0 {
