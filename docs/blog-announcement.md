@@ -175,3 +175,11 @@ great.  Pick your own adventure.
 
 *If you find it useful, a star on the repo goes a long way. And if you find a
 bug, please do tell me so we can fix it rather than quietly suffering.*
+
+## Embedded metadata
+
+- I tried Claude and OpenCode for writing drafts for this.  Claude was much
+  closer to what I wanted.  Most of my changes were things that needed to be
+  corrected elsewhere in the docs.  You can see the drafts I started from at
+  <https://github.com/fini-net/gh-observer/tree/main/docs/drafts> .
+- This will get cross-posted on linked-in.
