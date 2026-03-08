@@ -24,7 +24,7 @@ doesn't. And when it finally does start showing me checks, I'm staring at a
 list of job names with no idea whether that `3m 52s` I've been waiting is
 normal or a sign that something's silently wedged.
 
-The standard `gh pr checks --watch` has had somereal gaps for a while now:
+The standard `gh pr checks --watch` has had some real gaps for a while now:
 
 - **It doesn't handle startup delay.** GitHub Actions typically takes 30-90
   seconds to queue jobs after a PR is created or pushed to. The built-in
@@ -116,12 +116,6 @@ toolchain required:
 
 ```bash
 gh extension install fini-net/gh-observer
-```
-
-Or if you've got Go and want to install it that way:
-
-```bash
-go install github.com/fini-net/gh-observer@latest
 ```
 
 Precompiled binaries exist for macOS (Intel and Apple Silicon), Linux (x86-64
