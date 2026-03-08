@@ -66,7 +66,7 @@ Thanks to [asciinema](https://asciinema.org/) we can show you:
 This was sped up 2x.  In this example, the Claude check fails, illustrating how
 error log output is integrated alongside the list of jobs.
 
-### PR that was just created with GHAs that use desciptions
+### PR that was just created with GHAs that use descriptions
 
 ![animation of watching checks after creating a PR with GHAs that use descriptions](docs/gh-observer-descriptions.gif)
 
