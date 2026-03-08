@@ -106,20 +106,23 @@ just build
 ### Auto-detect PR from current branch
 
 ```bash
-gh-observer
+gh observer
 ```
 
 ### Watch specific PR
 
 ```bash
-gh-observer 123
+gh observer 123
 ```
 
 ### Use in CI pipelines
 
+Our primary focus is on improving the interactive experience, but we also
+set the `exit` code for the process in a potentially useful way.
+
 ```bash
 # Wait for checks to complete and exit with their status
-gh-observer && echo "All checks passed!"
+gh observer && echo "All checks passed!"
 ```
 
 ## Configuration
@@ -164,11 +167,11 @@ All binaries include supply chain security attestations for verification.
 This project uses [just](https://github.com/casey/just) for task automation:
 
 ```bash
-# Build the binary
+# Build the binary and install locally as gh extension
 just build
 
 # Run on current PR
-./gh-observer
+gh observer
 
 # Create a PR
 just pr
