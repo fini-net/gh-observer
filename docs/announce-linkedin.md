@@ -20,7 +20,7 @@ difference between "slow" and "broken."
 
 It looks like this:
 
-```
+```ShellOutput
 PR #5: 🔶 [claude] /init 21:04:15 UTC
 
 Startup  Workflow/Job                              Duration
@@ -44,15 +44,15 @@ Also ships with:
 
 No Go toolchain needed — just install via gh CLI extensions:
 
-```
+```bash
 gh extension install fini-net/gh-observer
 ```
 
 macOS, Linux, and Windows binaries available, all with build attestations.
 
-Full writeup on the blog: https://www.chicks.net/posts/2026-03-08-announce-gh-observer/
+Full writeup on the blog: <https://www.chicks.net/posts/2026-03-08-announce-gh-observer/>
 
-Code at: https://github.com/fini-net/gh-observer
+Code at: <https://github.com/fini-net/gh-observer>
 
 Stars and bug reports both welcome. It's turtles all the way down — gh-observer
 was partially built using gh-observer to watch its own CI.
