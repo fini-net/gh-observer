@@ -1,3 +1,5 @@
+Read final form at <https://www.chicks.net/posts/2026-03-08-announce-gh-observer/>
+
 +++
 title = 'Announcing gh-observer: Because Waiting for CI Should Not Be a Mystery'
 date = 2026-03-08T02:00:00-00:00
