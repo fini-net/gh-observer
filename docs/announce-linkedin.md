@@ -57,4 +57,4 @@ Code at: <https://github.com/fini-net/gh-observer>
 Stars and bug reports both welcome. It's turtles all the way down — gh-observer
 was partially built using gh-observer to watch its own CI.
 
-#GitHub #GitHubActions #DevTools #OpenSource #Go #DeveloperExperience
+ #GitHub #GitHubActions #DevTools #OpenSource #Go #DeveloperExperience
