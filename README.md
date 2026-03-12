@@ -122,11 +122,24 @@ just build
 gh observer
 ```
 
-### Watch specific PR
+### Watch specific PR in current repo
 
 ```bash
 gh observer 123
 ```
+
+### Watch external PR by URL
+
+You can watch checks on any public PR by passing the full URL - no need to clone the repo:
+
+```bash
+gh observer https://github.com/StackExchange/dnscontrol/pull/3941
+```
+
+This works for any GitHub PR URL and is useful for:
+- Reviewing checks on a colleague's PR in another repo
+- Monitoring upstream dependencies before merging
+- Following CI status on projects you don't have cloned locally
 
 ### Use in CI pipelines
 

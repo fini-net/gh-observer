@@ -65,6 +65,20 @@ func parseOwnerRepoFromURL(url string) (string, string, error) {
 	return "", "", fmt.Errorf("unable to parse owner/repo from remote URL: %s", url)
 }
 
+// ParsePRURL extracts owner, repo, and PR number from a GitHub PR URL
+func ParsePRURL(prURL string) (owner, repo string, prNumber int, err error) {
+	pattern := regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)$`)
+	matches := pattern.FindStringSubmatch(prURL)
+	if len(matches) != 4 {
+		return "", "", 0, fmt.Errorf("invalid PR URL: %s (expected https://github.com/owner/repo/pull/NNN)", prURL)
+	}
+	prNum, err := strconv.Atoi(matches[3])
+	if err != nil {
+		return "", "", 0, fmt.Errorf("invalid PR number: %w", err)
+	}
+	return matches[1], matches[2], prNum, nil
+}
+
 // FetchPRInfo retrieves metadata about a pull request
 func FetchPRInfo(ctx context.Context, client *github.Client, owner, repo string, prNumber int) (*PRInfo, error) {
 	pr, _, err := client.PullRequests.Get(ctx, owner, repo, prNumber)
