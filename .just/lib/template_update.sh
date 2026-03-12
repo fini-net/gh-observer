@@ -133,9 +133,9 @@ process_file() {
         echo -e "  ${BLUE}↓${NORMAL} $filepath - new file, downloading"
         if download_file "$filepath"; then
             echo -e "      ${GREEN}Downloaded successfully${NORMAL}"
-            ((downloaded_new_count++))
+            ((downloaded_new_count++)) || true
         else
-            ((failed_count++))
+            ((failed_count++)) || true
         fi
         return
     fi
@@ -147,7 +147,7 @@ process_file() {
     # Check if already at latest
     if [[ "$local_checksum" == "$latest_checksum" ]]; then
         echo -e "  ${GREEN}✓${NORMAL} $filepath - already at latest${NORMAL}"
-        ((skipped_current_count++))
+        ((skipped_current_count++)) || true
         return
     fi
 
@@ -165,7 +165,7 @@ process_file() {
 
     if [[ "$match_found" == false ]]; then
         echo -e "  ${YELLOW}⚠${NORMAL} $filepath - has local modifications, skipping"
-        ((skipped_modified_count++))
+        ((skipped_modified_count++)) || true
         return
     fi
 
@@ -178,9 +178,9 @@ process_file() {
     echo -e "  ${BLUE}⬆${NORMAL} $filepath - updating${version_info}"
     if download_file "$filepath"; then
         echo -e "      ${GREEN}Updated successfully${NORMAL}"
-        ((updated_count++))
+        ((updated_count++)) || true
     else
-        ((failed_count++))
+        ((failed_count++)) || true
     fi
 }
 

@@ -13,7 +13,7 @@ sync:
     git pull
     git status --porcelain # stp
 
-# PR create v5.5
+# PR create v5.7
 [group('Process')]
 pr: _has_commits && pr_checks
     #!/usr/bin/env bash
@@ -216,10 +216,17 @@ release rel_version:
 
 # watch GHAs then check for Copilot suggestions
 [group('Process')]
-pr_checks: _wait_for_checks && claude_review
+pr_checks: && claude_review
     #!/usr/bin/env bash
 
-    gh pr checks --watch -i 5
+    # Use gh observer if installed, otherwise fall back to gh pr checks --watch
+    if gh observer --help >/dev/null 2>&1; then
+        echo ""
+        gh observer
+    else
+        just _wait_for_checks
+        gh pr checks --watch -i 5
+    fi
     echo "" # blank line for visual space
 
     # Load repo metadata for conditional display
