@@ -18,6 +18,21 @@ type Annotation struct {
 	AnnotationLevel string
 }
 
+// JobDurationInfo holds the duration data for a single job execution
+type JobDurationInfo struct {
+	WorkflowName string
+	JobName      string
+	Duration     time.Duration
+}
+
+// HistoricalJobRun holds data for a completed job run used for average calculation
+type HistoricalJobRun struct {
+	WorkflowName string
+	JobName      string
+	StartedAt    *time.Time
+	CompletedAt  *time.Time
+}
+
 // CheckRunInfo contains enriched check run data with workflow name
 type CheckRunInfo struct {
 	Name         string
@@ -195,4 +210,127 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 	}
 
 	return checkRuns, query.RateLimit.Remaining, nil
+}
+
+// workflowRunsQuery fetches recent workflow runs with their jobs
+type workflowRunsQuery struct {
+	Repository struct {
+		WorkflowRuns struct {
+			Nodes []struct {
+				Workflow struct {
+					Name string
+				}
+				Status     string
+				Conclusion string
+				Jobs       struct {
+					Nodes []struct {
+						Name        string
+						Status      string
+						Conclusion  string
+						StartedAt   githubv4.DateTime
+						CompletedAt githubv4.DateTime
+					}
+				} `graphql:"jobs(first: 100)"`
+			}
+		} `graphql:"workflowRuns(first: $limit, orderBy: {field: CREATED_AT, direction: DESC})"`
+	} `graphql:"repository(owner: $owner, name: $repo)"`
+	RateLimit struct {
+		Remaining int
+	}
+}
+
+// FetchHistoricalJobDurations fetches recent completed job runs for average calculation
+// Returns a slice of JobDurationInfo grouped by job name, and the rate limit remaining
+func FetchHistoricalJobDurations(ctx context.Context, token, owner, repo string, limit int) ([]JobDurationInfo, int, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	src := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
+	httpClient := oauth2.NewClient(ctx, src)
+	client := githubv4.NewClient(httpClient)
+
+	var query workflowRunsQuery
+	variables := map[string]interface{}{
+		"owner": githubv4.String(owner),
+		"repo":  githubv4.String(repo),
+		"limit": githubv4.Int(limit),
+	}
+
+	err := client.Query(ctx, &query, variables)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var durations []JobDurationInfo
+
+	for _, run := range query.Repository.WorkflowRuns.Nodes {
+		if run.Status != "completed" || run.Conclusion != "SUCCESS" {
+			continue
+		}
+
+		workflowName := run.Workflow.Name
+
+		for _, job := range run.Jobs.Nodes {
+			if job.Status != "completed" || job.Conclusion != "SUCCESS" {
+				continue
+			}
+
+			if job.StartedAt.Time.IsZero() || job.CompletedAt.Time.IsZero() {
+				continue
+			}
+
+			duration := job.CompletedAt.Time.Sub(job.StartedAt.Time)
+			if duration <= 0 {
+				continue
+			}
+
+			durations = append(durations, JobDurationInfo{
+				WorkflowName: workflowName,
+				JobName:      job.Name,
+				Duration:     duration,
+			})
+		}
+	}
+
+	return durations, query.RateLimit.Remaining, nil
+}
+
+// CalculateAverageDurations computes average duration per job from historical runs
+// Returns a map keyed by "WorkflowName/JobName" or just "JobName"
+func CalculateAverageDurations(durations []JobDurationInfo, maxSamples int) map[string]time.Duration {
+	jobRuns := make(map[string][]time.Duration)
+
+	for _, d := range durations {
+		key := formatJobKey(d.WorkflowName, d.JobName)
+		jobRuns[key] = append(jobRuns[key], d.Duration)
+	}
+
+	averages := make(map[string]time.Duration)
+	for key, runs := range jobRuns {
+		sampleCount := len(runs)
+		if maxSamples > 0 && sampleCount > maxSamples {
+			sampleCount = maxSamples
+		}
+
+		var total time.Duration
+		count := 0
+		for i := 0; i < sampleCount && i < len(runs); i++ {
+			total += runs[i]
+			count++
+		}
+
+		if count > 0 {
+			averages[key] = total / time.Duration(count)
+		}
+	}
+
+	return averages
+}
+
+func formatJobKey(workflowName, jobName string) string {
+	if workflowName != "" {
+		return workflowName + " / " + jobName
+	}
+	return jobName
 }

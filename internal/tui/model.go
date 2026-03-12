@@ -25,6 +25,11 @@ type Model struct {
 	// Check runs
 	checkRuns []ghclient.CheckRunInfo
 
+	// Historical averages (keyed by "WorkflowName/JobName")
+	historicalAverages   map[string]time.Duration
+	historicalLoaded     bool
+	historicalSampleSize int
+
 	// Rate limiting
 	rateLimitRemaining int
 
@@ -51,24 +56,30 @@ type ColumnWidths struct {
 	QueueWidth    int // Right-aligned queue latency
 	NameWidth     int // Left-aligned check name
 	DurationWidth int // Right-aligned duration
+	AvgWidth      int // Right-aligned average runtime
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool) Model {
+func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, historicalSampleSize int) Model {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
+	if historicalSampleSize <= 0 {
+		historicalSampleSize = 10
+	}
+
 	return Model{
-		ctx:             ctx,
-		token:           token,
-		owner:           owner,
-		repo:            repo,
-		prNumber:        prNumber,
-		spinner:         s,
-		startTime:       time.Now(),
-		lastUpdate:      time.Now(),
-		refreshInterval: refreshInterval,
-		styles:          styles,
-		enableLinks:     enableLinks,
+		ctx:                  ctx,
+		token:                token,
+		owner:                owner,
+		repo:                 repo,
+		prNumber:             prNumber,
+		spinner:              s,
+		startTime:            time.Now(),
+		lastUpdate:           time.Now(),
+		refreshInterval:      refreshInterval,
+		styles:               styles,
+		enableLinks:          enableLinks,
+		historicalSampleSize: historicalSampleSize,
 	}
 }
 

@@ -74,12 +74,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastUpdate = time.Now()
 		m.err = nil
 
+		// Trigger historical average fetch once on first check load (lazy loading)
+		if !m.historicalLoaded && len(msg.CheckRuns) > 0 && m.rateLimitRemaining > 100 {
+			return m, tea.Batch(
+				fetchHistoricalAverages(m.ctx, m.token, m.owner, m.repo, m.historicalSampleSize),
+			)
+		}
+
 		if allChecksComplete(m.checkRuns) {
 			m.exitCode = determineExitCode(m.checkRuns)
 			m.quitting = true
 			return m, tea.Quit
 		}
 
+		return m, nil
+
+	case HistoricalAvgMsg:
+		if msg.Err == nil {
+			m.historicalAverages = msg.Averages
+			m.historicalLoaded = true
+			if msg.RateLimitRemaining > 0 {
+				m.rateLimitRemaining = msg.RateLimitRemaining
+			}
+		}
 		return m, nil
 
 	case ErrorMsg:
@@ -134,6 +151,22 @@ func fetchCheckRuns(ctx context.Context, token, owner, repo string, prNumber int
 
 		return ChecksUpdateMsg{
 			CheckRuns:          checkRuns,
+			RateLimitRemaining: rateLimit,
+		}
+	}
+}
+
+// fetchHistoricalAverages fetches historical job durations for average calculation
+func fetchHistoricalAverages(ctx context.Context, token, owner, repo string, sampleSize int) tea.Cmd {
+	return func() tea.Msg {
+		durations, rateLimit, err := ghclient.FetchHistoricalJobDurations(ctx, token, owner, repo, 50)
+		if err != nil {
+			return HistoricalAvgMsg{Err: err}
+		}
+
+		averages := ghclient.CalculateAverageDurations(durations, sampleSize)
+		return HistoricalAvgMsg{
+			Averages:           averages,
 			RateLimitRemaining: rateLimit,
 		}
 	}

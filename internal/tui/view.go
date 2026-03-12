@@ -42,10 +42,10 @@ func (m Model) View() tea.View {
 		return tea.NewView(b.String() + m.renderStartupPhase())
 	}
 
-	widths := CalculateColumnWidths(m.checkRuns, m.headCommitTime)
+	widths := CalculateColumnWidths(m.checkRuns, m.headCommitTime, m.historicalAverages)
 
-	headerQueue, headerName, headerDuration := FormatHeaderColumns(widths)
-	b.WriteString(m.styles.Header.Render(fmt.Sprintf("%s   %s  %s\n", headerQueue, headerName, headerDuration)))
+	headerQueue, headerName, headerDuration, headerAvg := FormatHeaderColumns(widths)
+	b.WriteString(m.styles.Header.Render(fmt.Sprintf("%s   %s  %s  %s\n", headerQueue, headerName, headerDuration, headerAvg)))
 	b.WriteString("\n")
 
 	for _, check := range m.checkRuns {
@@ -132,6 +132,7 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 	// Get column data (plain text)
 	queueText := FormatQueueLatency(check, m.headCommitTime)
 	durationText := FormatDuration(check)
+	avgText := FormatAverage(check, m.historicalAverages)
 
 	// Determine icon and style
 	icon := GetCheckIcon(status, conclusion)
@@ -159,7 +160,7 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 
 	// Compute queue and duration columns; discard the name return value since
 	// nameCol was already built correctly by BuildNameColumn above.
-	queueCol, _, durationCol := FormatAlignedColumns(queueText, FormatCheckNameWithTruncate(check, widths.NameWidth), durationText, widths)
+	queueCol, _, durationCol, avgCol := FormatAlignedColumns(queueText, FormatCheckNameWithTruncate(check, widths.NameWidth), durationText, avgText, widths)
 
 	// Apply styling to icon and duration
 	styledIcon := style.Render(icon)
@@ -171,8 +172,8 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 		styledName = style.Render(nameCol)
 	}
 
-	// Assemble line: [queue][1 space][icon][1 space][name][2 spaces][duration][newline]
-	return queueCol + " " + styledIcon + " " + styledName + "  " + styledDuration + "\n"
+	// Assemble line: [queue][1 space][icon][1 space][name][2 spaces][duration][2 spaces][avg][newline]
+	return queueCol + " " + styledIcon + " " + styledName + "  " + styledDuration + "  " + avgCol + "\n"
 }
 
 // renderStartupPhase shows helpful message during GitHub Actions startup delay

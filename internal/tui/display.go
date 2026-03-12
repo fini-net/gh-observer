@@ -46,6 +46,15 @@ func FormatDuration(check ghclient.CheckRunInfo) string {
 	}
 }
 
+// FormatAverage returns the average duration or "--" if unavailable
+func FormatAverage(check ghclient.CheckRunInfo, averages map[string]time.Duration) string {
+	key := FormatCheckName(check)
+	if avg, ok := averages[key]; ok && avg > 0 {
+		return timing.FormatDuration(avg)
+	}
+	return "--"
+}
+
 // GetCheckIcon returns the appropriate icon for a check run based on status and conclusion
 func GetCheckIcon(status, conclusion string) string {
 	switch status {
@@ -146,7 +155,7 @@ func BuildNameColumn(check ghclient.CheckRunInfo, widths ColumnWidths, enableLin
 }
 
 // CalculateColumnWidths scans all check runs and determines max width for each column
-func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime time.Time) ColumnWidths {
+func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime time.Time, averages map[string]time.Duration) ColumnWidths {
 	const (
 		minNameWidth = 20
 		maxNameWidth = 60
@@ -157,6 +166,7 @@ func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime tim
 		QueueWidth:    minTimeWidth,
 		NameWidth:     minNameWidth,
 		DurationWidth: minTimeWidth,
+		AvgWidth:      len("--"),
 	}
 
 	for _, check := range checkRuns {
@@ -177,13 +187,18 @@ func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime tim
 		if len(durationText) > widths.DurationWidth {
 			widths.DurationWidth = len(durationText)
 		}
+
+		avgText := FormatAverage(check, averages)
+		if len(avgText) > widths.AvgWidth {
+			widths.AvgWidth = len(avgText)
+		}
 	}
 
 	return widths
 }
 
-// FormatAlignedColumns formats the three columns with proper padding
-func FormatAlignedColumns(queueText, nameText, durationText string, widths ColumnWidths) (string, string, string) {
+// FormatAlignedColumns formats the columns with proper padding
+func FormatAlignedColumns(queueText, nameText, durationText, avgText string, widths ColumnWidths) (string, string, string, string) {
 	queuePadding := widths.QueueWidth - len(queueText)
 	if queuePadding < 0 {
 		queuePadding = 0
@@ -202,12 +217,18 @@ func FormatAlignedColumns(queueText, nameText, durationText string, widths Colum
 	}
 	durationCol := strings.Repeat(" ", durationPadding) + durationText
 
-	return queueCol, nameCol, durationCol
+	avgPadding := widths.AvgWidth - len(avgText)
+	if avgPadding < 0 {
+		avgPadding = 0
+	}
+	avgCol := strings.Repeat(" ", avgPadding) + avgText
+
+	return queueCol, nameCol, durationCol, avgCol
 }
 
 // FormatHeaderColumns formats the column headers with proper padding
-func FormatHeaderColumns(widths ColumnWidths) (string, string, string) {
-	queuePad := widths.QueueWidth - 7
+func FormatHeaderColumns(widths ColumnWidths) (string, string, string, string) {
+	queuePad := widths.QueueWidth - 5
 	if queuePad < 0 {
 		queuePad = 0
 	}
@@ -225,7 +246,13 @@ func FormatHeaderColumns(widths ColumnWidths) (string, string, string) {
 	}
 	headerDuration := strings.Repeat(" ", durationPad) + "Duration"
 
-	return headerQueue, headerName, headerDuration
+	avgPad := widths.AvgWidth - 3
+	if avgPad < 0 {
+		avgPad = 0
+	}
+	headerAvg := strings.Repeat(" ", avgPad) + "Avg"
+
+	return headerQueue, headerName, headerDuration, headerAvg
 }
 
 // FormatDescription truncates description to fit within the total visual width
@@ -233,7 +260,8 @@ func FormatDescription(description string, widths ColumnWidths) string {
 	if description == "" {
 		return ""
 	}
-	totalWidth := widths.QueueWidth + 1 + 1 + widths.NameWidth + 2 + widths.DurationWidth
+	// Total: [queue][space][space][icon][space][name][2 spaces][duration][2 spaces][avg]
+	totalWidth := widths.QueueWidth + 1 + 1 + 1 + widths.NameWidth + 2 + widths.DurationWidth + 2 + widths.AvgWidth
 	maxLen := totalWidth - 4
 	if maxLen < 20 {
 		maxLen = 20

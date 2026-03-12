@@ -26,6 +26,13 @@ type ChecksUpdateMsg struct {
 	Err                error
 }
 
+// HistoricalAvgMsg contains historical average durations
+type HistoricalAvgMsg struct {
+	Averages           map[string]time.Duration
+	RateLimitRemaining int
+	Err                error
+}
+
 // ErrorMsg contains error information
 type ErrorMsg struct {
 	Err error
