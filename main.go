@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -23,11 +24,14 @@ func main() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "gh-observer [PR_NUMBER]",
+	Use:   "gh-observer [PR_NUMBER | PR_URL]",
 	Short: "Watch GitHub PR checks with runtime metrics",
 	Long: `gh-observer is a GitHub PR check watcher CLI tool that improves on 
 'gh pr checks --watch' by showing runtime metrics, queue latency, 
-and better handling of startup delays.`,
+and better handling of startup delays.
+
+Supports watching checks on external repositories by passing a full PR URL:
+  gh-observer https://github.com/owner/repo/pull/123`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		exitCode := run(args)
@@ -129,31 +133,49 @@ func run(args []string) int {
 	)
 
 	// Parse arguments
+	var owner, repo string
 	var prNumber int
+
 	if len(args) > 0 {
-		// PR number provided as argument
-		n, err := strconv.Atoi(args[0])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Invalid PR number: %s\n", args[0])
-			return 1
+		arg := args[0]
+		// Check if argument is a PR URL
+		if strings.Contains(arg, "github.com") && strings.Contains(arg, "/pull/") {
+			// URL provided: parse owner/repo/number from URL
+			owner, repo, prNumber, err = ghclient.ParsePRURL(arg)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to parse PR URL: %v\n", err)
+				return 1
+			}
+		} else {
+			// PR number provided: parse number, get owner/repo from git remote
+			n, err := strconv.Atoi(arg)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Invalid PR number or URL: %s\n", arg)
+				return 1
+			}
+			prNumber = n
+
+			owner, repo, err = ghclient.ParseOwnerRepo()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to parse repository: %v\n", err)
+				return 1
+			}
 		}
-		prNumber = n
 	} else {
 		// Auto-detect PR from current branch
 		n, err := ghclient.GetCurrentPR()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to detect PR: %v\n", err)
-			fmt.Fprintf(os.Stderr, "Make sure you're on a PR branch or provide a PR number: gh-observer <number>\n")
+			fmt.Fprintf(os.Stderr, "Make sure you're on a PR branch or provide a PR number or URL\n")
 			return 1
 		}
 		prNumber = n
-	}
 
-	// Get owner and repo
-	owner, repo, err := ghclient.ParseOwnerRepo()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to parse repository: %v\n", err)
-		return 1
+		owner, repo, err = ghclient.ParseOwnerRepo()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to parse repository: %v\n", err)
+			return 1
+		}
 	}
 
 	// Get GitHub token
