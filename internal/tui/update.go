@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -75,28 +76,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 
 		// Trigger historical average fetch once on first check load (lazy loading)
-		if !m.historicalLoaded && len(msg.CheckRuns) > 0 && m.rateLimitRemaining > 100 {
-			return m, tea.Batch(
-				fetchHistoricalAverages(m.ctx, m.token, m.owner, m.repo, m.historicalSampleSize),
-			)
-		}
+		// We need historical averages for comparison even when checks are already complete
+		needHistorical := !m.historicalLoaded && len(msg.CheckRuns) > 0 && m.rateLimitRemaining > 100
 
+		// Check if all checks are complete
 		if allChecksComplete(m.checkRuns) {
 			m.exitCode = determineExitCode(m.checkRuns)
+
+			if needHistorical {
+				// Fetch averages before quitting
+				m.historicalLoaded = true
+				m.historicalPending = true
+				return m, fetchHistoricalAverages(m.ctx, m.token, m.owner, m.repo, m.historicalSampleSize)
+			}
+
+			// All complete and no historical fetch needed - quit
 			m.quitting = true
 			return m, tea.Quit
+		}
+
+		// Checks still running - fetch historicals in background
+		if needHistorical {
+			m.historicalLoaded = true
+			m.historicalPending = true
+			return m, tea.Batch(
+				fetchHistoricalAverages(m.ctx, m.token, m.owner, m.repo, m.historicalSampleSize),
+				tick(m.refreshInterval),
+			)
 		}
 
 		return m, nil
 
 	case HistoricalAvgMsg:
-		if msg.Err == nil {
+		m.historicalPending = false
+		if msg.Err != nil {
+			// Averages are optional - don't crash on error
+			m.err = fmt.Errorf("historical avg: %w", msg.Err)
+		} else {
 			m.historicalAverages = msg.Averages
-			m.historicalLoaded = true
 			if msg.RateLimitRemaining > 0 {
 				m.rateLimitRemaining = msg.RateLimitRemaining
 			}
 		}
+
+		// If checks are complete, quit after rendering the final state with averages
+		if allChecksComplete(m.checkRuns) {
+			m.exitCode = determineExitCode(m.checkRuns)
+			m.quitting = true
+			// Render one more frame before quitting
+			// The View() is automatically called after Update() returns
+			return m, tea.Quit
+		}
+
 		return m, nil
 
 	case ErrorMsg:

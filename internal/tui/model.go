@@ -28,6 +28,7 @@ type Model struct {
 	// Historical averages (keyed by "WorkflowName/JobName")
 	historicalAverages   map[string]time.Duration
 	historicalLoaded     bool
+	historicalPending    bool // Waiting for historical averages to arrive
 	historicalSampleSize int
 
 	// Rate limiting
