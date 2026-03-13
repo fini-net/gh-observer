@@ -137,6 +137,7 @@ gh observer https://github.com/StackExchange/dnscontrol/pull/3941
 ```
 
 This works for any GitHub PR URL and is useful for:
+
 - Reviewing checks on a colleague's PR in another repo
 - Monitoring upstream dependencies before merging
 - Following CI status on projects you don't have cloned locally
