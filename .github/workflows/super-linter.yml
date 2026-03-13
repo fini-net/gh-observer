@@ -30,7 +30,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VALIDATE_GO: false
           VALIDATE_GO_MODULES: false
+          VALIDATE_BIOME_FORMAT: false
           VALIDATE_CHECKOV: false
           VALIDATE_JSON_PRETTIER: false
+          VALIDATE_MARKDOWN: false
           VALIDATE_MARKDOWN_PRETTIER: false
+          VALIDATE_SHELL_SHFMT: false
           VALIDATE_YAML_PRETTIER: false
