@@ -74,12 +74,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastUpdate = time.Now()
 		m.err = nil
 
+		var cmds []tea.Cmd
+		if !m.noAvg && !m.avgFetchStarted && len(msg.CheckRuns) > 0 {
+			m.avgFetchStarted = true
+			cmds = append(cmds, fetchJobAverages(m.ctx, m.owner, m.repo, msg.CheckRuns))
+		}
+
 		if allChecksComplete(m.checkRuns) {
 			m.exitCode = determineExitCode(m.checkRuns)
+			m.checksComplete = true
+			// Wait for the averages fetch to land before quitting, unless it
+			// was never started (noAvg or no check runs) or already done.
+			if m.noAvg || m.avgFetchDone || !m.avgFetchStarted {
+				m.quitting = true
+				cmds = append(cmds, tea.Quit)
+			}
+			return m, tea.Batch(cmds...)
+		}
+
+		return m, tea.Batch(cmds...)
+
+	case JobAveragesMsg:
+		if msg.Err == nil && msg.Averages != nil {
+			m.jobAverages = msg.Averages
+		}
+		m.avgFetchDone = true
+		// If checks already finished while we were fetching, quit now.
+		if m.checksComplete {
 			m.quitting = true
 			return m, tea.Quit
 		}
-
 		return m, nil
 
 	case ErrorMsg:
@@ -121,6 +145,21 @@ func fetchPRInfo(ctx context.Context, token, owner, repo string, prNumber int) t
 			CreatedAt:      createdAt,
 			HeadCommitTime: headCommitTime,
 		}
+	}
+}
+
+// fetchJobAverages fetches historical average runtimes for each job (one-shot, non-fatal).
+func fetchJobAverages(ctx context.Context, owner, repo string, checkRuns []ghclient.CheckRunInfo) tea.Cmd {
+	return func() tea.Msg {
+		client, err := ghclient.NewClient(ctx)
+		if err != nil {
+			return JobAveragesMsg{Err: err}
+		}
+		averages, err := ghclient.FetchJobAverages(ctx, client, owner, repo, checkRuns)
+		if err != nil {
+			return JobAveragesMsg{Err: err}
+		}
+		return JobAveragesMsg{Averages: averages}
 	}
 }
 

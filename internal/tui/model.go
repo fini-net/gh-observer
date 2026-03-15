@@ -44,6 +44,15 @@ type Model struct {
 
 	// Feature flags
 	enableLinks bool
+
+	// Historical job averages (fetched once, cached for the session)
+	jobAverages     map[string]time.Duration
+	avgFetchStarted bool
+	avgFetchDone    bool
+	noAvg           bool
+
+	// Set when all checks complete; used to defer quit until avgFetchDone
+	checksComplete bool
 }
 
 // ColumnWidths holds pre-calculated column widths for aligned rendering
@@ -51,10 +60,11 @@ type ColumnWidths struct {
 	QueueWidth    int // Right-aligned queue latency
 	NameWidth     int // Left-aligned check name
 	DurationWidth int // Right-aligned duration
+	AvgWidth      int // Right-aligned historical average
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool) Model {
+func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool) Model {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	return Model{
@@ -69,6 +79,7 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 		refreshInterval: refreshInterval,
 		styles:          styles,
 		enableLinks:     enableLinks,
+		noAvg:           noAvg,
 	}
 }
 

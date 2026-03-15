@@ -21,6 +21,8 @@ The existing `gh pr checks --watch` doesn't show how long checks have been runni
 - 🔄 **Real-time updates** - Auto-refreshes every 5s (configurable) without manual polling
 - ⚡ **Startup phases** - Helpful messages like "Waiting for Actions to start..." during the 30-90s GitHub delay
 - 🛡️ **Rate limits** - Backs off automatically when approaching API limits to avoid interruptions
+- 📊 **Historical averages** - Shows average runtime for each job based on recent completed runs, so you know if things are taking longer than usual
+- ⚡ **`--quick` mode** - Skip the historical averages fetch when you just want a fast snapshot
 - ✅ **CI-friendly** - Returns exit codes (0=success, 1=failure) for script automation
 
 ## Example Output
@@ -35,18 +37,18 @@ Startup Phase (37s elapsed):
 PR #5: 🔶 [claude] /init 21:04:15 UTC
 Updated 0s ago  •  Pushed 43h 8m 11s ago
 
-Startup   Workflow/Job                                Duration
+Startup   Workflow/Job                                Duration   Avg
 
-  15s ✗ MarkdownLint / lint                             5s
+  15s ✗ MarkdownLint / lint                             5s        6s
    .github:13 - Failed with exit code: 1
    CLAUDE.md:100 - Lists should be surrounded by blank lines: CLAUDE.md:100 MD032/blanks-around-lists Lists should be surr
 
-  15s ✓ Auto Assign / run                               5s
-  15s ✓ CUE Validation / verify                         6s
-  15s ✓ Checkov / scan                                 27s
-  15s ✓ Claude Code Review / claude-review          3m 52s
-  15s ✓ Lint GitHub Actions workflows / actionlint      8s
-  39s ✓ Checkov                                         2s
+  15s ✓ Auto Assign / run                               5s        4s
+  15s ✓ CUE Validation / verify                         6s        7s
+  15s ✓ Checkov / scan                                 27s       31s
+  15s ✓ Claude Code Review / claude-review          3m 52s   4m 10s
+  15s ✓ Lint GitHub Actions workflows / actionlint      8s        9s
+  39s ✓ Checkov                                         2s        2s
 
 Press q to quit
 ```
@@ -141,6 +143,20 @@ This works for any GitHub PR URL and is useful for:
 - Reviewing checks on a colleague's PR in another repo
 - Monitoring upstream dependencies before merging
 - Following CI status on projects you don't have cloned locally
+
+### Skip historical averages for a faster snapshot
+
+If you just want a quick look without waiting for the historical averages
+fetch, use `--quick` (or `-q`):
+
+```bash
+gh observer --quick
+gh observer -q 123
+```
+
+This skips the extra API calls for historical job runtimes and prints
+immediately. Useful when you're in a hurry or don't have the API budget
+to spare.
 
 ### Use in CI pipelines
 

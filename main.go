@@ -23,6 +23,12 @@ func main() {
 	}
 }
 
+var quickFlag bool
+
+func init() {
+	rootCmd.Flags().BoolVarP(&quickFlag, "quick", "q", false, "Skip fetching historical average runtimes")
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "gh-observer [PR_NUMBER | PR_URL]",
 	Short: "Watch GitHub PR checks with runtime metrics",
@@ -40,7 +46,7 @@ Supports watching checks on external repositories by passing a full PR URL:
 }
 
 // runSnapshot prints a one-time snapshot of PR check status (non-interactive mode)
-func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, enableLinks bool) int {
+func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, enableLinks bool, quick bool) int {
 	// Create GitHub client for PR info
 	client, err := ghclient.NewClient(ctx)
 	if err != nil {
@@ -80,12 +86,24 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 		return 0
 	}
 
+	// Fetch historical averages unless --quick was passed
+	var jobAverages map[string]time.Duration
+	if !quick {
+		client, err := ghclient.NewClient(ctx)
+		if err == nil {
+			avgs, err := ghclient.FetchJobAverages(ctx, client, owner, repo, checkRuns)
+			if err == nil {
+				jobAverages = avgs
+			}
+		}
+	}
+
 	// Calculate column widths
-	widths := tui.CalculateColumnWidths(checkRuns, headCommitTime)
+	widths := tui.CalculateColumnWidths(checkRuns, headCommitTime, jobAverages)
 
 	// Print column headers
-	headerQueue, headerName, headerDuration := tui.FormatHeaderColumns(widths)
-	fmt.Printf("%s   %s  %s\n\n", headerQueue, headerName, headerDuration)
+	headerQueue, headerName, headerDuration, headerAvg := tui.FormatHeaderColumns(widths)
+	fmt.Printf("%s   %s  %s  %s\n\n", headerQueue, headerName, headerDuration, headerAvg)
 
 	// Print each check
 	exitCode := 0
@@ -94,13 +112,14 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 		nameCol := tui.BuildNameColumn(check, widths, enableLinks)
 		queueText := tui.FormatQueueLatency(check, headCommitTime)
 		durationText := tui.FormatDuration(check)
+		avgText := tui.FormatAvg(check, jobAverages)
 		icon := tui.GetCheckIcon(check.Status, check.Conclusion)
 
-		// Compute queue and duration columns; discard name since BuildNameColumn owns it
-		queueCol, _, durationCol := tui.FormatAlignedColumns(queueText, tui.FormatCheckNameWithTruncate(check, widths.NameWidth), durationText, widths)
+		// Compute queue, duration, and avg columns; discard name since BuildNameColumn owns it
+		queueCol, _, durationCol, avgCol := tui.FormatAlignedColumns(queueText, tui.FormatCheckNameWithTruncate(check, widths.NameWidth), durationText, avgText, widths)
 
 		// Print line without colors (plain text for non-terminal)
-		fmt.Printf("%s %s %s  %s\n", queueCol, icon, nameCol, durationCol)
+		fmt.Printf("%s %s %s  %s  %s\n", queueCol, icon, nameCol, durationCol, avgCol)
 
 		// Determine exit code based on conclusions
 		if check.Status == "completed" {
@@ -188,11 +207,11 @@ func run(args []string) int {
 	// Check if running in a terminal
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
 		// Non-interactive mode: print snapshot and exit
-		return runSnapshot(ctx, token, owner, repo, prNumber, cfg.EnableLinks)
+		return runSnapshot(ctx, token, owner, repo, prNumber, cfg.EnableLinks, quickFlag)
 	}
 
 	// Create model
-	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks)
+	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag)
 
 	// Run TUI (keeps output visible after exit)
 	p := tea.NewProgram(model)
