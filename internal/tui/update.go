@@ -78,6 +78,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmds []tea.Cmd
 		if !m.noAvg && !m.avgFetchStarted && len(msg.CheckRuns) > 0 {
 			m.avgFetchStarted = true
+			m.avgFetchStartedAt = time.Now()
 			cmds = append(cmds, fetchJobAverages(m.ctx, m.owner, m.repo, msg.CheckRuns))
 		}
 
