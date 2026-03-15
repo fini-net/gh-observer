@@ -33,11 +33,20 @@ func (m Model) View() tea.View {
 			updatedLine = fmt.Sprintf("Updated %s ago", timing.FormatDuration(timeSinceUpdate))
 		}
 
-		// Add historical averages timing if fetch completed
-		if m.avgFetchDone && !m.avgFetchStartedAt.IsZero() {
-			avgDuration := time.Since(m.avgFetchStartedAt)
-			avgTiming := timing.FormatDuration(avgDuration)
-			updatedLine += m.styles.Info.Render(fmt.Sprintf("  •  Historical averages completed in %s", avgTiming))
+		// Add historical averages status
+		if !m.noAvg && m.avgFetchStarted {
+			if !m.avgFetchDone {
+				// Fetch in progress - show elapsed time
+				elapsed := time.Since(m.avgFetchStartedAt)
+				updatedLine += m.styles.Running.Render(fmt.Sprintf("  •  Fetching historical averages... (%s)", timing.FormatDuration(elapsed)))
+			} else if m.avgFetchErr != nil {
+				// Fetch failed
+				updatedLine += m.styles.Queued.Render("  •  Historical averages unavailable")
+			} else if !m.avgFetchFinishedAt.IsZero() {
+				// Fetch succeeded - use fixed duration
+				avgDuration := m.avgFetchFinishedAt.Sub(m.avgFetchStartedAt)
+				updatedLine += m.styles.Info.Render(fmt.Sprintf("  •  Historical averages completed in %s", timing.FormatDuration(avgDuration)))
+			}
 		}
 
 		b.WriteString(fmt.Sprintf("%s %s\n", prInfo, utcTime))

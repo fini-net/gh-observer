@@ -100,6 +100,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err == nil && msg.Averages != nil {
 			m.jobAverages = msg.Averages
 		}
+		m.avgFetchFinishedAt = time.Now()
+		m.avgFetchErr = msg.Err
 		m.avgFetchDone = true
 		// If checks already finished while we were fetching, quit now.
 		if m.checksComplete {
