@@ -275,16 +275,39 @@ func FormatDescription(description string, widths ColumnWidths) string {
 	return description
 }
 
-// SortCheckRuns sorts check runs by ThisRun duration ascending.
-// Completed jobs sort by final duration (0 if unknown).
-// In-progress jobs sort by current runtime.
-// Queued/other jobs sort last (treated as max duration).
+// SortCheckRuns sorts check runs with three criteria:
+// Primary: ThisRun duration ascending (shortest first)
+// Secondary: Status priority (in_progress > completed > queued > other)
+// Tertiary: Job name alphabetically
 func SortCheckRuns(checks []ghclient.CheckRunInfo) {
 	sort.Slice(checks, func(i, j int) bool {
 		di := sortKeyDuration(checks[i])
 		dj := sortKeyDuration(checks[j])
-		return di < dj
+		if di != dj {
+			return di < dj
+		}
+		si := statusPriority(checks[i].Status)
+		sj := statusPriority(checks[j].Status)
+		if si != sj {
+			return si < sj
+		}
+		return FormatCheckName(checks[i]) < FormatCheckName(checks[j])
 	})
+}
+
+// statusPriority returns a numeric priority for status sorting.
+// Lower values appear first: in_progress (0) > completed (1) > queued (2) > other (3).
+func statusPriority(status string) int {
+	switch status {
+	case "in_progress":
+		return 0
+	case "completed":
+		return 1
+	case "queued":
+		return 2
+	default:
+		return 3
+	}
 }
 
 // sortKeyDuration returns a duration for sorting: actual duration for completed/running,
