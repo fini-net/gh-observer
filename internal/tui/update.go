@@ -75,15 +75,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 
 		var cmds []tea.Cmd
-		if !m.avgFetchStarted && len(msg.CheckRuns) > 0 {
+		if !m.noAvg && !m.avgFetchStarted && len(msg.CheckRuns) > 0 {
 			m.avgFetchStarted = true
 			cmds = append(cmds, fetchJobAverages(m.ctx, m.owner, m.repo, msg.CheckRuns))
 		}
 
 		if allChecksComplete(m.checkRuns) {
 			m.exitCode = determineExitCode(m.checkRuns)
-			m.quitting = true
-			cmds = append(cmds, tea.Quit)
+			m.checksComplete = true
+			// Wait for the averages fetch to land before quitting, unless it
+			// was never started (noAvg or no check runs) or already done.
+			if m.noAvg || m.avgFetchDone || !m.avgFetchStarted {
+				m.quitting = true
+				cmds = append(cmds, tea.Quit)
+			}
 			return m, tea.Batch(cmds...)
 		}
 
@@ -92,6 +97,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case JobAveragesMsg:
 		if msg.Err == nil && msg.Averages != nil {
 			m.jobAverages = msg.Averages
+		}
+		m.avgFetchDone = true
+		// If checks already finished while we were fetching, quit now.
+		if m.checksComplete {
+			m.quitting = true
+			return m, tea.Quit
 		}
 		return m, nil
 
