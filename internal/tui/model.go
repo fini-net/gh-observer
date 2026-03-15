@@ -46,10 +46,13 @@ type Model struct {
 	enableLinks bool
 
 	// Historical job averages (fetched once, cached for the session)
-	jobAverages     map[string]time.Duration
-	avgFetchStarted bool
-	avgFetchDone    bool
-	noAvg           bool
+	jobAverages        map[string]time.Duration
+	avgFetchStarted    bool
+	avgFetchDone       bool
+	avgFetchStartedAt  time.Time
+	avgFetchFinishedAt time.Time
+	avgFetchErr        error
+	noAvg              bool
 
 	// Set when all checks complete; used to defer quit until avgFetchDone
 	checksComplete bool
