@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -272,4 +273,60 @@ func FormatDescription(description string, widths ColumnWidths) string {
 		return description[:maxLen-1] + "…"
 	}
 	return description
+}
+
+// SortCheckRuns sorts check runs with three criteria:
+// Primary: ThisRun duration ascending (shortest first)
+// Secondary: Status priority (in_progress > completed > queued > other)
+// Tertiary: Job name alphabetically
+func SortCheckRuns(checks []ghclient.CheckRunInfo) {
+	sort.Slice(checks, func(i, j int) bool {
+		di := sortKeyDuration(checks[i])
+		dj := sortKeyDuration(checks[j])
+		if di != dj {
+			return di < dj
+		}
+		si := statusPriority(checks[i].Status)
+		sj := statusPriority(checks[j].Status)
+		if si != sj {
+			return si < sj
+		}
+		return FormatCheckName(checks[i]) < FormatCheckName(checks[j])
+	})
+}
+
+// statusPriority returns a numeric priority for status sorting.
+// Lower values appear first: in_progress (0) > completed (1) > queued (2) > other (3).
+func statusPriority(status string) int {
+	switch status {
+	case "in_progress":
+		return 0
+	case "completed":
+		return 1
+	case "queued":
+		return 2
+	default:
+		return 3
+	}
+}
+
+// sortKeyDuration returns a duration for sorting: actual duration for completed/running,
+// 0 for unknown durations, and a large value for queued jobs (so they appear last).
+func sortKeyDuration(check ghclient.CheckRunInfo) time.Duration {
+	switch check.Status {
+	case "completed":
+		d := timing.FinalDuration(check)
+		if d > 0 {
+			return d
+		}
+		return 0
+	case "in_progress":
+		d := timing.Runtime(check)
+		if d > 0 {
+			return d
+		}
+		return 0
+	default:
+		return time.Duration(1 << 62)
+	}
 }

@@ -70,6 +70,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.checkRuns = msg.CheckRuns
+		SortCheckRuns(m.checkRuns)
 		m.rateLimitRemaining = msg.RateLimitRemaining
 		m.lastUpdate = time.Now()
 		m.err = nil
