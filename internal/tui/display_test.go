@@ -2,6 +2,7 @@ package tui
 
 import (
 	"testing"
+	"time"
 
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
@@ -138,4 +139,36 @@ func TestFormatCheckNameWithTruncate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFormatAvg(t *testing.T) {
+	check := ghclient.CheckRunInfo{Name: "my-job"}
+
+	t.Run("nil map", func(t *testing.T) {
+		got := FormatAvg(check, nil)
+		if got != "--" {
+			t.Errorf("FormatAvg() = %q, want %q", got, "--")
+		}
+	})
+
+	t.Run("missing key", func(t *testing.T) {
+		got := FormatAvg(check, map[string]time.Duration{"other-job": 5 * time.Minute})
+		if got != "--" {
+			t.Errorf("FormatAvg() = %q, want %q", got, "--")
+		}
+	})
+
+	t.Run("zero duration", func(t *testing.T) {
+		got := FormatAvg(check, map[string]time.Duration{"my-job": 0})
+		if got != "0s" {
+			t.Errorf("FormatAvg() = %q, want %q", got, "0s")
+		}
+	})
+
+	t.Run("valid duration", func(t *testing.T) {
+		got := FormatAvg(check, map[string]time.Duration{"my-job": 2*time.Minute + 30*time.Second})
+		if got != "2m 30s" {
+			t.Errorf("FormatAvg() = %q, want %q", got, "2m 30s")
+		}
+	})
 }

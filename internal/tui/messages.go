@@ -30,3 +30,9 @@ type ChecksUpdateMsg struct {
 type ErrorMsg struct {
 	Err error
 }
+
+// JobAveragesMsg contains historical job average durations
+type JobAveragesMsg struct {
+	Averages map[string]time.Duration
+	Err      error
+}

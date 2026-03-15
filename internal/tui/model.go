@@ -44,6 +44,10 @@ type Model struct {
 
 	// Feature flags
 	enableLinks bool
+
+	// Historical job averages (fetched once, cached for the session)
+	jobAverages     map[string]time.Duration
+	avgFetchStarted bool
 }
 
 // ColumnWidths holds pre-calculated column widths for aligned rendering
@@ -51,6 +55,7 @@ type ColumnWidths struct {
 	QueueWidth    int // Right-aligned queue latency
 	NameWidth     int // Left-aligned check name
 	DurationWidth int // Right-aligned duration
+	AvgWidth      int // Right-aligned historical average
 }
 
 // NewModel creates a new TUI model

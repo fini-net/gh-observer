@@ -80,12 +80,12 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 		return 0
 	}
 
-	// Calculate column widths
-	widths := tui.CalculateColumnWidths(checkRuns, headCommitTime)
+	// Calculate column widths (no historical averages in snapshot mode)
+	widths := tui.CalculateColumnWidths(checkRuns, headCommitTime, nil)
 
 	// Print column headers
-	headerQueue, headerName, headerDuration := tui.FormatHeaderColumns(widths)
-	fmt.Printf("%s   %s  %s\n\n", headerQueue, headerName, headerDuration)
+	headerQueue, headerName, headerDuration, headerAvg := tui.FormatHeaderColumns(widths)
+	fmt.Printf("%s   %s  %s  %s\n\n", headerQueue, headerName, headerDuration, headerAvg)
 
 	// Print each check
 	exitCode := 0
@@ -94,13 +94,14 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 		nameCol := tui.BuildNameColumn(check, widths, enableLinks)
 		queueText := tui.FormatQueueLatency(check, headCommitTime)
 		durationText := tui.FormatDuration(check)
+		avgText := tui.FormatAvg(check, nil)
 		icon := tui.GetCheckIcon(check.Status, check.Conclusion)
 
-		// Compute queue and duration columns; discard name since BuildNameColumn owns it
-		queueCol, _, durationCol := tui.FormatAlignedColumns(queueText, tui.FormatCheckNameWithTruncate(check, widths.NameWidth), durationText, widths)
+		// Compute queue, duration, and avg columns; discard name since BuildNameColumn owns it
+		queueCol, _, durationCol, avgCol := tui.FormatAlignedColumns(queueText, tui.FormatCheckNameWithTruncate(check, widths.NameWidth), durationText, avgText, widths)
 
 		// Print line without colors (plain text for non-terminal)
-		fmt.Printf("%s %s %s  %s\n", queueCol, icon, nameCol, durationCol)
+		fmt.Printf("%s %s %s  %s  %s\n", queueCol, icon, nameCol, durationCol, avgCol)
 
 		// Determine exit code based on conclusions
 		if check.Status == "completed" {
