@@ -243,17 +243,17 @@ func FormatHeaderColumns(widths ColumnWidths) (string, string, string, string) {
 	}
 	headerName := "Workflow/Job" + strings.Repeat(" ", namePad)
 
-	durationPad := widths.DurationWidth - 8
+	durationPad := widths.DurationWidth - 7
 	if durationPad < 0 {
 		durationPad = 0
 	}
-	headerDuration := strings.Repeat(" ", durationPad) + "Duration"
+	headerDuration := strings.Repeat(" ", durationPad) + "ThisRun"
 
-	avgPad := widths.AvgWidth - 3 // "Avg" is 3 chars
+	avgPad := widths.AvgWidth - 7 // "HistAvg" is 7 chars
 	if avgPad < 0 {
 		avgPad = 0
 	}
-	headerAvg := strings.Repeat(" ", avgPad) + "Avg"
+	headerAvg := strings.Repeat(" ", avgPad) + "HistAvg"
 
 	return headerQueue, headerName, headerDuration, headerAvg
 }
