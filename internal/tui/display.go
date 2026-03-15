@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -272,4 +273,37 @@ func FormatDescription(description string, widths ColumnWidths) string {
 		return description[:maxLen-1] + "…"
 	}
 	return description
+}
+
+// SortCheckRuns sorts check runs by ThisRun duration ascending.
+// Completed jobs sort by final duration (0 if unknown).
+// In-progress jobs sort by current runtime.
+// Queued/other jobs sort last (treated as max duration).
+func SortCheckRuns(checks []ghclient.CheckRunInfo) {
+	sort.Slice(checks, func(i, j int) bool {
+		di := sortKeyDuration(checks[i])
+		dj := sortKeyDuration(checks[j])
+		return di < dj
+	})
+}
+
+// sortKeyDuration returns a duration for sorting: actual duration for completed/running,
+// 0 for unknown durations, and a large value for queued jobs (so they appear last).
+func sortKeyDuration(check ghclient.CheckRunInfo) time.Duration {
+	switch check.Status {
+	case "completed":
+		d := timing.FinalDuration(check)
+		if d > 0 {
+			return d
+		}
+		return 0
+	case "in_progress":
+		d := timing.Runtime(check)
+		if d > 0 {
+			return d
+		}
+		return 0
+	default:
+		return time.Duration(1 << 62)
+	}
 }
