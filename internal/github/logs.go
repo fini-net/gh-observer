@@ -106,12 +106,12 @@ func extractShellError(line string) string {
 // extractErrorMessage parses the error message from a log line.
 // Lines are typically: "2026-03-16T18:56:23.0425787Z ##[error]Process completed with exit code 127."
 func extractErrorMessage(line string) string {
-	idx := strings.Index(line, "##[error]")
-	if idx == -1 {
+	_, after, ok := strings.Cut(line, "##[error]")
+	if !ok {
 		return ""
 	}
 
-	msg := strings.TrimSpace(line[idx+len("##[error]"):])
+	msg := strings.TrimSpace(after)
 
 	// Filter out noise from cleanup/post-job phases
 	if strings.Contains(msg, "Post job cleanup") {

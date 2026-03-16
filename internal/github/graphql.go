@@ -99,7 +99,7 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 
 	// Execute query
 	var query pullRequestQuery
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"owner":    githubv4.String(owner),
 		"repo":     githubv4.String(repo),
 		"prNumber": githubv4.Int(prNumber),
