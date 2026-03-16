@@ -34,7 +34,23 @@ func ParseJobIDFromURL(detailsURL string) (int64, error) {
 // FetchJobAverages fetches historical average durations for each job.
 // Returns a map keyed by bare job name to average duration.
 // Non-fatal: skips failed calls and returns whatever data was collected.
-func FetchJobAverages(ctx context.Context, client *github.Client, owner, repo string, checkRuns []CheckRunInfo) (map[string]time.Duration, error) {
+//
+// The knownRunIDToWorkflowID and knownFetchedWorkflowIDs parameters enable incremental
+// fetching: run IDs already mapped to workflow IDs are cached, and workflow IDs already
+// fetched are skipped. New mappings and newly-fetched workflow IDs are returned for caching.
+func FetchJobAverages(
+	ctx context.Context,
+	client *github.Client,
+	owner, repo string,
+	checkRuns []CheckRunInfo,
+	knownRunIDToWorkflowID map[int64]int64,
+	knownFetchedWorkflowIDs map[int64]bool,
+) (
+	averages map[string]time.Duration,
+	newRunIDToWorkflowID map[int64]int64,
+	newFetchedWorkflowIDs []int64,
+	err error,
+) {
 	// Step 1: collect unique run IDs from check run URLs
 	runIDSet := map[int64]bool{}
 	for _, cr := range checkRuns {
@@ -49,28 +65,51 @@ func FetchJobAverages(ctx context.Context, client *github.Client, owner, repo st
 	}
 
 	if len(runIDSet) == 0 {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 
-	// Step 2: per unique run_id, get workflow_id
+	// Step 2: per unique run_id, get workflow_id (using cache where available)
+	newRunIDToWorkflowID = make(map[int64]int64)
 	workflowIDSet := map[int64]bool{}
+
 	for runID := range runIDSet {
+		// Check cache first
+		if wfID, ok := knownRunIDToWorkflowID[runID]; ok {
+			workflowIDSet[wfID] = true
+			continue
+		}
+
+		// Fetch workflow ID for new run ID
 		run, _, err := client.Actions.GetWorkflowRunByID(ctx, owner, repo, runID)
 		if err != nil {
 			continue
 		}
 		if run.WorkflowID != nil {
 			workflowIDSet[*run.WorkflowID] = true
+			newRunIDToWorkflowID[runID] = *run.WorkflowID
 		}
 	}
 
 	if len(workflowIDSet) == 0 {
-		return nil, nil
+		return nil, newRunIDToWorkflowID, nil, nil
 	}
 
-	// Step 3: per unique workflow_id, get recent completed run IDs
-	var historicalRunIDs []int64
+	// Step 3: filter out already-fetched workflow IDs
+	workflowIDsToFetch := make([]int64, 0, len(workflowIDSet))
 	for wfID := range workflowIDSet {
+		if !knownFetchedWorkflowIDs[wfID] {
+			workflowIDsToFetch = append(workflowIDsToFetch, wfID)
+		}
+	}
+
+	if len(workflowIDsToFetch) == 0 {
+		// All workflows already fetched, nothing new to process
+		return nil, newRunIDToWorkflowID, nil, nil
+	}
+
+	// Step 4: per workflow_id to fetch, get recent completed run IDs
+	var historicalRunIDs []int64
+	for _, wfID := range workflowIDsToFetch {
 		runs, _, err := client.Actions.ListWorkflowRunsByID(ctx, owner, repo, wfID, &github.ListWorkflowRunsOptions{
 			Status:      "completed",
 			ListOptions: github.ListOptions{PerPage: 10},
@@ -86,10 +125,10 @@ func FetchJobAverages(ctx context.Context, client *github.Client, owner, repo st
 	}
 
 	if len(historicalRunIDs) == 0 {
-		return nil, nil
+		return nil, newRunIDToWorkflowID, workflowIDsToFetch, nil
 	}
 
-	// Step 4: per historical run_id, collect job durations by name
+	// Step 5: per historical run_id, collect job durations by name
 	jobDurations := map[string][]time.Duration{}
 	for _, runID := range historicalRunIDs {
 		jobs, _, err := client.Actions.ListWorkflowJobs(ctx, owner, repo, runID, &github.ListWorkflowJobsOptions{
@@ -110,15 +149,15 @@ func FetchJobAverages(ctx context.Context, client *github.Client, owner, repo st
 		}
 	}
 
-	// Step 5: average durations per job name
-	result := make(map[string]time.Duration, len(jobDurations))
+	// Step 6: average durations per job name
+	averages = make(map[string]time.Duration, len(jobDurations))
 	for name, durations := range jobDurations {
 		var total time.Duration
 		for _, d := range durations {
 			total += d
 		}
-		result[name] = total / time.Duration(len(durations))
+		averages[name] = total / time.Duration(len(durations))
 	}
 
-	return result, nil
+	return averages, newRunIDToWorkflowID, workflowIDsToFetch, nil
 }

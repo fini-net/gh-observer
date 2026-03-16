@@ -45,14 +45,15 @@ type Model struct {
 	// Feature flags
 	enableLinks bool
 
-	// Historical job averages (fetched once, cached for the session)
-	jobAverages        map[string]time.Duration
-	avgFetchStarted    bool
-	avgFetchDone       bool
-	avgFetchStartedAt  time.Time
-	avgFetchFinishedAt time.Time
-	avgFetchErr        error
-	noAvg              bool
+	// Historical job averages (incrementally updated as new workflows appear)
+	jobAverages          map[string]time.Duration
+	runIDToWorkflowID    map[int64]int64
+	fetchedWorkflowIDs   map[int64]bool
+	avgFetchPending      bool
+	avgFetchStartTime    time.Time
+	avgFetchLastDuration time.Duration
+	avgFetchErr          error
+	noAvg                bool
 
 	// Job log errors (fetched async for failed checks, cached for the session)
 	jobLogErrors    map[int64][]string
@@ -75,20 +76,23 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	return Model{
-		ctx:             ctx,
-		token:           token,
-		owner:           owner,
-		repo:            repo,
-		prNumber:        prNumber,
-		spinner:         s,
-		startTime:       time.Now(),
-		lastUpdate:      time.Now(),
-		refreshInterval: refreshInterval,
-		styles:          styles,
-		enableLinks:     enableLinks,
-		noAvg:           noAvg,
-		jobLogErrors:    make(map[int64][]string),
-		logFetchPending: make(map[int64]bool),
+		ctx:                ctx,
+		token:              token,
+		owner:              owner,
+		repo:               repo,
+		prNumber:           prNumber,
+		spinner:            s,
+		startTime:          time.Now(),
+		lastUpdate:         time.Now(),
+		refreshInterval:    refreshInterval,
+		styles:             styles,
+		enableLinks:        enableLinks,
+		noAvg:              noAvg,
+		jobAverages:        make(map[string]time.Duration),
+		runIDToWorkflowID:  make(map[int64]int64),
+		fetchedWorkflowIDs: make(map[int64]bool),
+		jobLogErrors:       make(map[int64][]string),
+		logFetchPending:    make(map[int64]bool),
 	}
 }
 

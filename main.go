@@ -91,7 +91,7 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 	if !quick {
 		client, err := ghclient.NewClient(ctx)
 		if err == nil {
-			avgs, err := ghclient.FetchJobAverages(ctx, client, owner, repo, checkRuns)
+			avgs, _, _, err := ghclient.FetchJobAverages(ctx, client, owner, repo, checkRuns, nil, nil)
 			if err == nil {
 				jobAverages = avgs
 			}

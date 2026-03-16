@@ -34,18 +34,18 @@ func (m Model) View() tea.View {
 		}
 
 		// Add historical averages status
-		if !m.noAvg && m.avgFetchStarted {
-			if !m.avgFetchDone {
+		if !m.noAvg {
+			if m.avgFetchPending {
 				// Fetch in progress - show elapsed time
-				elapsed := time.Since(m.avgFetchStartedAt)
+				elapsed := time.Since(m.avgFetchStartTime)
 				updatedLine += m.styles.Running.Render(fmt.Sprintf("  •  Fetching historical averages... (%s)", timing.FormatDuration(elapsed)))
 			} else if m.avgFetchErr != nil {
 				// Fetch failed
 				updatedLine += m.styles.Queued.Render("  •  Historical averages unavailable")
-			} else if !m.avgFetchFinishedAt.IsZero() {
-				// Fetch succeeded - use fixed duration
-				avgDuration := m.avgFetchFinishedAt.Sub(m.avgFetchStartedAt)
-				updatedLine += m.styles.Info.Render(fmt.Sprintf("  •  Historical averages completed in %s", timing.FormatDuration(avgDuration)))
+			} else if m.avgFetchLastDuration > 0 {
+				// Fetch succeeded - show workflow count and last fetch duration
+				wfCount := len(m.fetchedWorkflowIDs)
+				updatedLine += m.styles.Info.Render(fmt.Sprintf("  •  Historical averages ready (%d workflows, %s)", wfCount, timing.FormatDuration(m.avgFetchLastDuration)))
 			}
 		}
 
