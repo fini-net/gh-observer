@@ -10,6 +10,7 @@
       "Bash(gh pr diff:*)",
       "Bash(gh pr list:*)",
       "Bash(gh pr view:*)",
+      "Bash(gh pr:*)",
       "Bash(gh release list:*)",
       "Bash(gh run list:*)",
       "Bash(gh run view:*)",
