@@ -135,10 +135,7 @@ func FormatLink(url, text string) string {
 // len()-based width measurement stays accurate for the rest of the line.
 func BuildNameColumn(check ghclient.CheckRunInfo, widths ColumnWidths, enableLinks bool) string {
 	name := FormatCheckNameWithTruncate(check, widths.NameWidth)
-	paddingLen := widths.NameWidth - len(name)
-	if paddingLen < 0 {
-		paddingLen = 0
-	}
+	paddingLen := max(widths.NameWidth-len(name), 0)
 	padding := strings.Repeat(" ", paddingLen)
 	if enableLinks && check.DetailsURL != "" {
 		return FormatLink(check.DetailsURL, name) + padding
@@ -203,28 +200,16 @@ func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime tim
 
 // FormatAlignedColumns formats the four columns with proper padding
 func FormatAlignedColumns(queueText, nameText, durationText, avgText string, widths ColumnWidths) (string, string, string, string) {
-	queuePadding := widths.QueueWidth - len(queueText)
-	if queuePadding < 0 {
-		queuePadding = 0
-	}
+	queuePadding := max(widths.QueueWidth-len(queueText), 0)
 	queueCol := strings.Repeat(" ", queuePadding) + queueText
 
-	namePadding := widths.NameWidth - len(nameText)
-	if namePadding < 0 {
-		namePadding = 0
-	}
+	namePadding := max(widths.NameWidth-len(nameText), 0)
 	nameCol := nameText + strings.Repeat(" ", namePadding)
 
-	durationPadding := widths.DurationWidth - len(durationText)
-	if durationPadding < 0 {
-		durationPadding = 0
-	}
+	durationPadding := max(widths.DurationWidth-len(durationText), 0)
 	durationCol := strings.Repeat(" ", durationPadding) + durationText
 
-	avgPadding := widths.AvgWidth - len(avgText)
-	if avgPadding < 0 {
-		avgPadding = 0
-	}
+	avgPadding := max(widths.AvgWidth-len(avgText), 0)
 	avgCol := strings.Repeat(" ", avgPadding) + avgText
 
 	return queueCol, nameCol, durationCol, avgCol
@@ -232,28 +217,18 @@ func FormatAlignedColumns(queueText, nameText, durationText, avgText string, wid
 
 // FormatHeaderColumns formats the column headers with proper padding
 func FormatHeaderColumns(widths ColumnWidths) (string, string, string, string) {
-	queuePad := widths.QueueWidth - 7
-	if queuePad < 0 {
-		queuePad = 0
-	}
+	queuePad := max(widths.QueueWidth-7, 0)
 	headerQueue := strings.Repeat(" ", queuePad) + "Start"
 
-	namePad := widths.NameWidth - 12
-	if namePad < 0 {
-		namePad = 0
-	}
+	namePad := max(widths.NameWidth-12, 0)
 	headerName := "Workflow/Job" + strings.Repeat(" ", namePad)
 
-	durationPad := widths.DurationWidth - 7
-	if durationPad < 0 {
-		durationPad = 0
-	}
+	durationPad := max(widths.DurationWidth-7, 0)
 	headerDuration := strings.Repeat(" ", durationPad) + "ThisRun"
 
-	avgPad := widths.AvgWidth - 7 // "HistAvg" is 7 chars
-	if avgPad < 0 {
-		avgPad = 0
-	}
+	avgPad := max(
+		// "HistAvg" is 7 chars
+		widths.AvgWidth-7, 0)
 	headerAvg := strings.Repeat(" ", avgPad) + "HistAvg"
 
 	return headerQueue, headerName, headerDuration, headerAvg
@@ -265,10 +240,7 @@ func FormatDescription(description string, widths ColumnWidths) string {
 		return ""
 	}
 	totalWidth := widths.QueueWidth + 1 + 1 + widths.NameWidth + 2 + widths.DurationWidth + 2 + widths.AvgWidth
-	maxLen := totalWidth - 4
-	if maxLen < 20 {
-		maxLen = 20
-	}
+	maxLen := max(totalWidth-4, 20)
 	if len(description) > maxLen {
 		return description[:maxLen-1] + "…"
 	}

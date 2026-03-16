@@ -29,7 +29,7 @@ func TestQueueLatency(t *testing.T) {
 			name:       "zero commitTime returns zero",
 			commitTime: time.Time{},
 			check: ghclient.CheckRunInfo{
-				StartedAt: ptrTime(now.Add(30 * time.Second)),
+				StartedAt: new(now.Add(30 * time.Second)),
 			},
 			wantZero: true,
 		},
@@ -37,7 +37,7 @@ func TestQueueLatency(t *testing.T) {
 			name:       "normal latency calculation",
 			commitTime: now,
 			check: ghclient.CheckRunInfo{
-				StartedAt: ptrTime(now.Add(45 * time.Second)),
+				StartedAt: new(now.Add(45 * time.Second)),
 			},
 			wantSeconds: 45,
 		},
@@ -45,7 +45,7 @@ func TestQueueLatency(t *testing.T) {
 			name:       "zero latency when check starts immediately",
 			commitTime: now,
 			check: ghclient.CheckRunInfo{
-				StartedAt: ptrTime(now),
+				StartedAt: new(now),
 			},
 			wantSeconds: 0,
 		},
@@ -53,7 +53,7 @@ func TestQueueLatency(t *testing.T) {
 			name:       "long latency",
 			commitTime: now,
 			check: ghclient.CheckRunInfo{
-				StartedAt: ptrTime(now.Add(5 * time.Minute)),
+				StartedAt: new(now.Add(5 * time.Minute)),
 			},
 			wantSeconds: 300,
 		},
@@ -88,7 +88,7 @@ func TestRuntime(t *testing.T) {
 			name: "non in_progress status returns zero",
 			check: ghclient.CheckRunInfo{
 				Status:    "completed",
-				StartedAt: ptrTime(now.Add(-1 * time.Minute)),
+				StartedAt: new(now.Add(-1 * time.Minute)),
 			},
 			wantZero: true,
 		},
@@ -104,7 +104,7 @@ func TestRuntime(t *testing.T) {
 			name: "queued status returns zero",
 			check: ghclient.CheckRunInfo{
 				Status:    "queued",
-				StartedAt: ptrTime(now),
+				StartedAt: new(now),
 			},
 			wantZero: true,
 		},
@@ -136,14 +136,14 @@ func TestFinalDuration(t *testing.T) {
 			name: "nil StartedAt returns zero",
 			check: ghclient.CheckRunInfo{
 				StartedAt:   nil,
-				CompletedAt: ptrTime(now),
+				CompletedAt: new(now),
 			},
 			wantZero: true,
 		},
 		{
 			name: "nil CompletedAt returns zero",
 			check: ghclient.CheckRunInfo{
-				StartedAt:   ptrTime(now),
+				StartedAt:   new(now),
 				CompletedAt: nil,
 			},
 			wantZero: true,
@@ -159,24 +159,24 @@ func TestFinalDuration(t *testing.T) {
 		{
 			name: "normal duration calculation",
 			check: ghclient.CheckRunInfo{
-				StartedAt:   ptrTime(now),
-				CompletedAt: ptrTime(now.Add(2 * time.Minute)),
+				StartedAt:   new(now),
+				CompletedAt: new(now.Add(2 * time.Minute)),
 			},
 			wantSeconds: 120,
 		},
 		{
 			name: "short duration",
 			check: ghclient.CheckRunInfo{
-				StartedAt:   ptrTime(now),
-				CompletedAt: ptrTime(now.Add(5 * time.Second)),
+				StartedAt:   new(now),
+				CompletedAt: new(now.Add(5 * time.Second)),
 			},
 			wantSeconds: 5,
 		},
 		{
 			name: "long duration over an hour",
 			check: ghclient.CheckRunInfo{
-				StartedAt:   ptrTime(now),
-				CompletedAt: ptrTime(now.Add(90 * time.Minute)),
+				StartedAt:   new(now),
+				CompletedAt: new(now.Add(90 * time.Minute)),
 			},
 			wantSeconds: 5400,
 		},
@@ -277,6 +277,7 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
+//go:fix inline
 func ptrTime(t time.Time) *time.Time {
-	return &t
+	return new(t)
 }

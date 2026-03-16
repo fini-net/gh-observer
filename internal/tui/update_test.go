@@ -7,8 +7,9 @@ import (
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
+//go:fix inline
 func ptrTime(t time.Time) *time.Time {
-	return &t
+	return new(t)
 }
 
 func TestAllChecksComplete(t *testing.T) {
@@ -37,7 +38,7 @@ func TestAllChecksComplete(t *testing.T) {
 			name: "one in_progress returns false",
 			checks: []ghclient.CheckRunInfo{
 				{Status: "completed", Conclusion: "success"},
-				{Status: "in_progress", StartedAt: ptrTime(now)},
+				{Status: "in_progress", StartedAt: new(now)},
 			},
 			want: false,
 		},
@@ -59,7 +60,7 @@ func TestAllChecksComplete(t *testing.T) {
 		{
 			name: "single in_progress returns false",
 			checks: []ghclient.CheckRunInfo{
-				{Status: "in_progress", StartedAt: ptrTime(now)},
+				{Status: "in_progress", StartedAt: new(now)},
 			},
 			want: false,
 		},

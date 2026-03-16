@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -137,13 +138,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.avgFetchErr = msg.Err
 		} else {
 			// Merge averages
-			for name, dur := range msg.Averages {
-				m.jobAverages[name] = dur
-			}
+			maps.Copy(m.jobAverages, msg.Averages)
 			// Add new run→workflow mappings to cache
-			for runID, wfID := range msg.NewRunIDToWorkflowID {
-				m.runIDToWorkflowID[runID] = wfID
-			}
+			maps.Copy(m.runIDToWorkflowID, msg.NewRunIDToWorkflowID)
 			// Mark newly-fetched workflow IDs
 			for _, wfID := range msg.NewFetchedWorkflowIDs {
 				m.fetchedWorkflowIDs[wfID] = true
