@@ -36,3 +36,10 @@ type JobAveragesMsg struct {
 	Averages map[string]time.Duration
 	Err      error
 }
+
+// JobLogMsg contains error lines extracted from job logs
+type JobLogMsg struct {
+	JobID  int64
+	Errors []string
+	Err    error
+}

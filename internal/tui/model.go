@@ -54,6 +54,10 @@ type Model struct {
 	avgFetchErr        error
 	noAvg              bool
 
+	// Job log errors (fetched async for failed checks, cached for the session)
+	jobLogErrors    map[int64][]string
+	logFetchPending map[int64]bool
+
 	// Set when all checks complete; used to defer quit until avgFetchDone
 	checksComplete bool
 }
@@ -83,6 +87,8 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 		styles:          styles,
 		enableLinks:     enableLinks,
 		noAvg:           noAvg,
+		jobLogErrors:    make(map[int64][]string),
+		logFetchPending: make(map[int64]bool),
 	}
 }
 

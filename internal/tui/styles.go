@@ -17,6 +17,8 @@ type Styles struct {
 	Info        lipgloss.Style
 	ErrorBox    lipgloss.Style
 	Description lipgloss.Style
+	Warning     lipgloss.Style
+	WarningBox  lipgloss.Style
 }
 
 // NewStyles creates styled renderers based on config colors
@@ -35,5 +37,11 @@ func NewStyles(successColor, failureColor, runningColor, queuedColor int) Styles
 			PaddingLeft(1).
 			Foreground(lipgloss.Color("243")),
 		Description: lipgloss.NewStyle().Foreground(lipgloss.Color("243")),
+		Warning:     lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Faint(true),
+		WarningBox: lipgloss.NewStyle().
+			BorderLeft(true).
+			BorderForeground(lipgloss.Color("3")).
+			PaddingLeft(1).
+			Foreground(lipgloss.Color("240")),
 	}
 }

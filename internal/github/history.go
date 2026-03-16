@@ -11,12 +11,22 @@ import (
 )
 
 var runIDRegexp = regexp.MustCompile(`/actions/runs/(\d+)/job/`)
+var jobIDRegexp = regexp.MustCompile(`/job/(\d+)$`)
 
 // ParseRunIDFromURL extracts the workflow run ID from a GitHub Actions details URL.
 func ParseRunIDFromURL(detailsURL string) (int64, error) {
 	matches := runIDRegexp.FindStringSubmatch(detailsURL)
 	if len(matches) < 2 {
 		return 0, fmt.Errorf("no run ID found in URL: %s", detailsURL)
+	}
+	return strconv.ParseInt(matches[1], 10, 64)
+}
+
+// ParseJobIDFromURL extracts the job ID from a GitHub Actions details URL.
+func ParseJobIDFromURL(detailsURL string) (int64, error) {
+	matches := jobIDRegexp.FindStringSubmatch(detailsURL)
+	if len(matches) < 2 {
+		return 0, fmt.Errorf("no job ID found in URL: %s", detailsURL)
 	}
 	return strconv.ParseInt(matches[1], 10, 64)
 }
