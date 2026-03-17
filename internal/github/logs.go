@@ -42,6 +42,7 @@ func parseErrorLines(reader io.Reader) []string {
 	var errorLines []string
 	seen := make(map[string]bool)
 	var prevLine string
+	var prevPrevLine string
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -55,17 +56,25 @@ func parseErrorLines(reader io.Reader) []string {
 				errorLines = append(errorLines, errorMsg)
 			}
 
-			// Also check the previous line - often contains the actual root cause
-			// e.g., "line 1: magick: command not found" before "##[error]Process completed with exit code 127."
+			// Check previous line for context
 			if prevLine != "" {
-				if shellErr := extractShellError(prevLine); shellErr != "" && !seen[shellErr] {
-					seen[shellErr] = true
-					// Insert shell error before the ##[error] line
-					errorLines = append([]string{shellErr}, errorLines...)
+				// For generic exit code errors, capture meaningful preceding line
+				if isGenericExitCodeError(errorMsg) {
+					if ctx := extractMeaningfulContext(prevLine, prevPrevLine); ctx != "" && !seen[ctx] {
+						seen[ctx] = true
+						errorLines = append([]string{ctx}, errorLines...)
+					}
+				} else {
+					// For specific shell errors, use the existing pattern matching
+					if shellErr := extractShellError(prevLine); shellErr != "" && !seen[shellErr] {
+						seen[shellErr] = true
+						errorLines = append([]string{shellErr}, errorLines...)
+					}
 				}
 			}
 		}
 
+		prevPrevLine = prevLine
 		prevLine = line
 
 		// Limit to 3 unique error lines
@@ -75,6 +84,79 @@ func parseErrorLines(reader io.Reader) []string {
 	}
 
 	return errorLines
+}
+
+// isGenericExitCodeError checks if the error is just a generic exit code wrapper
+func isGenericExitCodeError(msg string) bool {
+	return strings.HasPrefix(msg, "Process completed with exit code")
+}
+
+// extractMeaningfulContext finds a meaningful error context line
+func extractMeaningfulContext(prevLine, prevPrevLine string) string {
+	// First try the immediate previous line
+	if ctx := extractContextLine(prevLine); ctx != "" {
+		return ctx
+	}
+	// Fall back to the line before that
+	return extractContextLine(prevPrevLine)
+}
+
+// extractContextLine extracts meaningful context from a log line
+func extractContextLine(line string) string {
+	// Strip timestamp prefix if present
+	if idx := strings.Index(line, "Z "); idx != -1 {
+		line = line[idx+2:]
+	}
+
+	// Filter out noise
+	if isNoiseLine(line) {
+		return ""
+	}
+
+	// Truncate very long lines
+	if len(line) > 200 {
+		line = line[:197] + "..."
+	}
+
+	return strings.TrimSpace(line)
+}
+
+// isNoiseLine detects lines that are just noise (not meaningful error context)
+func isNoiseLine(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return true
+	}
+
+	// Generic error echoes (GitHub Actions echoes these before ##[error])
+	if strings.HasPrefix(line, "Error: Process completed with exit code") {
+		return true
+	}
+
+	// Shell command echoes (lines starting with "Run " followed by shell commands)
+	if strings.HasPrefix(line, "Run ") && (strings.HasPrefix(line, "Run if ") || strings.HasPrefix(line, "Run cd ") || strings.HasPrefix(line, "Run export ") || strings.HasPrefix(line, "Run echo ") || strings.HasPrefix(line, "Run npm ") || strings.HasPrefix(line, "Run yarn ") || strings.HasPrefix(line, "Run pip ")) {
+		return true
+	}
+
+	// Environment variable display lines (key=value without context)
+	if strings.HasPrefix(line, "env:") {
+		return false
+	}
+
+	// Common noise patterns
+	noisePatterns := []string{
+		"shell: /usr/bin/bash",
+		"permissions:",
+		"##[endgroup]",
+		"##[group]",
+	}
+	for _, pattern := range noisePatterns {
+		if strings.Contains(line, pattern) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // extractShellError detects shell/binary errors in log lines (not marked with ##[error])
