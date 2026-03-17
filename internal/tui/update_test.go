@@ -7,6 +7,7 @@ import (
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
+//nolint:unused // test helper for pointer time values
 //go:fix inline
 func ptrTime(t time.Time) *time.Time {
 	return new(t)

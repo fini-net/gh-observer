@@ -49,8 +49,8 @@ func (m Model) View() tea.View {
 			}
 		}
 
-		b.WriteString(fmt.Sprintf("%s %s\n", prInfo, utcTime))
-		b.WriteString(fmt.Sprintf("%s\n", updatedLine))
+		fmt.Fprintf(&b, "%s %s\n", prInfo, utcTime)
+		fmt.Fprintf(&b, "%s\n", updatedLine)
 		b.WriteString("\n")
 	}
 
@@ -101,9 +101,10 @@ func (m Model) renderErrorBox(check ghclient.CheckRunInfo, widths ColumnWidths) 
 	// Separate annotations by level
 	var failures, warnings []ghclient.Annotation
 	for _, ann := range check.Annotations {
-		if ann.AnnotationLevel == "failure" {
+		switch ann.AnnotationLevel {
+		case "failure":
 			failures = append(failures, ann)
-		} else if ann.AnnotationLevel == "warning" {
+		case "warning":
 			warnings = append(warnings, ann)
 		}
 	}
@@ -125,9 +126,9 @@ func (m Model) renderErrorBox(check ghclient.CheckRunInfo, widths ColumnWidths) 
 
 	// Render job log errors
 	if len(logErrors) > 0 {
-		b.WriteString(fmt.Sprintf("%s%s\n", strings.Repeat(" ", indent), m.styles.Info.Render("From job logs:")))
+		fmt.Fprintf(&b, "%s%s\n", strings.Repeat(" ", indent), m.styles.Info.Render("From job logs:"))
 		for _, errMsg := range logErrors {
-			b.WriteString(fmt.Sprintf("%s  %s\n", strings.Repeat(" ", indent), m.styles.ErrorBox.Render(errMsg)))
+			fmt.Fprintf(&b, "%s  %s\n", strings.Repeat(" ", indent), m.styles.ErrorBox.Render(errMsg))
 		}
 	}
 
