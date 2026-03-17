@@ -95,7 +95,7 @@ func FetchPRInfo(ctx context.Context, client *github.Client, owner, repo string,
 	}
 
 	commitDate := ""
-	if commit.GetCommit().GetCommitter().GetDate().Time.IsZero() == false {
+	if !commit.GetCommit().GetCommitter().GetDate().Time.IsZero() {
 		commitDate = commit.GetCommit().GetCommitter().GetDate().Format("2006-01-02T15:04:05Z")
 	}
 

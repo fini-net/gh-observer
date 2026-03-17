@@ -142,7 +142,7 @@ func FetchJobAverages(
 			if job.Name == nil || job.StartedAt == nil || job.CompletedAt == nil {
 				continue
 			}
-			dur := job.CompletedAt.Time.Sub(job.StartedAt.Time)
+			dur := job.CompletedAt.Sub(job.StartedAt.Time)
 			if dur > 0 {
 				jobDurations[*job.Name] = append(jobDurations[*job.Name], dur)
 			}

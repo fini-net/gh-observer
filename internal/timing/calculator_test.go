@@ -277,6 +277,7 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
+//nolint:unused // test helper for pointer time values
 //go:fix inline
 func ptrTime(t time.Time) *time.Time {
 	return new(t)

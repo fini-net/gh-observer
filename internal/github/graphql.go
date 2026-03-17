@@ -160,11 +160,11 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 			}
 
 			var startedAt, completedAt *time.Time
-			if !checkRun.StartedAt.Time.IsZero() {
+			if !checkRun.StartedAt.IsZero() {
 				t := checkRun.StartedAt.Time
 				startedAt = &t
 			}
-			if !checkRun.CompletedAt.Time.IsZero() {
+			if !checkRun.CompletedAt.IsZero() {
 				t := checkRun.CompletedAt.Time
 				completedAt = &t
 			}

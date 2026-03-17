@@ -47,9 +47,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tick(m.refreshInterval),
 		)
 
-		// Re-schedule tick even if we can't poll yet
-		return m, tick(m.refreshInterval)
-
 	case PRInfoMsg:
 		if msg.Err != nil {
 			m.err = msg.Err
