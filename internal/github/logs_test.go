@@ -50,6 +50,32 @@ func TestParseErrorLines(t *testing.T) {
 			wantLen:     2,
 			wantContain: []string{"command not found", "exit code 127"},
 		},
+		{
+			name: "context line before generic exit code error",
+			input: `2026-03-16T18:56:23.0419487Z Linting blocked: commit message contains '[wip|fixup|no_ci]'.
+2026-03-16T18:56:23.0425787Z Error: Process completed with exit code 1.
+2026-03-16T18:56:23.0425787Z ##[error]Process completed with exit code 1.
+`,
+			wantLen:     2,
+			wantContain: []string{"Linting blocked", "exit code 1"},
+		},
+		{
+			name: "filters Run command echo before exit code",
+			input: `Run if git log --pretty=%B origin/main..HEAD | grep -Eiq 'wip|fixup|no_ci'; then
+2026-03-16T18:56:23.0425787Z ##[error]Process completed with exit code 1.
+`,
+			wantLen:     1,
+			wantContain: []string{"exit code 1"},
+		},
+		{
+			name: "captures meaningful line after Run echo",
+			input: `Run if git log --pretty=%B origin/main..HEAD | grep -Eiq 'wip|fixup|no_ci'; then
+Linting blocked: commit message contains '[wip|fixup|no_ci]'.
+2026-03-16T18:56:23.0425787Z ##[error]Process completed with exit code 1.
+`,
+			wantLen:     2,
+			wantContain: []string{"Linting blocked", "exit code 1"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -155,6 +181,105 @@ func TestExtractShellError(t *testing.T) {
 			got := extractShellError(tt.line)
 			if got != tt.want {
 				t.Errorf("extractShellError() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsGenericExitCodeError(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  string
+		want bool
+	}{
+		{
+			name: "generic exit code error",
+			msg:  "Process completed with exit code 1.",
+			want: true,
+		},
+		{
+			name: "generic exit code 127",
+			msg:  "Process completed with exit code 127.",
+			want: true,
+		},
+		{
+			name: "specific error",
+			msg:  "Some specific error message",
+			want: false,
+		},
+		{
+			name: "empty string",
+			msg:  "",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isGenericExitCodeError(tt.msg); got != tt.want {
+				t.Errorf("isGenericExitCodeError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsNoiseLine(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{
+			name: "empty line",
+			line: "",
+			want: true,
+		},
+		{
+			name: "whitespace only",
+			line: "   ",
+			want: true,
+		},
+		{
+			name: "Run if command",
+			line: "Run if git log --pretty=%B origin/main..HEAD | grep -Eiq 'wip|fixup|no_ci'; then",
+			want: true,
+		},
+		{
+			name: "shell line",
+			line: "shell: /usr/bin/bash -e {0}",
+			want: true,
+		},
+		{
+			name: "meaningful error line",
+			line: "Linting blocked: commit message contains '[wip|fixup|no_ci]'.",
+			want: false,
+		},
+		{
+			name: "env line",
+			line: "env:",
+			want: false,
+		},
+		{
+			name: "group marker",
+			line: "##[group]Some group",
+			want: true,
+		},
+		{
+			name: "regular output",
+			line: "Running tests...",
+			want: false,
+		},
+		{
+			name: "Error echo before ##[error]",
+			line: "Error: Process completed with exit code 1.",
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isNoiseLine(tt.line); got != tt.want {
+				t.Errorf("isNoiseLine() = %v, want %v", got, tt.want)
 			}
 		})
 	}
