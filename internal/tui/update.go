@@ -209,9 +209,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SlowJobLogMsg:
 		// Clear pending flag and store results
 		delete(m.slowLogFetchPending, msg.JobID)
+		m.slowLogLastFetch[msg.JobID] = time.Now()
 		if msg.Err == nil && len(msg.Lines) > 0 {
 			m.jobSlowLogs[msg.JobID] = msg.Lines
-			m.slowLogLastFetch[msg.JobID] = time.Now()
 		}
 		return m, nil
 

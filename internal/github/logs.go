@@ -3,6 +3,7 @@ package github
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -225,54 +226,68 @@ func FetchLastNJobLines(ctx context.Context, client *github.Client, owner, repo 
 		return nil, err
 	}
 
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, logURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
 	httpClient := &http.Client{}
-	resp, err := httpClient.Get(logURL.String())
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil
+		return nil, fmt.Errorf("failed to fetch job logs: HTTP %s", resp.Status)
 	}
 
-	return parseLastNLines(resp.Body, n), nil
+	return parseLastNLines(resp.Body, n)
 }
 
 // parseLastNLines extracts the last N lines from log output, with cleanup.
-func parseLastNLines(reader io.Reader, n int) []string {
+// Uses a ring buffer to maintain O(N) memory usage regardless of log size.
+func parseLastNLines(reader io.Reader, n int) ([]string, error) {
 	scanner := bufio.NewScanner(reader)
-	var allLines []string
+	buf := make([]byte, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	ring := make([]string, n)
+	idx := 0
+	count := 0
 
 	for scanner.Scan() {
-		allLines = append(allLines, scanner.Text())
+		ring[idx] = scanner.Text()
+		idx = (idx + 1) % n
+		count++
 	}
 
-	if len(allLines) == 0 {
-		return nil
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to scan log lines: %w", err)
 	}
 
-	// Get last N lines
-	start := 0
-	if len(allLines) > n {
-		start = len(allLines) - n
+	if count == 0 {
+		return nil, nil
 	}
 
-	var result []string
-	for i := start; i < len(allLines); i++ {
-		line := allLines[i]
-		// Strip timestamp prefix if present (format: "2026-03-16T18:56:23.0419487Z <content>")
+	if count > n {
+		count = n
+	}
+
+	result := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		pos := (idx + i) % n
+		line := ring[pos]
 		if idx := strings.Index(line, "Z "); idx != -1 {
 			line = line[idx+2:]
 		}
-		// Truncate long lines
 		if len(line) > maxSlowLogLineLen {
 			line = line[:maxSlowLogLineLen-3] + "..."
 		}
-		if strings.TrimSpace(line) != "" {
-			result = append(result, strings.TrimSpace(line))
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			result = append(result, trimmed)
 		}
 	}
 
-	return result
+	return result, nil
 }
