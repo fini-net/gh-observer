@@ -10,6 +10,10 @@ import (
 	"github.com/google/go-github/v84/github"
 )
 
+const (
+	maxSlowLogLineLen = 200
+)
+
 // FetchJobLogs retrieves job logs and extracts relevant error lines.
 // Returns up to 3 most relevant error lines from the logs.
 func FetchJobLogs(ctx context.Context, client *github.Client, owner, repo string, jobID int64) ([]string, error) {
@@ -211,4 +215,64 @@ func extractErrorMessage(line string) string {
 // ExtractJobIDFromDetailsURL extracts the job ID from a GitHub Actions details URL.
 func ExtractJobIDFromDetailsURL(detailsURL string) (int64, error) {
 	return ParseJobIDFromURL(detailsURL)
+}
+
+// FetchLastNJobLines fetches the last N lines from a job's logs.
+// Lines are truncated to maxSlowLogLineLen characters and timestamp prefixes are stripped.
+func FetchLastNJobLines(ctx context.Context, client *github.Client, owner, repo string, jobID int64, n int) ([]string, error) {
+	logURL, _, err := client.Actions.GetWorkflowJobLogs(ctx, owner, repo, jobID, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	httpClient := &http.Client{}
+	resp, err := httpClient.Get(logURL.String())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil
+	}
+
+	return parseLastNLines(resp.Body, n), nil
+}
+
+// parseLastNLines extracts the last N lines from log output, with cleanup.
+func parseLastNLines(reader io.Reader, n int) []string {
+	scanner := bufio.NewScanner(reader)
+	var allLines []string
+
+	for scanner.Scan() {
+		allLines = append(allLines, scanner.Text())
+	}
+
+	if len(allLines) == 0 {
+		return nil
+	}
+
+	// Get last N lines
+	start := 0
+	if len(allLines) > n {
+		start = len(allLines) - n
+	}
+
+	var result []string
+	for i := start; i < len(allLines); i++ {
+		line := allLines[i]
+		// Strip timestamp prefix if present (format: "2026-03-16T18:56:23.0419487Z <content>")
+		if idx := strings.Index(line, "Z "); idx != -1 {
+			line = line[idx+2:]
+		}
+		// Truncate long lines
+		if len(line) > maxSlowLogLineLen {
+			line = line[:maxSlowLogLineLen-3] + "..."
+		}
+		if strings.TrimSpace(line) != "" {
+			result = append(result, strings.TrimSpace(line))
+		}
+	}
+
+	return result
 }
