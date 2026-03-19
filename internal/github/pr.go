@@ -37,13 +37,6 @@ func GetCurrentPR() (int, error) {
 	return prNumber, nil
 }
 
-// PRWithRepo contains PR number and its repository coordinates
-type PRWithRepo struct {
-	Number int
-	Owner  string
-	Repo   string
-}
-
 // parsePRViewWithRepo parses JSON output from 'gh pr view --json number,url'
 func parsePRViewWithRepo(jsonOutput []byte) (int, string, string, error) {
 	var result struct {
