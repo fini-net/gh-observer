@@ -251,12 +251,12 @@ func (m Model) renderStartupPhase() string {
 	var b strings.Builder
 
 	if sinceStart < 2*time.Minute {
-		b.WriteString(fmt.Sprintf("%s ", m.spinner.View()))
+		fmt.Fprintf(&b, "%s ", m.spinner.View())
 		b.WriteString(m.styles.Running.Render(fmt.Sprintf("Startup Phase (%s elapsed):\n", timing.FormatDuration(sinceStart))))
 		b.WriteString("  ⏳ Waiting for Actions to start...\n")
 		b.WriteString("  💡 GitHub typically takes 30-90s to queue jobs after PR creation\n")
 	} else if sinceStart < 3*time.Minute {
-		b.WriteString(fmt.Sprintf("%s ", m.spinner.View()))
+		fmt.Fprintf(&b, "%s ", m.spinner.View())
 		b.WriteString(m.styles.Running.Render(fmt.Sprintf("Still waiting (%s elapsed)...\n", timing.FormatDuration(sinceStart))))
 		b.WriteString("  ⏳ Checks may be delayed or not configured for this PR\n")
 	} else {

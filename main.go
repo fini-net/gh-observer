@@ -108,7 +108,7 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 			if check.StartedAt == nil {
 				continue
 			}
-			if check.Status != "in_progress" && !(check.Status == "completed" && check.Conclusion == "success") {
+			if check.Status != "in_progress" && (check.Status != "completed" || check.Conclusion != "success") {
 				continue
 			}
 
