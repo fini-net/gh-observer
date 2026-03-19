@@ -44,16 +44,11 @@ type PRWithRepo struct {
 	Repo   string
 }
 
-// parsePRViewWithRepo parses JSON output from 'gh pr view --json number,baseRepository'
+// parsePRViewWithRepo parses JSON output from 'gh pr view --json number,url'
 func parsePRViewWithRepo(jsonOutput []byte) (int, string, string, error) {
 	var result struct {
-		Number         int `json:"number"`
-		BaseRepository struct {
-			Owner struct {
-				Login string `json:"login"`
-			} `json:"owner"`
-			Name string `json:"name"`
-		} `json:"baseRepository"`
+		Number int    `json:"number"`
+		URL    string `json:"url"`
 	}
 
 	if err := json.Unmarshal(jsonOutput, &result); err != nil {
@@ -64,22 +59,29 @@ func parsePRViewWithRepo(jsonOutput []byte) (int, string, string, error) {
 		return 0, "", "", fmt.Errorf("PR number is zero or missing")
 	}
 
-	if result.BaseRepository.Owner.Login == "" {
-		return 0, "", "", fmt.Errorf("repository owner is missing")
+	if result.URL == "" {
+		return 0, "", "", fmt.Errorf("PR URL is missing")
 	}
 
-	if result.BaseRepository.Name == "" {
-		return 0, "", "", fmt.Errorf("repository name is missing")
+	// Parse owner/repo from URL like https://github.com/owner/repo/pull/123
+	owner, repo, prNum, err := ParsePRURL(result.URL)
+	if err != nil {
+		return 0, "", "", fmt.Errorf("failed to parse PR URL: %w", err)
 	}
 
-	return result.Number, result.BaseRepository.Owner.Login, result.BaseRepository.Name, nil
+	// Sanity check: parsed PR number should match
+	if prNum != result.Number {
+		return 0, "", "", fmt.Errorf("PR number mismatch: URL has %d, JSON has %d", prNum, result.Number)
+	}
+
+	return result.Number, owner, repo, nil
 }
 
 // GetCurrentPRWithRepo auto-detects PR number and repository from current branch.
-// This correctly handles forked repos by getting owner/repo from the PR's baseRepository
+// This correctly handles forked repos by getting owner/repo from the PR URL
 // rather than from the local git remote.
 func GetCurrentPRWithRepo() (int, string, string, error) {
-	cmd := exec.Command("gh", "pr", "view", "--json", "number,baseRepository")
+	cmd := exec.Command("gh", "pr", "view", "--json", "number,url")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, "", "", fmt.Errorf("not on a PR branch or gh CLI not available")
@@ -89,9 +91,9 @@ func GetCurrentPRWithRepo() (int, string, string, error) {
 }
 
 // GetPRWithRepo fetches PR number and repository for an explicit PR number.
-// This correctly handles forked repos by getting owner/repo from the PR's baseRepository.
+// This correctly handles forked repos by getting owner/repo from the PR URL.
 func GetPRWithRepo(prNumber int) (int, string, string, error) {
-	cmd := exec.Command("gh", "pr", "view", strconv.Itoa(prNumber), "--json", "number,baseRepository")
+	cmd := exec.Command("gh", "pr", "view", strconv.Itoa(prNumber), "--json", "number,url")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, "", "", fmt.Errorf("failed to view PR #%d: %w", prNumber, err)

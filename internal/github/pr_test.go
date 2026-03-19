@@ -126,15 +126,15 @@ func TestParsePRViewWithRepo(t *testing.T) {
 	}{
 		{
 			name:       "valid PR view output",
-			jsonInput:  `{"number":4173,"baseRepository":{"owner":{"login":"StackExchange"},"name":"dnscontrol"}}`,
+			jsonInput:  `{"number":4173,"url":"https://github.com/StackExchange/dnscontrol/pull/4173"}`,
 			wantNumber: 4173,
 			wantOwner:  "StackExchange",
 			wantRepo:   "dnscontrol",
 			wantErr:    false,
 		},
 		{
-			name:       "fork scenario - upstream repo returned",
-			jsonInput:  `{"number":123,"baseRepository":{"owner":{"login":"upstream-owner"},"name":"upstream-repo"}}`,
+			name:       "fork scenario - upstream repo in URL",
+			jsonInput:  `{"number":123,"url":"https://github.com/upstream-owner/upstream-repo/pull/123"}`,
 			wantNumber: 123,
 			wantOwner:  "upstream-owner",
 			wantRepo:   "upstream-repo",
@@ -142,7 +142,7 @@ func TestParsePRViewWithRepo(t *testing.T) {
 		},
 		{
 			name:       "owner with hyphens and numbers",
-			jsonInput:  `{"number":456,"baseRepository":{"owner":{"login":"org-123"},"name":"repo-name-789"}}`,
+			jsonInput:  `{"number":456,"url":"https://github.com/org-123/repo-name-789/pull/456"}`,
 			wantNumber: 456,
 			wantOwner:  "org-123",
 			wantRepo:   "repo-name-789",
@@ -150,7 +150,7 @@ func TestParsePRViewWithRepo(t *testing.T) {
 		},
 		{
 			name:       "repo with dots",
-			jsonInput:  `{"number":1,"baseRepository":{"owner":{"login":"owner"},"name":"repo.name"}}`,
+			jsonInput:  `{"number":1,"url":"https://github.com/owner/repo.name/pull/1"}`,
 			wantNumber: 1,
 			wantOwner:  "owner",
 			wantRepo:   "repo.name",
@@ -158,7 +158,7 @@ func TestParsePRViewWithRepo(t *testing.T) {
 		},
 		{
 			name:       "missing number",
-			jsonInput:  `{"baseRepository":{"owner":{"login":"owner"},"name":"repo"}}`,
+			jsonInput:  `{"url":"https://github.com/owner/repo/pull/123"}`,
 			wantNumber: 0,
 			wantOwner:  "",
 			wantRepo:   "",
@@ -166,22 +166,22 @@ func TestParsePRViewWithRepo(t *testing.T) {
 			errContain: "PR number is zero or missing",
 		},
 		{
-			name:       "missing owner",
-			jsonInput:  `{"number":123,"baseRepository":{"owner":{"login":""},"name":"repo"}}`,
+			name:       "missing URL",
+			jsonInput:  `{"number":123}`,
 			wantNumber: 0,
 			wantOwner:  "",
 			wantRepo:   "",
 			wantErr:    true,
-			errContain: "repository owner is missing",
+			errContain: "PR URL is missing",
 		},
 		{
-			name:       "missing repo name",
-			jsonInput:  `{"number":123,"baseRepository":{"owner":{"login":"owner"},"name":""}}`,
+			name:       "invalid URL format",
+			jsonInput:  `{"number":123,"url":"https://github.com/owner/repo/issues/123"}`,
 			wantNumber: 0,
 			wantOwner:  "",
 			wantRepo:   "",
 			wantErr:    true,
-			errContain: "repository name is missing",
+			errContain: "failed to parse PR URL",
 		},
 		{
 			name:       "invalid JSON",
@@ -200,6 +200,15 @@ func TestParsePRViewWithRepo(t *testing.T) {
 			wantRepo:   "",
 			wantErr:    true,
 			errContain: "PR number is zero or missing",
+		},
+		{
+			name:       "PR number mismatch in URL",
+			jsonInput:  `{"number":123,"url":"https://github.com/owner/repo/pull/456"}`,
+			wantNumber: 0,
+			wantOwner:  "",
+			wantRepo:   "",
+			wantErr:    true,
+			errContain: "PR number mismatch",
 		},
 	}
 
