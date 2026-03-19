@@ -216,33 +216,24 @@ func run(args []string) int {
 				return 1
 			}
 		} else {
-			// PR number provided: parse number, get owner/repo from git remote
+			// PR number provided: use gh pr view to get correct repo (handles forks)
 			n, err := strconv.Atoi(arg)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Invalid PR number or URL: %s\n", arg)
 				return 1
 			}
-			prNumber = n
-
-			owner, repo, err = ghclient.ParseOwnerRepo()
+			prNumber, owner, repo, err = ghclient.GetPRWithRepo(n)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to parse repository: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Failed to get PR #%d: %v\n", n, err)
 				return 1
 			}
 		}
 	} else {
-		// Auto-detect PR from current branch
-		n, err := ghclient.GetCurrentPR()
+		// Auto-detect PR from current branch (correctly handles forks)
+		prNumber, owner, repo, err = ghclient.GetCurrentPRWithRepo()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to detect PR: %v\n", err)
 			fmt.Fprintf(os.Stderr, "Make sure you're on a PR branch or provide a PR number or URL\n")
-			return 1
-		}
-		prNumber = n
-
-		owner, repo, err = ghclient.ParseOwnerRepo()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to parse repository: %v\n", err)
 			return 1
 		}
 	}

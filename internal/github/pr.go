@@ -37,6 +37,69 @@ func GetCurrentPR() (int, error) {
 	return prNumber, nil
 }
 
+// PRWithRepo contains PR number and its repository coordinates
+type PRWithRepo struct {
+	Number int
+	Owner  string
+	Repo   string
+}
+
+// parsePRViewWithRepo parses JSON output from 'gh pr view --json number,baseRepository'
+func parsePRViewWithRepo(jsonOutput []byte) (int, string, string, error) {
+	var result struct {
+		Number         int `json:"number"`
+		BaseRepository struct {
+			Owner struct {
+				Login string `json:"login"`
+			} `json:"owner"`
+			Name string `json:"name"`
+		} `json:"baseRepository"`
+	}
+
+	if err := json.Unmarshal(jsonOutput, &result); err != nil {
+		return 0, "", "", fmt.Errorf("failed to parse PR info: %w", err)
+	}
+
+	if result.Number == 0 {
+		return 0, "", "", fmt.Errorf("PR number is zero or missing")
+	}
+
+	if result.BaseRepository.Owner.Login == "" {
+		return 0, "", "", fmt.Errorf("repository owner is missing")
+	}
+
+	if result.BaseRepository.Name == "" {
+		return 0, "", "", fmt.Errorf("repository name is missing")
+	}
+
+	return result.Number, result.BaseRepository.Owner.Login, result.BaseRepository.Name, nil
+}
+
+// GetCurrentPRWithRepo auto-detects PR number and repository from current branch.
+// This correctly handles forked repos by getting owner/repo from the PR's baseRepository
+// rather than from the local git remote.
+func GetCurrentPRWithRepo() (int, string, string, error) {
+	cmd := exec.Command("gh", "pr", "view", "--json", "number,baseRepository")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, "", "", fmt.Errorf("not on a PR branch or gh CLI not available")
+	}
+
+	return parsePRViewWithRepo(output)
+}
+
+// GetPRWithRepo fetches PR number and repository for an explicit PR number.
+// This correctly handles forked repos by getting owner/repo from the PR's baseRepository.
+func GetPRWithRepo(prNumber int) (int, string, string, error) {
+	cmd := exec.Command("gh", "pr", "view", strconv.Itoa(prNumber), "--json", "number,baseRepository")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, "", "", fmt.Errorf("failed to view PR #%d: %w", prNumber, err)
+	}
+
+	return parsePRViewWithRepo(output)
+}
+
 // ParseOwnerRepo extracts owner and repo from git remote origin
 func ParseOwnerRepo() (string, string, error) {
 	cmd := exec.Command("git", "remote", "get-url", "origin")
