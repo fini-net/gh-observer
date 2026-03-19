@@ -114,6 +114,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Fetch logs for slow-running successful jobs (only if rate limit >= 100)
+		if m.slowNonerror && m.rateLimitRemaining >= 100 {
+			for _, check := range msg.CheckRuns {
+				// For in-progress jobs: poll every 10 seconds if runtime > 1 minute
+				if check.Status == "in_progress" && check.StartedAt != nil {
+					if time.Since(*check.StartedAt) < time.Minute {
+						continue
+					}
+
+					jobID, err := ghclient.ParseJobIDFromURL(check.DetailsURL)
+					if err != nil {
+						continue
+					}
+
+					// Check if we should fetch (10 second minimum interval)
+					lastFetch := m.slowLogLastFetch[jobID]
+					if time.Since(lastFetch) < 10*time.Second {
+						continue
+					}
+					if m.slowLogFetchPending[jobID] {
+						continue
+					}
+					m.slowLogFetchPending[jobID] = true
+					cmds = append(cmds, fetchSlowJobLogs(m.ctx, m.owner, m.repo, jobID))
+				}
+
+				// For completed successful jobs: fetch final logs once if runtime > 1 minute
+				if check.Status == "completed" && check.Conclusion == "success" {
+					if check.StartedAt == nil || check.CompletedAt == nil {
+						continue
+					}
+					if check.CompletedAt.Sub(*check.StartedAt) < time.Minute {
+						continue
+					}
+
+					jobID, err := ghclient.ParseJobIDFromURL(check.DetailsURL)
+					if err != nil {
+						continue
+					}
+
+					// Only fetch if we don't already have logs for this job
+					if m.jobSlowLogs[jobID] != nil || m.slowLogFetchPending[jobID] {
+						continue
+					}
+					m.slowLogFetchPending[jobID] = true
+					cmds = append(cmds, fetchSlowJobLogs(m.ctx, m.owner, m.repo, jobID))
+				}
+			}
+		}
+
 		if allChecksComplete(m.checkRuns) {
 			m.exitCode = determineExitCode(m.checkRuns)
 			m.checksComplete = true
@@ -156,6 +206,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.logFetchPending, msg.JobID)
 		if msg.Err == nil && len(msg.Errors) > 0 {
 			m.jobLogErrors[msg.JobID] = msg.Errors
+		}
+		return m, nil
+
+	case SlowJobLogMsg:
+		// Clear pending flag and store results
+		delete(m.slowLogFetchPending, msg.JobID)
+		m.slowLogLastFetch[msg.JobID] = time.Now()
+		if msg.Err == nil && len(msg.Lines) > 0 {
+			m.jobSlowLogs[msg.JobID] = msg.Lines
 		}
 		return m, nil
 
@@ -233,6 +292,22 @@ func fetchJobLogs(ctx context.Context, owner, repo string, jobID int64) tea.Cmd 
 			return JobLogMsg{JobID: jobID, Err: err}
 		}
 		return JobLogMsg{JobID: jobID, Errors: errors}
+	}
+}
+
+// fetchSlowJobLogs fetches the last N lines for a slow-running successful job.
+func fetchSlowJobLogs(ctx context.Context, owner, repo string, jobID int64) tea.Cmd {
+	return func() tea.Msg {
+		client, err := ghclient.NewClient(ctx)
+		if err != nil {
+			return SlowJobLogMsg{JobID: jobID, Err: err}
+		}
+
+		lines, err := ghclient.FetchLastNJobLines(ctx, client, owner, repo, jobID, 5)
+		if err != nil {
+			return SlowJobLogMsg{JobID: jobID, Err: err}
+		}
+		return SlowJobLogMsg{JobID: jobID, Lines: lines}
 	}
 }
 

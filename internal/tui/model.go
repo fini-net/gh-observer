@@ -59,6 +59,12 @@ type Model struct {
 	jobLogErrors    map[int64][]string
 	logFetchPending map[int64]bool
 
+	// Slow non-error job logs (for jobs running >1 minute)
+	slowNonerror        bool
+	jobSlowLogs         map[int64][]string
+	slowLogFetchPending map[int64]bool
+	slowLogLastFetch    map[int64]time.Time
+
 	// Set when all checks complete; used to defer quit until avgFetchDone
 	checksComplete bool
 }
@@ -72,27 +78,31 @@ type ColumnWidths struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool) Model {
+func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool, slowNonerror bool) Model {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	return Model{
-		ctx:                ctx,
-		token:              token,
-		owner:              owner,
-		repo:               repo,
-		prNumber:           prNumber,
-		spinner:            s,
-		startTime:          time.Now(),
-		lastUpdate:         time.Now(),
-		refreshInterval:    refreshInterval,
-		styles:             styles,
-		enableLinks:        enableLinks,
-		noAvg:              noAvg,
-		jobAverages:        make(map[string]time.Duration),
-		runIDToWorkflowID:  make(map[int64]int64),
-		fetchedWorkflowIDs: make(map[int64]bool),
-		jobLogErrors:       make(map[int64][]string),
-		logFetchPending:    make(map[int64]bool),
+		ctx:                 ctx,
+		token:               token,
+		owner:               owner,
+		repo:                repo,
+		prNumber:            prNumber,
+		spinner:             s,
+		startTime:           time.Now(),
+		lastUpdate:          time.Now(),
+		refreshInterval:     refreshInterval,
+		styles:              styles,
+		enableLinks:         enableLinks,
+		noAvg:               noAvg,
+		slowNonerror:        slowNonerror,
+		jobAverages:         make(map[string]time.Duration),
+		runIDToWorkflowID:   make(map[int64]int64),
+		fetchedWorkflowIDs:  make(map[int64]bool),
+		jobLogErrors:        make(map[int64][]string),
+		logFetchPending:     make(map[int64]bool),
+		jobSlowLogs:         make(map[int64][]string),
+		slowLogFetchPending: make(map[int64]bool),
+		slowLogLastFetch:    make(map[int64]time.Time),
 	}
 }
 

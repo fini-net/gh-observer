@@ -24,9 +24,11 @@ func main() {
 }
 
 var quickFlag bool
+var slowNonerrorFlag bool
 
 func init() {
 	rootCmd.Flags().BoolVarP(&quickFlag, "quick", "q", false, "Skip fetching historical average runtimes")
+	rootCmd.Flags().BoolVar(&slowNonerrorFlag, "slow-nonerror", false, "Show logs for successful jobs running longer than 1 minute")
 }
 
 var rootCmd = &cobra.Command{
@@ -46,7 +48,7 @@ Supports watching checks on external repositories by passing a full PR URL:
 }
 
 // runSnapshot prints a one-time snapshot of PR check status (non-interactive mode)
-func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, enableLinks bool, quick bool) int {
+func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, enableLinks bool, quick bool, slowNonerror bool) int {
 	// Create GitHub client for PR info
 	client, err := ghclient.NewClient(ctx)
 	if err != nil {
@@ -98,6 +100,40 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 		}
 	}
 
+	// Fetch slow job logs if requested
+	jobSlowLogs := make(map[int64][]string)
+	if slowNonerror {
+		for _, check := range checkRuns {
+			// Only for in_progress or completed success
+			if check.StartedAt == nil {
+				continue
+			}
+			if check.Status != "in_progress" && (check.Status != "completed" || check.Conclusion != "success") {
+				continue
+			}
+
+			// Check runtime > 1 minute
+			var runtime time.Duration
+			if check.Status == "in_progress" {
+				runtime = time.Since(*check.StartedAt)
+			} else if check.CompletedAt != nil {
+				runtime = check.CompletedAt.Sub(*check.StartedAt)
+			}
+			if runtime < time.Minute {
+				continue
+			}
+
+			jobID, err := ghclient.ParseJobIDFromURL(check.DetailsURL)
+			if err != nil {
+				continue
+			}
+			lines, err := ghclient.FetchLastNJobLines(ctx, client, owner, repo, jobID, 5)
+			if err == nil && len(lines) > 0 {
+				jobSlowLogs[jobID] = lines
+			}
+		}
+	}
+
 	// Calculate column widths
 	widths := tui.CalculateColumnWidths(checkRuns, headCommitTime, jobAverages)
 
@@ -126,6 +162,20 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 			conclusion := check.Conclusion
 			if conclusion == "failure" || conclusion == "timed_out" || conclusion == "action_required" {
 				exitCode = 1
+			}
+		}
+
+		// Print slow job logs if available
+		if slowNonerror {
+			jobID, err := ghclient.ParseJobIDFromURL(check.DetailsURL)
+			if err == nil {
+				if lines, ok := jobSlowLogs[jobID]; ok && len(lines) > 0 {
+					indent := widths.QueueWidth + 3
+					fmt.Printf("%sLast 5 lines:\n", strings.Repeat(" ", indent))
+					for _, line := range lines {
+						fmt.Printf("%s  %s\n", strings.Repeat(" ", indent), line)
+					}
+				}
 			}
 		}
 	}
@@ -207,11 +257,11 @@ func run(args []string) int {
 	// Check if running in a terminal
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
 		// Non-interactive mode: print snapshot and exit
-		return runSnapshot(ctx, token, owner, repo, prNumber, cfg.EnableLinks, quickFlag)
+		return runSnapshot(ctx, token, owner, repo, prNumber, cfg.EnableLinks, quickFlag, slowNonerrorFlag)
 	}
 
 	// Create model
-	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag)
+	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag, slowNonerrorFlag)
 
 	// Run TUI (keeps output visible after exit)
 	p := tea.NewProgram(model)

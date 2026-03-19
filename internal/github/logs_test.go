@@ -284,3 +284,119 @@ func TestIsNoiseLine(t *testing.T) {
 		})
 	}
 }
+
+func TestParseLastNLines(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		n        int
+		wantLen  int
+		wantErr  bool
+		contains []string
+	}{
+		{
+			name:    "n <= 0 returns error",
+			input:   "line1\nline2\n",
+			n:       0,
+			wantErr: true,
+		},
+		{
+			name:    "negative n returns error",
+			input:   "line1\nline2\n",
+			n:       -1,
+			wantErr: true,
+		},
+		{
+			name:    "empty input returns nil",
+			input:   "",
+			n:       5,
+			wantLen: 0,
+		},
+		{
+			name:    "empty lines only returns nil",
+			input:   "\n\n\n",
+			n:       5,
+			wantLen: 0,
+		},
+		{
+			name:     "fewer lines than n",
+			input:    "line1\nline2\nline3\n",
+			n:        5,
+			wantLen:  3,
+			contains: []string{"line1", "line2", "line3"},
+		},
+		{
+			name:     "exactly n lines",
+			input:    "line1\nline2\nline3\nline4\nline5\n",
+			n:        5,
+			wantLen:  5,
+			contains: []string{"line1", "line2", "line3", "line4", "line5"},
+		},
+		{
+			name:     "more lines than n returns last n",
+			input:    "line1\nline2\nline3\nline4\nline5\nline6\nline7\n",
+			n:        3,
+			wantLen:  3,
+			contains: []string{"line5", "line6", "line7"},
+		},
+		{
+			name:     "strips timestamp prefix",
+			input:    "2026-03-16T18:56:23.0419487Z actual content\n2026-03-16T18:56:24Z another line\n",
+			n:        5,
+			wantLen:  2,
+			contains: []string{"actual content", "another line"},
+		},
+		{
+			name:     "truncates long lines",
+			input:    strings.Repeat("x", 250) + "\n",
+			n:        5,
+			wantLen:  1,
+			contains: []string{strings.Repeat("x", 197) + "..."},
+		},
+		{
+			name:     "filters empty lines",
+			input:    "line1\n\n\nline2\n",
+			n:        5,
+			wantLen:  2,
+			contains: []string{"line1", "line2"},
+		},
+		{
+			name:     "preserves order from ring buffer",
+			input:    "first\nsecond\nthird\nfourth\nfifth\n",
+			n:        3,
+			wantLen:  3,
+			contains: []string{"third", "fourth", "fifth"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseLastNLines(strings.NewReader(tt.input), tt.n)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("parseLastNLines() expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("parseLastNLines() unexpected error: %v", err)
+				return
+			}
+			if len(got) != tt.wantLen {
+				t.Errorf("parseLastNLines() returned %d lines, want %d", len(got), tt.wantLen)
+			}
+			for _, want := range tt.contains {
+				found := false
+				for _, line := range got {
+					if strings.Contains(line, want) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("parseLastNLines() missing expected content %q in %v", want, got)
+				}
+			}
+		})
+	}
+}

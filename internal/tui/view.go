@@ -75,6 +75,11 @@ func (m Model) View() tea.View {
 		if check.Conclusion == "failure" || check.Conclusion == "timed_out" {
 			b.WriteString(m.renderErrorBox(check, widths))
 		}
+
+		// Show slow job logs for successful or in-progress jobs running >1 minute
+		if m.slowNonerror {
+			b.WriteString(m.renderSlowJobLogs(check, widths))
+		}
 	}
 
 	b.WriteString("\n")
@@ -246,18 +251,69 @@ func (m Model) renderStartupPhase() string {
 	var b strings.Builder
 
 	if sinceStart < 2*time.Minute {
-		b.WriteString(fmt.Sprintf("%s ", m.spinner.View()))
+		fmt.Fprintf(&b, "%s ", m.spinner.View())
 		b.WriteString(m.styles.Running.Render(fmt.Sprintf("Startup Phase (%s elapsed):\n", timing.FormatDuration(sinceStart))))
 		b.WriteString("  ⏳ Waiting for Actions to start...\n")
 		b.WriteString("  💡 GitHub typically takes 30-90s to queue jobs after PR creation\n")
 	} else if sinceStart < 3*time.Minute {
-		b.WriteString(fmt.Sprintf("%s ", m.spinner.View()))
+		fmt.Fprintf(&b, "%s ", m.spinner.View())
 		b.WriteString(m.styles.Running.Render(fmt.Sprintf("Still waiting (%s elapsed)...\n", timing.FormatDuration(sinceStart))))
 		b.WriteString("  ⏳ Checks may be delayed or not configured for this PR\n")
 	} else {
 		b.WriteString(m.styles.Queued.Render("No checks found.\n"))
 		b.WriteString("  This PR may not have workflows configured, or they may have been skipped.\n")
 	}
+
+	return b.String()
+}
+
+// renderSlowJobLogs displays the last N log lines for slow-running successful jobs.
+// Shows logs for in-progress jobs running >1 minute, and completed successful jobs >1 minute.
+func (m Model) renderSlowJobLogs(check ghclient.CheckRunInfo, widths ColumnWidths) string {
+	// Only for in_progress or completed success
+	if check.Status == "in_progress" {
+		// OK
+	} else if check.Status == "completed" && check.Conclusion == "success" {
+		// OK
+	} else {
+		return ""
+	}
+
+	// Must have start time
+	if check.StartedAt == nil {
+		return ""
+	}
+
+	// Check runtime > 1 minute
+	var runtime time.Duration
+	if check.Status == "in_progress" {
+		runtime = time.Since(*check.StartedAt)
+	} else if check.CompletedAt != nil {
+		runtime = check.CompletedAt.Sub(*check.StartedAt)
+	}
+
+	if runtime < time.Minute {
+		return ""
+	}
+
+	jobID, err := ghclient.ParseJobIDFromURL(check.DetailsURL)
+	if err != nil {
+		return ""
+	}
+
+	lines := m.jobSlowLogs[jobID]
+	if len(lines) == 0 {
+		return ""
+	}
+
+	indent := widths.QueueWidth + 3
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "%s%s\n", strings.Repeat(" ", indent), m.styles.Info.Render("│ Last 5 lines:"))
+	for _, line := range lines {
+		fmt.Fprintf(&b, "%s%s\n", strings.Repeat(" ", indent), m.styles.Queued.Render("│ "+line))
+	}
+	b.WriteString("\n")
 
 	return b.String()
 }
