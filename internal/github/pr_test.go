@@ -1,6 +1,7 @@
 package github
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -108,6 +109,132 @@ func TestParsePRURL(t *testing.T) {
 			}
 			if gotPRNum != tt.wantPRNum {
 				t.Errorf("ParsePRURL(%q) PR number = %d, want %d", tt.url, gotPRNum, tt.wantPRNum)
+			}
+		})
+	}
+}
+
+func TestParsePRViewWithRepo(t *testing.T) {
+	tests := []struct {
+		name       string
+		jsonInput  string
+		wantNumber int
+		wantOwner  string
+		wantRepo   string
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name:       "valid PR view output",
+			jsonInput:  `{"number":4173,"url":"https://github.com/StackExchange/dnscontrol/pull/4173"}`,
+			wantNumber: 4173,
+			wantOwner:  "StackExchange",
+			wantRepo:   "dnscontrol",
+			wantErr:    false,
+		},
+		{
+			name:       "fork scenario - upstream repo in URL",
+			jsonInput:  `{"number":123,"url":"https://github.com/upstream-owner/upstream-repo/pull/123"}`,
+			wantNumber: 123,
+			wantOwner:  "upstream-owner",
+			wantRepo:   "upstream-repo",
+			wantErr:    false,
+		},
+		{
+			name:       "owner with hyphens and numbers",
+			jsonInput:  `{"number":456,"url":"https://github.com/org-123/repo-name-789/pull/456"}`,
+			wantNumber: 456,
+			wantOwner:  "org-123",
+			wantRepo:   "repo-name-789",
+			wantErr:    false,
+		},
+		{
+			name:       "repo with dots",
+			jsonInput:  `{"number":1,"url":"https://github.com/owner/repo.name/pull/1"}`,
+			wantNumber: 1,
+			wantOwner:  "owner",
+			wantRepo:   "repo.name",
+			wantErr:    false,
+		},
+		{
+			name:       "missing number",
+			jsonInput:  `{"url":"https://github.com/owner/repo/pull/123"}`,
+			wantNumber: 0,
+			wantOwner:  "",
+			wantRepo:   "",
+			wantErr:    true,
+			errContain: "PR number is zero or missing",
+		},
+		{
+			name:       "missing URL",
+			jsonInput:  `{"number":123}`,
+			wantNumber: 0,
+			wantOwner:  "",
+			wantRepo:   "",
+			wantErr:    true,
+			errContain: "PR URL is missing",
+		},
+		{
+			name:       "invalid URL format",
+			jsonInput:  `{"number":123,"url":"https://github.com/owner/repo/issues/123"}`,
+			wantNumber: 0,
+			wantOwner:  "",
+			wantRepo:   "",
+			wantErr:    true,
+			errContain: "failed to parse PR URL",
+		},
+		{
+			name:       "invalid JSON",
+			jsonInput:  `{invalid json`,
+			wantNumber: 0,
+			wantOwner:  "",
+			wantRepo:   "",
+			wantErr:    true,
+			errContain: "failed to parse PR info",
+		},
+		{
+			name:       "empty JSON object",
+			jsonInput:  `{}`,
+			wantNumber: 0,
+			wantOwner:  "",
+			wantRepo:   "",
+			wantErr:    true,
+			errContain: "PR number is zero or missing",
+		},
+		{
+			name:       "PR number mismatch in URL",
+			jsonInput:  `{"number":123,"url":"https://github.com/owner/repo/pull/456"}`,
+			wantNumber: 0,
+			wantOwner:  "",
+			wantRepo:   "",
+			wantErr:    true,
+			errContain: "PR number mismatch",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotNumber, gotOwner, gotRepo, err := parsePRViewWithRepo([]byte(tt.jsonInput))
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("parsePRViewWithRepo(%q) expected error, got nil", tt.jsonInput)
+				} else if tt.errContain != "" && !strings.Contains(err.Error(), tt.errContain) {
+					t.Errorf("parsePRViewWithRepo(%q) error = %v, want error containing %q", tt.jsonInput, err, tt.errContain)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("parsePRViewWithRepo(%q) unexpected error: %v", tt.jsonInput, err)
+				return
+			}
+			if gotNumber != tt.wantNumber {
+				t.Errorf("parsePRViewWithRepo(%q) number = %d, want %d", tt.jsonInput, gotNumber, tt.wantNumber)
+			}
+			if gotOwner != tt.wantOwner {
+				t.Errorf("parsePRViewWithRepo(%q) owner = %q, want %q", tt.jsonInput, gotOwner, tt.wantOwner)
+			}
+			if gotRepo != tt.wantRepo {
+				t.Errorf("parsePRViewWithRepo(%q) repo = %q, want %q", tt.jsonInput, gotRepo, tt.wantRepo)
 			}
 		})
 	}
