@@ -117,22 +117,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Fetch logs for slow-running successful jobs (only if rate limit >= 100)
 		if m.slowNonerror && m.rateLimitRemaining >= 100 {
 			for _, check := range msg.CheckRuns {
-				// Skip if no start time or runtime < 1 minute
-				if check.StartedAt == nil {
-					continue
-				}
-				runtime := time.Since(*check.StartedAt)
-				if runtime < time.Minute {
-					continue
-				}
+				// For in-progress jobs: poll every 10 seconds if runtime > 1 minute
+				if check.Status == "in_progress" && check.StartedAt != nil {
+					if time.Since(*check.StartedAt) < time.Minute {
+						continue
+					}
 
-				jobID, err := ghclient.ParseJobIDFromURL(check.DetailsURL)
-				if err != nil {
-					continue
-				}
+					jobID, err := ghclient.ParseJobIDFromURL(check.DetailsURL)
+					if err != nil {
+						continue
+					}
 
-				// For in-progress jobs: poll every 10 seconds
-				if check.Status == "in_progress" {
 					// Check if we should fetch (10 second minimum interval)
 					lastFetch := m.slowLogLastFetch[jobID]
 					if time.Since(lastFetch) < 10*time.Second {
@@ -145,12 +140,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, fetchSlowJobLogs(m.ctx, m.owner, m.repo, jobID))
 				}
 
-				// For completed successful jobs: fetch final logs once
+				// For completed successful jobs: fetch final logs once if runtime > 1 minute
 				if check.Status == "completed" && check.Conclusion == "success" {
-					// Check if job actually ran > 1 minute
-					if check.CompletedAt == nil || check.CompletedAt.Sub(*check.StartedAt) < time.Minute {
+					if check.StartedAt == nil || check.CompletedAt == nil {
 						continue
 					}
+					if check.CompletedAt.Sub(*check.StartedAt) < time.Minute {
+						continue
+					}
+
+					jobID, err := ghclient.ParseJobIDFromURL(check.DetailsURL)
+					if err != nil {
+						continue
+					}
+
 					// Only fetch if we don't already have logs for this job
 					if m.jobSlowLogs[jobID] != nil || m.slowLogFetchPending[jobID] {
 						continue

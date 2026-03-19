@@ -248,6 +248,10 @@ func FetchLastNJobLines(ctx context.Context, client *github.Client, owner, repo 
 // parseLastNLines extracts the last N lines from log output, with cleanup.
 // Uses a ring buffer to maintain O(N) memory usage regardless of log size.
 func parseLastNLines(reader io.Reader, n int) ([]string, error) {
+	if n <= 0 {
+		return nil, fmt.Errorf("n must be positive, got %d", n)
+	}
+
 	scanner := bufio.NewScanner(reader)
 	buf := make([]byte, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
@@ -255,10 +259,15 @@ func parseLastNLines(reader io.Reader, n int) ([]string, error) {
 	ring := make([]string, n)
 	idx := 0
 	count := 0
+	wrapped := false
 
 	for scanner.Scan() {
 		ring[idx] = scanner.Text()
-		idx = (idx + 1) % n
+		idx++
+		if idx == n {
+			idx = 0
+			wrapped = true
+		}
 		count++
 	}
 
@@ -270,13 +279,19 @@ func parseLastNLines(reader io.Reader, n int) ([]string, error) {
 		return nil, nil
 	}
 
-	if count > n {
-		count = n
+	resultCount := count
+	if resultCount > n {
+		resultCount = n
 	}
 
-	result := make([]string, 0, count)
-	for i := 0; i < count; i++ {
-		pos := (idx + i) % n
+	result := make([]string, 0, resultCount)
+	startIdx := 0
+	if wrapped {
+		startIdx = idx
+	}
+
+	for i := 0; i < resultCount; i++ {
+		pos := (startIdx + i) % n
 		line := ring[pos]
 		if idx := strings.Index(line, "Z "); idx != -1 {
 			line = line[idx+2:]

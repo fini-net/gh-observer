@@ -10,7 +10,7 @@ import (
 //nolint:unused // test helper for pointer time values
 //go:fix inline
 func ptrTime(t time.Time) *time.Time {
-	return new(t)
+	return &t
 }
 
 func TestAllChecksComplete(t *testing.T) {
@@ -39,7 +39,7 @@ func TestAllChecksComplete(t *testing.T) {
 			name: "one in_progress returns false",
 			checks: []ghclient.CheckRunInfo{
 				{Status: "completed", Conclusion: "success"},
-				{Status: "in_progress", StartedAt: new(now)},
+				{Status: "in_progress", StartedAt: &now},
 			},
 			want: false,
 		},
@@ -61,7 +61,7 @@ func TestAllChecksComplete(t *testing.T) {
 		{
 			name: "single in_progress returns false",
 			checks: []ghclient.CheckRunInfo{
-				{Status: "in_progress", StartedAt: new(now)},
+				{Status: "in_progress", StartedAt: &now},
 			},
 			want: false,
 		},
