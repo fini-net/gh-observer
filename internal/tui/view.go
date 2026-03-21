@@ -268,7 +268,7 @@ func (m Model) renderStartupPhase() string {
 }
 
 // renderSlowJobLogs displays the last N log lines for slow-running successful jobs.
-// Shows logs for in-progress jobs running > slowLogRuntimeMin, and completed successful jobs > slowLogRuntimeMin.
+// Shows logs for in-progress jobs running at least slowLogRuntimeMin, and completed successful jobs running at least slowLogRuntimeMin.
 func (m Model) renderSlowJobLogs(check ghclient.CheckRunInfo, widths ColumnWidths) string {
 	// Only for in_progress or completed success
 	if check.Status == "in_progress" {

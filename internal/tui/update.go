@@ -117,7 +117,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Fetch logs for slow-running successful jobs (only if rate limit >= minRateLimitForFetch)
 		if m.slowNonerror && m.rateLimitRemaining >= minRateLimitForFetch {
 			for _, check := range msg.CheckRuns {
-				// For in-progress jobs: poll every slowLogFetchInterval if runtime > slowLogRuntimeMin
+				// For in-progress jobs: poll every slowLogFetchInterval if runtime >= slowLogRuntimeMin
 				if check.Status == "in_progress" && check.StartedAt != nil {
 					if time.Since(*check.StartedAt) < slowLogRuntimeMin {
 						continue

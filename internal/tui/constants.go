@@ -10,5 +10,4 @@ const (
 
 	rateBackoffThreshold = 10
 	minRateLimitForFetch = 100
-	fiveLogsFromEndOfJob = 5
 )
