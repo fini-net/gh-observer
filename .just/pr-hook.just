@@ -6,4 +6,6 @@
 _pr-hook:
     just shellcheck
     just claude_permissions_sort
+    just test
+    just build # to ensure we use the latest build for this PR
     @echo "{{BLUE}}Feel free to add more to the _pr-hook...{{NORMAL}}"
