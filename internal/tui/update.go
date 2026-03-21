@@ -36,7 +36,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case TickMsg:
 		// Check rate limit before polling
-		if m.rateLimitRemaining < 10 {
+		if m.rateLimitRemaining < rateBackoffThreshold {
 			// Back off if rate limited
 			return m, tick(m.refreshInterval * 3)
 		}
@@ -76,7 +76,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmds []tea.Cmd
 
 		// Check for new run IDs that need history fetching
-		if !m.noAvg && !m.avgFetchPending && m.rateLimitRemaining >= 100 {
+		if !m.noAvg && !m.avgFetchPending && m.rateLimitRemaining >= minRateLimitForFetch {
 			var newRunIDs []int64
 			for _, cr := range msg.CheckRuns {
 				if cr.DetailsURL == "" {
@@ -97,8 +97,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Fetch logs for newly failed checks (only if rate limit >= 100)
-		if m.rateLimitRemaining >= 100 {
+		// Fetch logs for newly failed checks (only if rate limit >= minRateLimitForFetch)
+		if m.rateLimitRemaining >= minRateLimitForFetch {
 			for _, check := range msg.CheckRuns {
 				if check.Conclusion == "failure" || check.Conclusion == "timed_out" {
 					jobID, err := ghclient.ParseJobIDFromURL(check.DetailsURL)
@@ -114,12 +114,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Fetch logs for slow-running successful jobs (only if rate limit >= 100)
-		if m.slowNonerror && m.rateLimitRemaining >= 100 {
+		// Fetch logs for slow-running successful jobs (only if rate limit >= minRateLimitForFetch)
+		if m.slowNonerror && m.rateLimitRemaining >= minRateLimitForFetch {
 			for _, check := range msg.CheckRuns {
-				// For in-progress jobs: poll every 10 seconds if runtime > 1 minute
+				// For in-progress jobs: poll every slowLogFetchInterval if runtime >= slowLogRuntimeMin
 				if check.Status == "in_progress" && check.StartedAt != nil {
-					if time.Since(*check.StartedAt) < time.Minute {
+					if time.Since(*check.StartedAt) < slowLogRuntimeMin {
 						continue
 					}
 
@@ -128,9 +128,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						continue
 					}
 
-					// Check if we should fetch (10 second minimum interval)
+					// Check if we should fetch (slowLogFetchInterval minimum interval)
 					lastFetch := m.slowLogLastFetch[jobID]
-					if time.Since(lastFetch) < 10*time.Second {
+					if time.Since(lastFetch) < slowLogFetchInterval {
 						continue
 					}
 					if m.slowLogFetchPending[jobID] {
@@ -140,12 +140,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, fetchSlowJobLogs(m.ctx, m.owner, m.repo, jobID))
 				}
 
-				// For completed successful jobs: fetch final logs once if runtime > 1 minute
+				// For completed successful jobs: fetch final logs once if runtime > slowLogRuntimeMin
 				if check.Status == "completed" && check.Conclusion == "success" {
 					if check.StartedAt == nil || check.CompletedAt == nil {
 						continue
 					}
-					if check.CompletedAt.Sub(*check.StartedAt) < time.Minute {
+					if check.CompletedAt.Sub(*check.StartedAt) < slowLogRuntimeMin {
 						continue
 					}
 

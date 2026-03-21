@@ -76,7 +76,7 @@ func (m Model) View() tea.View {
 			b.WriteString(m.renderErrorBox(check, widths))
 		}
 
-		// Show slow job logs for successful or in-progress jobs running >1 minute
+		// Show slow job logs for successful or in-progress jobs running > slowLogRuntimeMin
 		if m.slowNonerror {
 			b.WriteString(m.renderSlowJobLogs(check, widths))
 		}
@@ -84,7 +84,7 @@ func (m Model) View() tea.View {
 
 	b.WriteString("\n")
 
-	if m.rateLimitRemaining < 100 {
+	if m.rateLimitRemaining < minRateLimitForFetch {
 		b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
 	}
 
@@ -250,12 +250,12 @@ func (m Model) renderStartupPhase() string {
 
 	var b strings.Builder
 
-	if sinceStart < 2*time.Minute {
+	if sinceStart < slowJobThreshold {
 		fmt.Fprintf(&b, "%s ", m.spinner.View())
 		b.WriteString(m.styles.Running.Render(fmt.Sprintf("Startup Phase (%s elapsed):\n", timing.FormatDuration(sinceStart))))
 		b.WriteString("  ⏳ Waiting for Actions to start...\n")
 		b.WriteString("  💡 GitHub typically takes 30-90s to queue jobs after PR creation\n")
-	} else if sinceStart < 3*time.Minute {
+	} else if sinceStart < verySlowJobThreshold {
 		fmt.Fprintf(&b, "%s ", m.spinner.View())
 		b.WriteString(m.styles.Running.Render(fmt.Sprintf("Still waiting (%s elapsed)...\n", timing.FormatDuration(sinceStart))))
 		b.WriteString("  ⏳ Checks may be delayed or not configured for this PR\n")
@@ -268,7 +268,7 @@ func (m Model) renderStartupPhase() string {
 }
 
 // renderSlowJobLogs displays the last N log lines for slow-running successful jobs.
-// Shows logs for in-progress jobs running >1 minute, and completed successful jobs >1 minute.
+// Shows logs for in-progress jobs running at least slowLogRuntimeMin, and completed successful jobs running at least slowLogRuntimeMin.
 func (m Model) renderSlowJobLogs(check ghclient.CheckRunInfo, widths ColumnWidths) string {
 	// Only for in_progress or completed success
 	if check.Status == "in_progress" {
@@ -292,7 +292,7 @@ func (m Model) renderSlowJobLogs(check ghclient.CheckRunInfo, widths ColumnWidth
 		runtime = check.CompletedAt.Sub(*check.StartedAt)
 	}
 
-	if runtime < time.Minute {
+	if runtime < slowLogRuntimeMin {
 		return ""
 	}
 
