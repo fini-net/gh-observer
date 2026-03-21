@@ -159,8 +159,7 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 
 		// Determine exit code based on conclusions
 		if check.Status == "completed" {
-			conclusion := check.Conclusion
-			if conclusion == "failure" || conclusion == "timed_out" || conclusion == "action_required" {
+			if ghclient.FailureConclusion(check.Conclusion) {
 				exitCode = 1
 			}
 		}
