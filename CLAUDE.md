@@ -23,6 +23,7 @@ This repo uses `just` for all development tasks:
 
 - `just prweb` - Open current PR in web browser
 - `just pr_update` - Update PR description with current commits (done automatically by `again`)
+- `just deps-update` - Update Go dependencies and tidy go.mod/go.sum
 - `just test2cast <pr>` - Record asciinema demo of watching a specific PR
 - `just release_status` - Check release workflow status and list binaries
 - `just release_age` - Check how long ago the last release was
@@ -31,8 +32,9 @@ This repo uses `just` for all development tasks:
 
 - `just test` or `go test ./...` - Run all unit tests
 - `go test ./internal/timing/...` - Run timing tests only
+- `go test ./internal/github/...` - Run GitHub client tests only
 
-Unit tests live in `internal/timing/calculator_test.go` and cover queue latency, runtime, final duration, and duration formatting. The rest of the app (TUI, GitHub API interactions) is tested manually by running `just build` and pointing the binary at a real PR.
+Unit tests cover timing calculations, log parsing, history fetching, PR parsing, and TUI display/update logic. The TUI rendering and live GitHub API interactions are tested manually by running `just build` and pointing the binary at a real PR.
 
 ## Release Workflow
 
@@ -76,7 +78,7 @@ The `.github/workflows/release.yml` workflow:
 
 - **Trigger**: Push of tags matching `v*` pattern
 - **Action**: Uses `cli/gh-extension-precompile@v2`
-- **Go Version**: Auto-detected from `go.mod` (currently 1.25.7) via `go_version_file` parameter
+- **Go Version**: Auto-detected from `go.mod` (currently 1.26.1) via `go_version_file` parameter
 - **Security**: Generates attestations with `generate_attestations: true`
 - **Permissions**: Requires `contents: write`, `id-token: write`, `attestations: write`
 
@@ -219,6 +221,24 @@ Repository → PullRequest → Commits → StatusCheckRollup → CheckRun
 - "Claude Code Review / claude-review"
 - "Checkov" (legacy checks without workflow show job name only)
 
+### Historical job averages
+
+The `internal/github/history.go` module fetches historical job runtimes for ETA estimation:
+
+- `FetchJobAverages()` - Walks run IDs from current check run URLs → workflow IDs → recent completed runs → job durations, then averages them per job name
+- Results are keyed by bare job name (matching `CheckRunInfo.Name`)
+- Uses incremental caching via `knownRunIDToWorkflowID` and `knownFetchedWorkflowIDs` maps to avoid redundant API calls across polling cycles
+- Non-fatal: skips individual failures and returns whatever data was collected
+
+### Job log fetching
+
+The `internal/github/logs.go` module retrieves job logs to surface error context in the TUI:
+
+- `FetchJobLogs()` - Returns up to 3 most relevant error lines from a failed job's logs, looking for `##[error]` markers and surrounding context
+- `FetchLastNJobLines()` - Returns the last N lines from a slow/in-progress job's logs using a ring buffer (O(N) memory)
+- Both functions strip GitHub Actions timestamp prefixes from log lines
+- `FetchJobLogs()` includes smart context extraction: for generic "exit code" errors it captures the preceding meaningful line; for shell errors it pattern-matches (`command not found`, `No such file or directory`, etc.)
+
 ### Key timing calculations
 
 The `internal/timing/calculator.go` module provides three core metrics:
@@ -334,7 +354,7 @@ gh-observer && echo "All checks passed!"
 
 ### Required tools
 
-- `go` 1.25+ - Go programming language
+- `go` 1.26+ - Go programming language
 - `gh` - GitHub CLI (for auth and PR detection)
 - `git` - Version control
 
@@ -344,15 +364,15 @@ gh-observer && echo "All checks passed!"
 
 ### Go dependencies
 
-- `github.com/charmbracelet/bubbletea` - TUI framework (Elm Architecture)
-- `github.com/charmbracelet/lipgloss` - Terminal styling and layout
-- `github.com/charmbracelet/bubbles` - Reusable TUI components (spinner)
-- `github.com/google/go-github/v58` - GitHub REST API client (PR metadata)
+- `charm.land/bubbletea/v2` - TUI framework (Elm Architecture)
+- `charm.land/lipgloss/v2` - Terminal styling and layout
+- `charm.land/bubbles/v2` - Reusable TUI components (spinner)
+- `github.com/google/go-github/v84` - GitHub REST API client (PR metadata and log fetching)
 - `github.com/shurcooL/githubv4` - GitHub GraphQL API client (check runs)
 - `github.com/spf13/cobra` - CLI framework for command-line argument parsing
 - `github.com/spf13/viper` - Configuration management
 - `golang.org/x/oauth2` - OAuth2 authentication for GitHub
-- `golang.org/x/term` - Terminal detection for snapshot vs interactive mode
+- `github.com/charmbracelet/x/term` - Terminal detection for snapshot vs interactive mode
 
 ## Important implementation notes
 
