@@ -247,8 +247,8 @@ func fetchPRInfo(ctx context.Context, token, owner, repo string, prNumber int) t
 			return PRInfoMsg{Err: err}
 		}
 
-		createdAt, _ := time.Parse("2006-01-02T15:04:05Z", prInfo.CreatedAt)
-		headCommitTime, _ := time.Parse("2006-01-02T15:04:05Z", prInfo.HeadCommitDate)
+		createdAt, _ := ghclient.ParseTimestamp(prInfo.CreatedAt)
+		headCommitTime, _ := ghclient.ParseTimestamp(prInfo.HeadCommitDate)
 
 		return PRInfoMsg{
 			Number:         prInfo.Number,
@@ -344,7 +344,7 @@ func allChecksComplete(checks []ghclient.CheckRunInfo) bool {
 // determineExitCode returns 1 if any check failed, 0 otherwise
 func determineExitCode(checks []ghclient.CheckRunInfo) int {
 	for _, check := range checks {
-		if check.Conclusion == "failure" || check.Conclusion == "timed_out" || check.Conclusion == "action_required" {
+		if ghclient.FailureConclusion(check.Conclusion) {
 			return 1
 		}
 	}

@@ -12,6 +12,12 @@ import (
 	"github.com/google/go-github/v84/github"
 )
 
+var (
+	sshPattern   = regexp.MustCompile(`git@github\.com:([^/]+)/(.+?)(?:\.git)?/?$`)
+	httpsPattern = regexp.MustCompile(`https://github\.com/([^/]+)/(.+?)(?:\.git)?/?$`)
+	prURLPattern = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)$`)
+)
+
 // PRInfo contains metadata about a pull request
 type PRInfo struct {
 	Number         int
@@ -109,13 +115,11 @@ func ParseOwnerRepo() (string, string, error) {
 // parseOwnerRepoFromURL extracts owner and repo from a remote URL string
 func parseOwnerRepoFromURL(url string) (string, string, error) {
 	// Parse SSH format: git@github.com:owner/repo.git
-	sshPattern := regexp.MustCompile(`git@github\.com:([^/]+)/(.+?)(?:\.git)?/?$`)
 	if matches := sshPattern.FindStringSubmatch(url); len(matches) == 3 {
 		return matches[1], strings.TrimSuffix(matches[2], "/"), nil
 	}
 
 	// Parse HTTPS format: https://github.com/owner/repo or https://github.com/owner/repo.git
-	httpsPattern := regexp.MustCompile(`https://github\.com/([^/]+)/(.+?)(?:\.git)?/?$`)
 	if matches := httpsPattern.FindStringSubmatch(url); len(matches) == 3 {
 		return matches[1], strings.TrimSuffix(matches[2], "/"), nil
 	}
@@ -125,8 +129,7 @@ func parseOwnerRepoFromURL(url string) (string, string, error) {
 
 // ParsePRURL extracts owner, repo, and PR number from a GitHub PR URL
 func ParsePRURL(prURL string) (owner, repo string, prNumber int, err error) {
-	pattern := regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)$`)
-	matches := pattern.FindStringSubmatch(prURL)
+	matches := prURLPattern.FindStringSubmatch(prURL)
 	if len(matches) != 4 {
 		return "", "", 0, fmt.Errorf("invalid PR URL: %s (expected https://github.com/owner/repo/pull/NNN)", prURL)
 	}
@@ -154,14 +157,14 @@ func FetchPRInfo(ctx context.Context, client *github.Client, owner, repo string,
 
 	commitDate := ""
 	if !commit.GetCommit().GetCommitter().GetDate().IsZero() {
-		commitDate = commit.GetCommit().GetCommitter().GetDate().Format("2006-01-02T15:04:05Z")
+		commitDate = commit.GetCommit().GetCommitter().GetDate().Format(TimestampFormat)
 	}
 
 	return &PRInfo{
 		Number:         prNumber,
 		Title:          pr.GetTitle(),
 		HeadSHA:        headSHA,
-		CreatedAt:      pr.GetCreatedAt().Format("2006-01-02T15:04:05Z"),
+		CreatedAt:      pr.GetCreatedAt().Format(TimestampFormat),
 		HeadCommitDate: commitDate,
 	}, nil
 }

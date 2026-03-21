@@ -106,12 +106,18 @@ func extractMeaningfulContext(prevLine, prevPrevLine string) string {
 	return extractContextLine(prevPrevLine)
 }
 
+// stripTimestampPrefix removes the GitHub Actions timestamp prefix from a log line.
+// Format: "2026-03-16T18:56:23.0419487Z <actual content>"
+func stripTimestampPrefix(line string) string {
+	if idx := strings.Index(line, "Z "); idx != -1 {
+		return line[idx+2:]
+	}
+	return line
+}
+
 // extractContextLine extracts meaningful context from a log line
 func extractContextLine(line string) string {
-	// Strip timestamp prefix if present
-	if idx := strings.Index(line, "Z "); idx != -1 {
-		line = line[idx+2:]
-	}
+	line = stripTimestampPrefix(line)
 
 	// Filter out noise
 	if isNoiseLine(line) {
@@ -166,11 +172,7 @@ func isNoiseLine(line string) bool {
 
 // extractShellError detects shell/binary errors in log lines (not marked with ##[error])
 func extractShellError(line string) string {
-	// Strip timestamp prefix if present
-	// Format: "2026-03-16T18:56:23.0419487Z <actual content>"
-	if idx := strings.Index(line, "Z "); idx != -1 {
-		line = line[idx+2:]
-	}
+	line = stripTimestampPrefix(line)
 
 	// Look for shell script error patterns
 	// Pattern 1: "/path/to/script.sh: line N: command: error message"
@@ -292,10 +294,7 @@ func parseLastNLines(reader io.Reader, n int) ([]string, error) {
 
 	for i := 0; i < resultCount; i++ {
 		pos := (startIdx + i) % n
-		line := ring[pos]
-		if idx := strings.Index(line, "Z "); idx != -1 {
-			line = line[idx+2:]
-		}
+		line := stripTimestampPrefix(ring[pos])
 		if len(line) > maxSlowLogLineLen {
 			line = line[:maxSlowLogLineLen-3] + "..."
 		}
