@@ -14,7 +14,7 @@ so many years!  Thank you.
 
 ![animation of checking the GHA status on a merged PR](gh-observer-merged-pr.gif)
 
-This show in real-time (not accelerated) how it goes when you check out a
+This shows in real-time (not accelerated) how it goes when you check out a
 PR that is already merged.
 
 ### PR that was just created
