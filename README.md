@@ -59,7 +59,10 @@ Thanks to [asciinema](https://asciinema.org/) we can show you:
 
 ### PR that was already merged
 
-![animation of checking the GHA status on a merged PR](docs/gh-observer-merged-pr.gif)
+![animation of checking the GHA status on a merged PR](docs/gh-observer-merged-pr2.gif)
+
+This show in real-time (not accelerated) how it goes when you check out a
+PR that is already merged.
 
 ### PR that was just created
 
