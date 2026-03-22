@@ -1,4 +1,4 @@
-# gh-observer
+# gh observer
 
 ![GitHub Issues](https://img.shields.io/github/issues/fini-net/gh-observer)
 ![GitHub Pull Requests](https://img.shields.io/github/issues-pr/fini-net/gh-observer)
@@ -55,11 +55,23 @@ Press q to quit
 
 ## Example Animations
 
-Thanks to [asciinema](https://asciinema.org/) we can show you:
+Thanks to [asciinema](https://asciinema.org/) we can show you how our extension
+looks in practice.  You can compare to [old animations](docs/OldAnimations.md) to
+see how we have evolved.
 
 ### PR that was already merged
 
-![animation of checking the GHA status on a merged PR](docs/gh-observer-merged-pr.gif)
+![animation of checking the GHA status on a merged PR](docs/gh-observer-merged-pr2.gif)
+
+This shows in real-time (not accelerated) how it goes when you check out a
+PR that is already merged.
+
+### PR in remote repo that was already merged
+
+![animation of checking the GHA status on a merged PR in a remote repo](docs/gh-observer-uncloned-repo.gif)
+
+Again in real-time, but now checking out a PR on a repo that we do not
+have cloned locally.  Note: it requires the full URL.
 
 ### PR that was just created
 
@@ -70,7 +82,7 @@ error log output is integrated alongside the list of jobs.
 
 ### PR that was just created with GHAs that use descriptions
 
-![animation of watching checks after creating a PR with GHAs that use descriptions](docs/gh-observer-descriptions.gif)
+![animation of watching checks after creating a PR with GHAs that use descriptions](docs/gh-observer-descriptions2.gif)
 
 The [Super-Linter](https://github.com/super-linter/super-linter) and a few other
 GitHub Actions utilize the description field to convey success or failure.  Our

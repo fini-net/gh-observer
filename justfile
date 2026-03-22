@@ -16,7 +16,7 @@ list:
 	just --list
 	@echo "{{GREEN}}Your justfile is waiting for more scripts and snippets{{NORMAL}}"
 
-# build the gh-observer binary and install locally
+# record a cast for a PR to help AI understand problems
 [group('Testing')]
 test2cast pr="25": build
 	asciinema record -c "./gh-observer {{ pr }}" --overwrite ".cache/pr-{{ pr }}.cast"
