@@ -68,6 +68,8 @@ PR that is already merged.
 
 ### PR in remote repo that was already merged
 
+Running `gh observer https://github.com/MartinDelille/nautilus/pull/13` results in:
+
 ![animation of checking the GHA status on a merged PR in a remote repo](docs/gh-observer-uncloned-repo.gif)
 
 Again in real-time, but now checking out a PR on a repo that we do not
