@@ -66,6 +66,13 @@ see how we have evolved.
 This shows in real-time (not accelerated) how it goes when you check out a
 PR that is already merged.
 
+### PR in remote repo that was already merged
+
+![animation of checking the GHA status on a merged PR in a remote repo](docs/gh-observer-uncloned-repo.gif)
+
+Again in real-time, but now checking out a PR on a repo that we do not
+have cloned locally.  Note: it requires the full URL.
+
 ### PR that was just created
 
 ![animation of watching checks after creating a PR](docs/gh-observer-active-pr.gif)
