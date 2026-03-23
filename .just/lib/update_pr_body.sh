@@ -53,6 +53,7 @@ fi
 
 # Parse the original body
 while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"  # normalize CRLF: strip trailing carriage return
     # Track code blocks (triple backticks)
     if [[ "$line" =~ ^\`\`\` ]]; then
         if [[ "$in_code_block" == true ]]; then
