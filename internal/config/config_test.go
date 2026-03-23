@@ -123,7 +123,7 @@ func TestLoad_PartialConfig(t *testing.T) {
 	}
 }
 
-func TestLoad_InvalidYAML(t *testing.T) {
+func TestLoad_InvalidDuration(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
@@ -140,7 +140,32 @@ func TestLoad_InvalidYAML(t *testing.T) {
 
 	_, err := Load()
 	if err == nil {
-		t.Error("Load() expected error for invalid YAML, got nil")
+		t.Error("Load() expected error for invalid duration, got nil")
+	}
+}
+
+func TestLoad_InvalidYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, ".config", "gh-observer")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("failed to create config dir: %v", err)
+	}
+
+	invalidYAML := "refresh_interval: 10s\n  invalid_indent: missing colon\n"
+	configPath := filepath.Join(configDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(invalidYAML), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v (currently unmarshalling uses defaults on YAML parse error)", err)
+	}
+
+	if cfg.RefreshInterval != 5*time.Second {
+		t.Errorf("RefreshInterval = %v, want 5s (default)", cfg.RefreshInterval)
 	}
 }
 
