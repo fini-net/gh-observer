@@ -1,11 +1,27 @@
 package tui
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
+
+func makeModel() *Model {
+	return &Model{
+		ctx:                 context.Background(),
+		token:               "test-token",
+		owner:               "test-owner",
+		repo:                "test-repo",
+		rateLimitRemaining:  5000,
+		jobLogErrors:        make(map[int64][]string),
+		logFetchPending:     make(map[int64]bool),
+		jobSlowLogs:         make(map[int64][]string),
+		slowLogFetchPending: make(map[int64]bool),
+		slowLogLastFetch:    make(map[int64]time.Time),
+	}
+}
 
 //nolint:unused // test helper for pointer time values
 //go:fix inline
@@ -156,6 +172,308 @@ func TestDetermineExitCode(t *testing.T) {
 			got := determineExitCode(tt.checks)
 			if got != tt.want {
 				t.Errorf("determineExitCode() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFetchLogsForFailedChecks(t *testing.T) {
+	tests := []struct {
+		name               string
+		checks             []ghclient.CheckRunInfo
+		rateLimit          int
+		existingErrors     map[int64][]string
+		pendingFetches     map[int64]bool
+		wantCommandCount   int
+		wantPendingChanged bool
+	}{
+		{
+			name:               "no failed checks returns no commands",
+			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          5000,
+			wantCommandCount:   0,
+			wantPendingChanged: false,
+		},
+		{
+			name:               "failed check returns command",
+			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          5000,
+			wantCommandCount:   1,
+			wantPendingChanged: true,
+		},
+		{
+			name:               "timed_out check returns command",
+			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "timed_out", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          5000,
+			wantCommandCount:   1,
+			wantPendingChanged: true,
+		},
+		{
+			name:               "low rate limit returns no commands",
+			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          50,
+			wantCommandCount:   0,
+			wantPendingChanged: false,
+		},
+		{
+			name:               "already pending skips",
+			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          5000,
+			pendingFetches:     map[int64]bool{456: true},
+			wantCommandCount:   0,
+			wantPendingChanged: false,
+		},
+		{
+			name:               "existing error skips",
+			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          5000,
+			existingErrors:     map[int64][]string{456: {"error"}},
+			wantCommandCount:   0,
+			wantPendingChanged: false,
+		},
+		{
+			name: "multiple failed checks returns multiple commands",
+			checks: []ghclient.CheckRunInfo{
+				{Status: "completed", Conclusion: "failure", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"},
+				{Status: "completed", Conclusion: "timed_out", DetailsURL: "https://github.com/test/test/actions/runs/123/job/789"},
+				{Status: "completed", Conclusion: "success", DetailsURL: "https://github.com/test/test/actions/runs/123/job/999"},
+			},
+			rateLimit:          5000,
+			wantCommandCount:   2,
+			wantPendingChanged: true,
+		},
+		{
+			name:               "invalid details URL skips",
+			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure", DetailsURL: "invalid"}},
+			rateLimit:          5000,
+			wantCommandCount:   0,
+			wantPendingChanged: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := makeModel()
+			m.rateLimitRemaining = tt.rateLimit
+			if tt.existingErrors != nil {
+				m.jobLogErrors = tt.existingErrors
+			}
+			if tt.pendingFetches != nil {
+				m.logFetchPending = tt.pendingFetches
+			}
+
+			pendingBefore := len(m.logFetchPending)
+			cmds := m.fetchLogsForFailedChecks(tt.checks)
+			pendingAfter := len(m.logFetchPending)
+
+			if len(cmds) != tt.wantCommandCount {
+				t.Errorf("fetchLogsForFailedChecks() returned %d commands, want %d", len(cmds), tt.wantCommandCount)
+			}
+
+			pendingAdded := pendingAfter - pendingBefore
+			if (pendingAdded > 0) != tt.wantPendingChanged {
+				t.Errorf("pending changed = %v (added %d), want %v", pendingAdded > 0, pendingAdded, tt.wantPendingChanged)
+			}
+		})
+	}
+}
+
+func TestFetchLogsForSlowChecks(t *testing.T) {
+	now := time.Now()
+	twoMinutesAgo := now.Add(-2 * time.Minute)
+	thirtySecondsAgo := now.Add(-30 * time.Second)
+	tests := []struct {
+		name               string
+		checks             []ghclient.CheckRunInfo
+		rateLimit          int
+		slowNonerror       bool
+		pendingFetches     map[int64]bool
+		existingLogs       map[int64][]string
+		wantCommandCount   int
+		wantPendingChanged bool
+	}{
+		{
+			name:               "slowNonerror disabled returns no commands",
+			checks:             []ghclient.CheckRunInfo{{Status: "in_progress", StartedAt: &twoMinutesAgo, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          5000,
+			slowNonerror:       false,
+			wantCommandCount:   0,
+			wantPendingChanged: false,
+		},
+		{
+			name:               "in_progress under threshold returns no commands",
+			checks:             []ghclient.CheckRunInfo{{Status: "in_progress", StartedAt: &now, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          5000,
+			slowNonerror:       true,
+			wantCommandCount:   0,
+			wantPendingChanged: false,
+		},
+		{
+			name:               "in_progress over threshold returns command",
+			checks:             []ghclient.CheckRunInfo{{Status: "in_progress", StartedAt: &twoMinutesAgo, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          5000,
+			slowNonerror:       true,
+			wantCommandCount:   1,
+			wantPendingChanged: true,
+		},
+		{
+			name:               "completed success under threshold returns no commands",
+			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success", StartedAt: &thirtySecondsAgo, CompletedAt: &now, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          5000,
+			slowNonerror:       true,
+			wantCommandCount:   0,
+			wantPendingChanged: false,
+		},
+		{
+			name:               "completed success over threshold returns command",
+			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success", StartedAt: &twoMinutesAgo, CompletedAt: &now, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          5000,
+			slowNonerror:       true,
+			wantCommandCount:   1,
+			wantPendingChanged: true,
+		},
+		{
+			name:               "completed failure skips",
+			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure", StartedAt: &twoMinutesAgo, CompletedAt: &now, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          5000,
+			slowNonerror:       true,
+			wantCommandCount:   0,
+			wantPendingChanged: false,
+		},
+		{
+			name:               "already pending skips",
+			checks:             []ghclient.CheckRunInfo{{Status: "in_progress", StartedAt: &twoMinutesAgo, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          5000,
+			slowNonerror:       true,
+			pendingFetches:     map[int64]bool{456: true},
+			wantCommandCount:   0,
+			wantPendingChanged: false,
+		},
+		{
+			name:               "already has logs skips",
+			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success", StartedAt: &twoMinutesAgo, CompletedAt: &now, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          5000,
+			slowNonerror:       true,
+			existingLogs:       map[int64][]string{456: {"line1"}},
+			wantCommandCount:   0,
+			wantPendingChanged: false,
+		},
+		{
+			name:               "low rate limit returns no commands",
+			checks:             []ghclient.CheckRunInfo{{Status: "in_progress", StartedAt: &twoMinutesAgo, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
+			rateLimit:          50,
+			slowNonerror:       true,
+			wantCommandCount:   0,
+			wantPendingChanged: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := makeModel()
+			m.rateLimitRemaining = tt.rateLimit
+			m.slowNonerror = tt.slowNonerror
+			if tt.pendingFetches != nil {
+				m.slowLogFetchPending = tt.pendingFetches
+			}
+			if tt.existingLogs != nil {
+				m.jobSlowLogs = tt.existingLogs
+			}
+
+			pendingBefore := len(m.slowLogFetchPending)
+			cmds := m.fetchLogsForSlowChecks(tt.checks)
+			pendingAfter := len(m.slowLogFetchPending)
+
+			if len(cmds) != tt.wantCommandCount {
+				t.Errorf("fetchLogsForSlowChecks() returned %d commands, want %d", len(cmds), tt.wantCommandCount)
+			}
+
+			pendingAdded := pendingAfter - pendingBefore
+			if (pendingAdded > 0) != tt.wantPendingChanged {
+				t.Errorf("pending changed = %v (added %d), want %v", pendingAdded > 0, pendingAdded, tt.wantPendingChanged)
+			}
+		})
+	}
+}
+
+func TestHandleChecksUpdate(t *testing.T) {
+	tests := []struct {
+		name             string
+		msg              ChecksUpdateMsg
+		rateLimit        int
+		wantErr          bool
+		wantExitCode     int
+		wantQuitting     bool
+		wantChecksStored bool
+	}{
+		{
+			name:             "error in message stores error and returns nil cmd",
+			msg:              ChecksUpdateMsg{Err: context.Canceled},
+			wantErr:          true,
+			wantExitCode:     0,
+			wantQuitting:     false,
+			wantChecksStored: false,
+		},
+		{
+			name:             "successful update stores check runs",
+			msg:              ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress", Conclusion: ""}}, RateLimitRemaining: 5000},
+			rateLimit:        5000,
+			wantErr:          false,
+			wantChecksStored: true,
+		},
+		{
+			name:             "all checks complete sets exit code 0 on success",
+			msg:              ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}, RateLimitRemaining: 5000},
+			rateLimit:        5000,
+			wantErr:          false,
+			wantExitCode:     0,
+			wantQuitting:     true,
+			wantChecksStored: true,
+		},
+		{
+			name:             "all checks complete sets exit code 1 on failure",
+			msg:              ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure"}}, RateLimitRemaining: 5000},
+			rateLimit:        5000,
+			wantErr:          false,
+			wantExitCode:     1,
+			wantQuitting:     true,
+			wantChecksStored: true,
+		},
+		{
+			name:             "in_progress checks do not quit",
+			msg:              ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress"}}, RateLimitRemaining: 5000},
+			rateLimit:        5000,
+			wantErr:          false,
+			wantQuitting:     false,
+			wantChecksStored: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := makeModel()
+			m.rateLimitRemaining = tt.rateLimit
+
+			model, _ := m.handleChecksUpdate(tt.msg)
+			result := model.(*Model)
+
+			if tt.wantErr && result.err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tt.wantErr && result.err != nil {
+				t.Errorf("unexpected error: %v", result.err)
+			}
+
+			if tt.wantChecksStored && len(result.checkRuns) != len(tt.msg.CheckRuns) {
+				t.Errorf("checkRuns not stored, got %d, want %d", len(result.checkRuns), len(tt.msg.CheckRuns))
+			}
+
+			if tt.wantExitCode != result.exitCode {
+				t.Errorf("exitCode = %d, want %d", result.exitCode, tt.wantExitCode)
+			}
+
+			if tt.wantQuitting != result.quitting {
+				t.Errorf("quitting = %v, want %v", result.quitting, tt.wantQuitting)
 			}
 		})
 	}
