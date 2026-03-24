@@ -132,8 +132,9 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 
 	var cmds []tea.Cmd
 
+	allComplete := allChecksComplete(msg.CheckRuns)
 	elapsed := time.Since(m.firstCheckSeenAt)
-	readyForHistory := !m.firstCheckSeenAt.IsZero() && elapsed >= historyFetchDelay
+	readyForHistory := !m.firstCheckSeenAt.IsZero() && (allComplete || elapsed >= historyFetchDelay)
 	if !m.noAvg && !m.avgFetchPending && m.rateLimitRemaining >= minRateLimitForFetch && readyForHistory {
 		var newRunIDs []int64
 		for _, cr := range msg.CheckRuns {

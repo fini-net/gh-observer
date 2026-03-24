@@ -623,4 +623,48 @@ func TestHistoryFetchDelay(t *testing.T) {
 			t.Error("avgFetchPending should be true for old PR after delay")
 		}
 	})
+
+	t.Run("fetches immediately when all checks complete on first update", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		m.runIDToWorkflowID = make(map[int64]int64)
+
+		msg := ChecksUpdateMsg{
+			CheckRuns: []ghclient.CheckRunInfo{
+				{Status: "completed", Conclusion: "success", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"},
+			},
+			RateLimitRemaining: 5000,
+		}
+
+		model, _ := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if result.firstCheckSeenAt.IsZero() {
+			t.Error("firstCheckSeenAt should be set")
+		}
+		if !result.avgFetchPending {
+			t.Error("avgFetchPending should be true when all checks complete on first update")
+		}
+	})
+
+	t.Run("fetches immediately on first update if all checks already complete", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		m.runIDToWorkflowID = make(map[int64]int64)
+
+		msg := ChecksUpdateMsg{
+			CheckRuns: []ghclient.CheckRunInfo{
+				{Status: "completed", Conclusion: "success", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"},
+				{Status: "completed", Conclusion: "success", DetailsURL: "https://github.com/test/test/actions/runs/124/job/789"},
+			},
+			RateLimitRemaining: 5000,
+		}
+
+		model, _ := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if !result.avgFetchPending {
+			t.Error("avgFetchPending should be true - should fetch immediately for already-complete checks")
+		}
+	})
 }
