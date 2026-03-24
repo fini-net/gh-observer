@@ -54,6 +54,7 @@ type Model struct {
 	avgFetchLastDuration time.Duration
 	avgFetchErr          error
 	noAvg                bool
+	firstCheckSeenAt     time.Time
 
 	// Job log errors (fetched async for failed checks, cached for the session)
 	jobLogErrors    map[int64][]string
