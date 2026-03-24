@@ -5,7 +5,7 @@
       "Bash(actionlint:*)",
       "Bash(cue export:*)",
       "Bash(gh copilot suggest:*)",
-      "Bash(gh issue view:*)",
+      "Bash(gh issue:*)",
       "Bash(gh pr checks:*)",
       "Bash(gh pr diff:*)",
       "Bash(gh pr list:*)",
