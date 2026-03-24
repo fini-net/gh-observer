@@ -5,3 +5,5 @@ rules:
         "actions/*": ref-pin
         "github/*": ref-pin
         "*": ref-pin
+      ignore:
+        "super-linter/super-linter": true
