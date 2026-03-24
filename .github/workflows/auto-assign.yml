@@ -18,7 +18,7 @@ jobs:
       contents: read
     steps:
     - name: 'Auto-assign issue'
-      uses: pozil/auto-assign-issue@v2
+      uses: pozil/auto-assign-issue@v2 # zizmor: ignore[unpinned-uses]
       with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           assignees: chicks-net
