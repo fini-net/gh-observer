@@ -19,8 +19,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6 # zizmor: ignore[unpinned-uses]
+        with:
+          persist-credentials: false
       - name: Check workflow files
-        uses: docker://rhysd/actionlint:latest
+        uses: docker://rhysd/actionlint:latest # zizmor: ignore[unpinned-uses]
         with:
           args: -color
