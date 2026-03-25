@@ -14,7 +14,8 @@ readonly NORMAL='\033[0m'
 
 readonly TEMPLATE_URL="https://raw.githubusercontent.com/fini-net/template-repo/main"
 readonly MANIFEST_URL="$TEMPLATE_URL/.just/CHECKSUMS.json"
-readonly MANIFEST_FILE=$(mktemp)
+MANIFEST_FILE=$(mktemp)
+readonly MANIFEST_FILE
 readonly MAX_RETRIES=3
 readonly RETRY_DELAY=2
 

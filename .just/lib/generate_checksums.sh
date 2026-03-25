@@ -80,7 +80,7 @@ for filepath in "${all_files[@]}"; do
 			rm "$temp_file"
 
 			# Skip if we've seen this checksum before (deduplicate)
-			if [[ " $seen_checksums " =~ " $checksum " ]]; then
+			if [[ " $seen_checksums " == *" $checksum "* ]]; then
 				continue
 			fi
 			seen_checksums="$seen_checksums $checksum"
