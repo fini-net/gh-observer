@@ -15,15 +15,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6 # zizmor: ignore[unpinned-uses]
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
 
       - name: Install just
-        uses: extractions/setup-just@v3 # zizmor: ignore[unpinned-uses]
+        uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
 
       - name: Install CUE
-        uses: cue-lang/setup-cue@v1.0.1 # zizmor: ignore[unpinned-uses]
+        uses: cue-lang/setup-cue@a93fa358375740cd8b0078f76355512b9208acb1 # v1.0.1
 
       - name: Verify CUE schemas
         run: just cue-verify
