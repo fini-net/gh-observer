@@ -10,11 +10,16 @@ import (
 
 func makeModel() *Model {
 	return &Model{
-		ctx:                context.Background(),
-		token:              "test-token",
-		owner:              "test-owner",
-		repo:               "test-repo",
-		rateLimitRemaining: 5000,
+		ctx:                     context.Background(),
+		token:                   "test-token",
+		owner:                   "test-owner",
+		repo:                    "test-repo",
+		rateLimitRemaining:      5000,
+		jobAverages:             make(map[string]time.Duration),
+		runIDToWorkflowID:       make(map[int64]int64),
+		fetchedWorkflowIDs:      make(map[int64]bool),
+		pendingWorkflowFetch:    make(map[int64]bool),
+		dispatchedWorkflowFetch: make(map[int64]bool),
 	}
 }
 
@@ -441,6 +446,209 @@ func TestHistoryFetchDelay(t *testing.T) {
 
 		if !result.avgFetchPending {
 			t.Error("avgFetchPending should be true - should fetch immediately for already-complete checks")
+		}
+	})
+}
+
+func TestWorkflowsDiscoveredMsg(t *testing.T) {
+	t.Run("error sets avgFetchErr and clears pending", func(t *testing.T) {
+		m := makeModel()
+		m.avgFetchPending = true
+		m.avgFetchStartTime = time.Now().Add(-1 * time.Second)
+
+		msg := WorkflowsDiscoveredMsg{Err: context.Canceled}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if result.avgFetchPending {
+			t.Error("avgFetchPending should be false after error")
+		}
+		if result.avgFetchErr == nil {
+			t.Error("avgFetchErr should be set")
+		}
+	})
+
+	t.Run("successful discovery tracks pending workflows", func(t *testing.T) {
+		m := makeModel()
+		m.avgFetchPending = true
+		m.avgFetchStartTime = time.Now().Add(-1 * time.Second)
+		m.pendingWorkflowFetch = make(map[int64]bool)
+		m.dispatchedWorkflowFetch = make(map[int64]bool)
+
+		msg := WorkflowsDiscoveredMsg{
+			NewRunIDToWorkflowID: map[int64]int64{123: 456, 789: 456},
+			WorkflowIDsToFetch:   []int64{456},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if result.runIDToWorkflowID[123] != 456 {
+			t.Error("run ID to workflow ID mapping should be stored")
+		}
+		if !result.pendingWorkflowFetch[456] {
+			t.Error("workflow ID should be in pending set")
+		}
+		if !result.dispatchedWorkflowFetch[456] {
+			t.Error("workflow ID should be in dispatched set")
+		}
+	})
+
+	t.Run("no workflows to fetch completes immediately", func(t *testing.T) {
+		m := makeModel()
+		m.avgFetchPending = true
+		m.avgFetchStartTime = time.Now().Add(-1 * time.Second)
+		m.pendingWorkflowFetch = make(map[int64]bool)
+		m.dispatchedWorkflowFetch = make(map[int64]bool)
+
+		msg := WorkflowsDiscoveredMsg{
+			NewRunIDToWorkflowID: map[int64]int64{123: 456},
+			WorkflowIDsToFetch:   []int64{},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if result.avgFetchPending {
+			t.Error("avgFetchPending should be false when no workflows to fetch")
+		}
+		if result.avgFetchLastDuration == 0 {
+			t.Error("avgFetchLastDuration should be set")
+		}
+	})
+
+	t.Run("already dispatched workflow is not redispatched", func(t *testing.T) {
+		m := makeModel()
+		m.avgFetchPending = true
+		m.avgFetchStartTime = time.Now().Add(-1 * time.Second)
+		m.pendingWorkflowFetch = make(map[int64]bool)
+		m.dispatchedWorkflowFetch = map[int64]bool{456: true}
+
+		msg := WorkflowsDiscoveredMsg{
+			WorkflowIDsToFetch: []int64{456},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if result.pendingWorkflowFetch[456] {
+			t.Error("workflow should not be added to pending if already dispatched")
+		}
+	})
+
+	t.Run("quits when checks complete and no pending fetches", func(t *testing.T) {
+		m := makeModel()
+		m.avgFetchPending = true
+		m.avgFetchStartTime = time.Now()
+		m.checksComplete = true
+		m.pendingWorkflowFetch = make(map[int64]bool)
+		m.dispatchedWorkflowFetch = make(map[int64]bool)
+
+		msg := WorkflowsDiscoveredMsg{
+			WorkflowIDsToFetch: []int64{},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if !result.quitting {
+			t.Error("should quit when checks complete and no pending fetches")
+		}
+	})
+}
+
+func TestJobAveragesPartialMsg(t *testing.T) {
+	t.Run("merges averages and removes from pending", func(t *testing.T) {
+		m := makeModel()
+		m.pendingWorkflowFetch = map[int64]bool{456: true, 789: true}
+		m.fetchedWorkflowIDs = make(map[int64]bool)
+		m.jobAverages = make(map[string]time.Duration)
+		m.avgFetchStartTime = time.Now().Add(-2 * time.Second)
+
+		msg := JobAveragesPartialMsg{
+			WorkflowID: 456,
+			Averages: map[string]time.Duration{
+				"build": time.Minute,
+				"test":  2 * time.Minute,
+			},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if result.pendingWorkflowFetch[456] {
+			t.Error("456 should be removed from pending")
+		}
+		if !result.fetchedWorkflowIDs[456] {
+			t.Error("456 should be in fetched set")
+		}
+		if result.jobAverages["build"] != time.Minute {
+			t.Error("build average should be merged")
+		}
+		if result.avgFetchPending {
+			t.Error("avgFetchPending should be false while fetches pending")
+		}
+	})
+
+	t.Run("sets avgFetchLastDuration when all fetches complete", func(t *testing.T) {
+		m := makeModel()
+		m.pendingWorkflowFetch = map[int64]bool{456: true}
+		m.fetchedWorkflowIDs = make(map[int64]bool)
+		m.jobAverages = make(map[string]time.Duration)
+		m.avgFetchStartTime = time.Now().Add(-2 * time.Second)
+
+		msg := JobAveragesPartialMsg{
+			WorkflowID: 456,
+			Averages: map[string]time.Duration{
+				"build": time.Minute,
+			},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if result.avgFetchLastDuration == 0 {
+			t.Error("avgFetchLastDuration should be set when all fetches complete")
+		}
+		if result.avgFetchPending {
+			t.Error("avgFetchPending should be false when all fetches complete")
+		}
+	})
+
+	t.Run("handles error and continues", func(t *testing.T) {
+		m := makeModel()
+		m.pendingWorkflowFetch = map[int64]bool{456: true}
+		m.fetchedWorkflowIDs = make(map[int64]bool)
+		m.avgFetchStartTime = time.Now().Add(-1 * time.Second)
+
+		msg := JobAveragesPartialMsg{
+			WorkflowID: 456,
+			Err:        context.Canceled,
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if result.pendingWorkflowFetch[456] {
+			t.Error("456 should be removed from pending even on error")
+		}
+		if !result.fetchedWorkflowIDs[456] {
+			t.Error("456 should be in fetched set even on error")
+		}
+	})
+
+	t.Run("quits when checks complete and fetches finish", func(t *testing.T) {
+		m := makeModel()
+		m.pendingWorkflowFetch = map[int64]bool{456: true}
+		m.fetchedWorkflowIDs = make(map[int64]bool)
+		m.jobAverages = make(map[string]time.Duration)
+		m.avgFetchStartTime = time.Now().Add(-1 * time.Second)
+		m.checksComplete = true
+
+		msg := JobAveragesPartialMsg{
+			WorkflowID: 456,
+			Averages: map[string]time.Duration{
+				"build": time.Minute,
+			},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if !result.quitting {
+			t.Error("should quit when checks complete and fetches finish")
 		}
 	})
 }
