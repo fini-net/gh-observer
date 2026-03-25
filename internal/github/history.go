@@ -151,3 +151,124 @@ func FetchJobAverages(
 
 	return averages, newRunIDToWorkflowID, workflowIDsToFetch, nil
 }
+
+// DiscoverWorkflows resolves run IDs to workflow IDs.
+// Returns new run ID → workflow ID mappings and the list of workflow IDs that need fetching.
+func DiscoverWorkflows(
+	ctx context.Context,
+	client *github.Client,
+	owner, repo string,
+	checkRuns []CheckRunInfo,
+	knownRunIDToWorkflowID map[int64]int64,
+	knownFetchedWorkflowIDs map[int64]bool,
+) (
+	newRunIDToWorkflowID map[int64]int64,
+	workflowIDsToFetch []int64,
+	err error,
+) {
+	runIDSet := map[int64]bool{}
+	for _, cr := range checkRuns {
+		if cr.DetailsURL == "" {
+			continue
+		}
+		runID, parseErr := ParseRunIDFromURL(cr.DetailsURL)
+		if parseErr != nil {
+			continue
+		}
+		runIDSet[runID] = true
+	}
+
+	if len(runIDSet) == 0 {
+		return nil, nil, nil
+	}
+
+	newRunIDToWorkflowID = make(map[int64]int64)
+	workflowIDSet := map[int64]bool{}
+
+	for runID := range runIDSet {
+		if wfID, ok := knownRunIDToWorkflowID[runID]; ok {
+			workflowIDSet[wfID] = true
+			continue
+		}
+
+		run, _, apiErr := client.Actions.GetWorkflowRunByID(ctx, owner, repo, runID)
+		if apiErr != nil {
+			continue
+		}
+		if run.WorkflowID != nil {
+			workflowIDSet[*run.WorkflowID] = true
+			newRunIDToWorkflowID[runID] = *run.WorkflowID
+		}
+	}
+
+	for wfID := range workflowIDSet {
+		if !knownFetchedWorkflowIDs[wfID] {
+			workflowIDsToFetch = append(workflowIDsToFetch, wfID)
+		}
+	}
+
+	return newRunIDToWorkflowID, workflowIDsToFetch, nil
+}
+
+// FetchWorkflowHistory fetches historical job durations for a single workflow.
+// Returns averaged durations per job name for the given workflow.
+func FetchWorkflowHistory(
+	ctx context.Context,
+	client *github.Client,
+	owner, repo string,
+	workflowID int64,
+) (map[string]time.Duration, error) {
+	runs, _, err := client.Actions.ListWorkflowRunsByID(ctx, owner, repo, workflowID, &github.ListWorkflowRunsOptions{
+		Status:      "completed",
+		ListOptions: github.ListOptions{PerPage: 10},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var historicalRunIDs []int64
+	for _, run := range runs.WorkflowRuns {
+		if run.ID != nil {
+			historicalRunIDs = append(historicalRunIDs, *run.ID)
+		}
+	}
+
+	if len(historicalRunIDs) == 0 {
+		return nil, nil
+	}
+
+	jobDurations := map[string][]time.Duration{}
+	for _, runID := range historicalRunIDs {
+		jobs, _, apiErr := client.Actions.ListWorkflowJobs(ctx, owner, repo, runID, &github.ListWorkflowJobsOptions{
+			Filter:      "latest",
+			ListOptions: github.ListOptions{PerPage: 100},
+		})
+		if apiErr != nil {
+			continue
+		}
+		for _, job := range jobs.Jobs {
+			if job.Name == nil || job.StartedAt == nil || job.CompletedAt == nil {
+				continue
+			}
+			dur := job.CompletedAt.Sub(job.StartedAt.Time)
+			if dur > 0 {
+				jobDurations[*job.Name] = append(jobDurations[*job.Name], dur)
+			}
+		}
+	}
+
+	if len(jobDurations) == 0 {
+		return nil, nil
+	}
+
+	averages := make(map[string]time.Duration, len(jobDurations))
+	for name, durations := range jobDurations {
+		var total time.Duration
+		for _, d := range durations {
+			total += d
+		}
+		averages[name] = total / time.Duration(len(durations))
+	}
+
+	return averages, nil
+}

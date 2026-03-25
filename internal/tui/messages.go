@@ -38,3 +38,17 @@ type JobAveragesMsg struct {
 	NewFetchedWorkflowIDs []int64
 	Err                   error
 }
+
+// WorkflowsDiscoveredMsg is sent when workflow discovery completes
+type WorkflowsDiscoveredMsg struct {
+	NewRunIDToWorkflowID map[int64]int64
+	WorkflowIDsToFetch   []int64
+	Err                  error
+}
+
+// JobAveragesPartialMsg is sent for each workflow that finishes history fetch
+type JobAveragesPartialMsg struct {
+	WorkflowID int64
+	Averages   map[string]time.Duration
+	Err        error
+}
