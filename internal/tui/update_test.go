@@ -10,16 +10,13 @@ import (
 
 func makeModel() *Model {
 	return &Model{
-		ctx:                 context.Background(),
-		token:               "test-token",
-		owner:               "test-owner",
-		repo:                "test-repo",
-		rateLimitRemaining:  5000,
-		jobLogErrors:        make(map[int64][]string),
-		logFetchPending:     make(map[int64]bool),
-		jobSlowLogs:         make(map[int64][]string),
-		slowLogFetchPending: make(map[int64]bool),
-		slowLogLastFetch:    make(map[int64]time.Time),
+		ctx:                context.Background(),
+		token:              "test-token",
+		owner:              "test-owner",
+		repo:               "test-repo",
+		rateLimitRemaining: 5000,
+		jobLogErrors:       make(map[int64][]string),
+		logFetchPending:    make(map[int64]bool),
 	}
 }
 
@@ -268,124 +265,6 @@ func TestFetchLogsForFailedChecks(t *testing.T) {
 
 			if len(cmds) != tt.wantCommandCount {
 				t.Errorf("fetchLogsForFailedChecks() returned %d commands, want %d", len(cmds), tt.wantCommandCount)
-			}
-
-			pendingAdded := pendingAfter - pendingBefore
-			if (pendingAdded > 0) != tt.wantPendingChanged {
-				t.Errorf("pending changed = %v (added %d), want %v", pendingAdded > 0, pendingAdded, tt.wantPendingChanged)
-			}
-		})
-	}
-}
-
-func TestFetchLogsForSlowChecks(t *testing.T) {
-	now := time.Now()
-	twoMinutesAgo := now.Add(-2 * time.Minute)
-	thirtySecondsAgo := now.Add(-30 * time.Second)
-	tests := []struct {
-		name               string
-		checks             []ghclient.CheckRunInfo
-		rateLimit          int
-		slowNonerror       bool
-		pendingFetches     map[int64]bool
-		existingLogs       map[int64][]string
-		wantCommandCount   int
-		wantPendingChanged bool
-	}{
-		{
-			name:               "slowNonerror disabled returns no commands",
-			checks:             []ghclient.CheckRunInfo{{Status: "in_progress", StartedAt: &twoMinutesAgo, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          5000,
-			slowNonerror:       false,
-			wantCommandCount:   0,
-			wantPendingChanged: false,
-		},
-		{
-			name:               "in_progress under threshold returns no commands",
-			checks:             []ghclient.CheckRunInfo{{Status: "in_progress", StartedAt: &now, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          5000,
-			slowNonerror:       true,
-			wantCommandCount:   0,
-			wantPendingChanged: false,
-		},
-		{
-			name:               "in_progress over threshold returns command",
-			checks:             []ghclient.CheckRunInfo{{Status: "in_progress", StartedAt: &twoMinutesAgo, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          5000,
-			slowNonerror:       true,
-			wantCommandCount:   1,
-			wantPendingChanged: true,
-		},
-		{
-			name:               "completed success under threshold returns no commands",
-			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success", StartedAt: &thirtySecondsAgo, CompletedAt: &now, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          5000,
-			slowNonerror:       true,
-			wantCommandCount:   0,
-			wantPendingChanged: false,
-		},
-		{
-			name:               "completed success over threshold returns command",
-			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success", StartedAt: &twoMinutesAgo, CompletedAt: &now, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          5000,
-			slowNonerror:       true,
-			wantCommandCount:   1,
-			wantPendingChanged: true,
-		},
-		{
-			name:               "completed failure skips",
-			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure", StartedAt: &twoMinutesAgo, CompletedAt: &now, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          5000,
-			slowNonerror:       true,
-			wantCommandCount:   0,
-			wantPendingChanged: false,
-		},
-		{
-			name:               "already pending skips",
-			checks:             []ghclient.CheckRunInfo{{Status: "in_progress", StartedAt: &twoMinutesAgo, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          5000,
-			slowNonerror:       true,
-			pendingFetches:     map[int64]bool{456: true},
-			wantCommandCount:   0,
-			wantPendingChanged: false,
-		},
-		{
-			name:               "already has logs skips",
-			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success", StartedAt: &twoMinutesAgo, CompletedAt: &now, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          5000,
-			slowNonerror:       true,
-			existingLogs:       map[int64][]string{456: {"line1"}},
-			wantCommandCount:   0,
-			wantPendingChanged: false,
-		},
-		{
-			name:               "low rate limit returns no commands",
-			checks:             []ghclient.CheckRunInfo{{Status: "in_progress", StartedAt: &twoMinutesAgo, DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          50,
-			slowNonerror:       true,
-			wantCommandCount:   0,
-			wantPendingChanged: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := makeModel()
-			m.rateLimitRemaining = tt.rateLimit
-			m.slowNonerror = tt.slowNonerror
-			if tt.pendingFetches != nil {
-				m.slowLogFetchPending = tt.pendingFetches
-			}
-			if tt.existingLogs != nil {
-				m.jobSlowLogs = tt.existingLogs
-			}
-
-			pendingBefore := len(m.slowLogFetchPending)
-			cmds := m.fetchLogsForSlowChecks(tt.checks)
-			pendingAfter := len(m.slowLogFetchPending)
-
-			if len(cmds) != tt.wantCommandCount {
-				t.Errorf("fetchLogsForSlowChecks() returned %d commands, want %d", len(cmds), tt.wantCommandCount)
 			}
 
 			pendingAdded := pendingAfter - pendingBefore

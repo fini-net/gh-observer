@@ -3,16 +3,11 @@ package github
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/google/go-github/v84/github"
-)
-
-const (
-	maxSlowLogLineLen = 200
 )
 
 // FetchJobLogs retrieves job logs and extracts relevant error lines.
@@ -218,90 +213,4 @@ func extractErrorMessage(line string) string {
 // ExtractJobIDFromDetailsURL extracts the job ID from a GitHub Actions details URL.
 func ExtractJobIDFromDetailsURL(detailsURL string) (int64, error) {
 	return ParseJobIDFromURL(detailsURL)
-}
-
-// FetchLastNJobLines fetches the last N lines from a job's logs.
-// Lines are truncated to maxSlowLogLineLen characters and timestamp prefixes are stripped.
-func FetchLastNJobLines(ctx context.Context, client *github.Client, owner, repo string, jobID int64, n int) ([]string, error) {
-	logURL, _, err := client.Actions.GetWorkflowJobLogs(ctx, owner, repo, jobID, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, logURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	httpClient := &http.Client{}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch job logs: HTTP %s", resp.Status)
-	}
-
-	return parseLastNLines(resp.Body, n)
-}
-
-// parseLastNLines extracts the last N lines from log output, with cleanup.
-// Uses a ring buffer to maintain O(N) memory usage regardless of log size.
-func parseLastNLines(reader io.Reader, n int) ([]string, error) {
-	if n <= 0 {
-		return nil, fmt.Errorf("n must be positive, got %d", n)
-	}
-
-	scanner := bufio.NewScanner(reader)
-	buf := make([]byte, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
-	ring := make([]string, n)
-	idx := 0
-	count := 0
-	wrapped := false
-
-	for scanner.Scan() {
-		ring[idx] = scanner.Text()
-		idx++
-		if idx == n {
-			idx = 0
-			wrapped = true
-		}
-		count++
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to scan log lines: %w", err)
-	}
-
-	if count == 0 {
-		return nil, nil
-	}
-
-	resultCount := count
-	if resultCount > n {
-		resultCount = n
-	}
-
-	result := make([]string, 0, resultCount)
-	startIdx := 0
-	if wrapped {
-		startIdx = idx
-	}
-
-	for i := 0; i < resultCount; i++ {
-		pos := (startIdx + i) % n
-		line := stripTimestampPrefix(ring[pos])
-		if len(line) > maxSlowLogLineLen {
-			line = line[:maxSlowLogLineLen-3] + "..."
-		}
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-
-	return result, nil
 }

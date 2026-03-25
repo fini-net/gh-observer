@@ -45,10 +45,3 @@ type JobLogMsg struct {
 	Errors []string
 	Err    error
 }
-
-// SlowJobLogMsg contains the last N lines for a slow-running successful job
-type SlowJobLogMsg struct {
-	JobID int64
-	Lines []string
-	Err   error
-}
