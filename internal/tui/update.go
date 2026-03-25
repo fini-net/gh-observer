@@ -89,20 +89,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case WorkflowsDiscoveredMsg:
-		m.avgFetchPending = false
-
 		if msg.Err != nil {
+			m.avgFetchPending = false
 			m.avgFetchErr = msg.Err
 		} else {
 			// Add new run→workflow mappings to cache
 			maps.Copy(m.runIDToWorkflowID, msg.NewRunIDToWorkflowID)
-			// Track pending workflow fetches (these will be dispatched next tick)
+			// Track pending workflow fetches and dispatch them immediately
+			var workflowCmds []tea.Cmd
 			for _, wfID := range msg.WorkflowIDsToFetch {
-				m.pendingWorkflowFetch[wfID] = true
+				if !m.dispatchedWorkflowFetch[wfID] {
+					m.pendingWorkflowFetch[wfID] = true
+					m.dispatchedWorkflowFetch[wfID] = true
+					workflowCmds = append(workflowCmds, fetchWorkflowHistory(m.ctx, m.owner, m.repo, wfID))
+				}
 			}
+			// If no new fetches, discovery phase is complete
+			if len(workflowCmds) == 0 {
+				m.avgFetchPending = false
+				if len(m.pendingWorkflowFetch) == 0 {
+					m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
+				}
+			}
+			// If checks already finished while we were fetching, and no pending fetches, quit now
+			if m.checksComplete && len(m.pendingWorkflowFetch) == 0 {
+				m.quitting = true
+				return m, tea.Quit
+			}
+			return m, tea.Batch(workflowCmds...)
 		}
 
-		// If checks already finished while we were fetching, and no pending fetches, quit now
+		// Error case: check if we should quit
 		if m.checksComplete && len(m.pendingWorkflowFetch) == 0 {
 			m.quitting = true
 			return m, tea.Quit
@@ -120,9 +137,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Check if all workflow fetches are done
-		if len(m.pendingWorkflowFetch) == 0 && m.checksComplete {
-			m.quitting = true
-			return m, tea.Quit
+		if len(m.pendingWorkflowFetch) == 0 {
+			// Discovery phase complete - record duration and clear error on success
+			m.avgFetchPending = false
+			m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
+			if msg.Err == nil {
+				m.avgFetchErr = nil
+			}
+			if m.checksComplete {
+				m.quitting = true
+				return m, tea.Quit
+			}
 		}
 		return m, nil
 
@@ -174,14 +199,6 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 			m.avgFetchPending = true
 			m.avgFetchStartTime = time.Now()
 			cmds = append(cmds, discoverWorkflows(m.ctx, m.owner, m.repo, msg.CheckRuns, m.runIDToWorkflowID, m.fetchedWorkflowIDs))
-		}
-	}
-
-	// Dispatch history fetches for pending workflows that haven't been dispatched yet
-	for wfID := range m.pendingWorkflowFetch {
-		if !m.dispatchedWorkflowFetch[wfID] {
-			m.dispatchedWorkflowFetch[wfID] = true
-			cmds = append(cmds, fetchWorkflowHistory(m.ctx, m.owner, m.repo, wfID))
 		}
 	}
 
