@@ -30,14 +30,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6 # zizmor: ignore[unpinned-uses]
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
           fetch-depth: 1
 
       - name: Run Claude Code Review
         id: claude-review
-        uses: anthropics/claude-code-action@v1 # zizmor: ignore[unpinned-uses]
+        uses: anthropics/claude-code-action@ff9acae5886d41a99ed4ec14b7dc147d55834722 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'

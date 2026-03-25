@@ -28,19 +28,19 @@ jobs:
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      - uses: actions/checkout@v6 # zizmor: ignore[unpinned-uses]
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
 
       - name: Checkov GitHub Action
-        uses: bridgecrewio/checkov-action@v12 # zizmor: ignore[unpinned-uses]
+        uses: bridgecrewio/checkov-action@2fd3901c8feb52417f27f0d9800259a106c1ec1e # v12
         with:
           # This will add both a CLI output to the console and create a results.sarif file
           output_format: cli,sarif
           output_file_path: console,results.sarif
         
       - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v4 # zizmor: ignore[unpinned-uses]
+        uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4
         
         # Results are generated only on a success or failure
         # this is required since GitHub by default won't run the next step
