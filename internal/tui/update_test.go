@@ -15,8 +15,6 @@ func makeModel() *Model {
 		owner:              "test-owner",
 		repo:               "test-repo",
 		rateLimitRemaining: 5000,
-		jobLogErrors:       make(map[int64][]string),
-		logFetchPending:    make(map[int64]bool),
 	}
 }
 
@@ -169,107 +167,6 @@ func TestDetermineExitCode(t *testing.T) {
 			got := determineExitCode(tt.checks)
 			if got != tt.want {
 				t.Errorf("determineExitCode() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestFetchLogsForFailedChecks(t *testing.T) {
-	tests := []struct {
-		name               string
-		checks             []ghclient.CheckRunInfo
-		rateLimit          int
-		existingErrors     map[int64][]string
-		pendingFetches     map[int64]bool
-		wantCommandCount   int
-		wantPendingChanged bool
-	}{
-		{
-			name:               "no failed checks returns no commands",
-			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          5000,
-			wantCommandCount:   0,
-			wantPendingChanged: false,
-		},
-		{
-			name:               "failed check returns command",
-			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          5000,
-			wantCommandCount:   1,
-			wantPendingChanged: true,
-		},
-		{
-			name:               "timed_out check returns command",
-			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "timed_out", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          5000,
-			wantCommandCount:   1,
-			wantPendingChanged: true,
-		},
-		{
-			name:               "low rate limit returns no commands",
-			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          50,
-			wantCommandCount:   0,
-			wantPendingChanged: false,
-		},
-		{
-			name:               "already pending skips",
-			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          5000,
-			pendingFetches:     map[int64]bool{456: true},
-			wantCommandCount:   0,
-			wantPendingChanged: false,
-		},
-		{
-			name:               "existing error skips",
-			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"}},
-			rateLimit:          5000,
-			existingErrors:     map[int64][]string{456: {"error"}},
-			wantCommandCount:   0,
-			wantPendingChanged: false,
-		},
-		{
-			name: "multiple failed checks returns multiple commands",
-			checks: []ghclient.CheckRunInfo{
-				{Status: "completed", Conclusion: "failure", DetailsURL: "https://github.com/test/test/actions/runs/123/job/456"},
-				{Status: "completed", Conclusion: "timed_out", DetailsURL: "https://github.com/test/test/actions/runs/123/job/789"},
-				{Status: "completed", Conclusion: "success", DetailsURL: "https://github.com/test/test/actions/runs/123/job/999"},
-			},
-			rateLimit:          5000,
-			wantCommandCount:   2,
-			wantPendingChanged: true,
-		},
-		{
-			name:               "invalid details URL skips",
-			checks:             []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure", DetailsURL: "invalid"}},
-			rateLimit:          5000,
-			wantCommandCount:   0,
-			wantPendingChanged: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := makeModel()
-			m.rateLimitRemaining = tt.rateLimit
-			if tt.existingErrors != nil {
-				m.jobLogErrors = tt.existingErrors
-			}
-			if tt.pendingFetches != nil {
-				m.logFetchPending = tt.pendingFetches
-			}
-
-			pendingBefore := len(m.logFetchPending)
-			cmds := m.fetchLogsForFailedChecks(tt.checks)
-			pendingAfter := len(m.logFetchPending)
-
-			if len(cmds) != tt.wantCommandCount {
-				t.Errorf("fetchLogsForFailedChecks() returned %d commands, want %d", len(cmds), tt.wantCommandCount)
-			}
-
-			pendingAdded := pendingAfter - pendingBefore
-			if (pendingAdded > 0) != tt.wantPendingChanged {
-				t.Errorf("pending changed = %v (added %d), want %v", pendingAdded > 0, pendingAdded, tt.wantPendingChanged)
 			}
 		})
 	}

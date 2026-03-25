@@ -38,10 +38,3 @@ type JobAveragesMsg struct {
 	NewFetchedWorkflowIDs []int64
 	Err                   error
 }
-
-// JobLogMsg contains error lines extracted from job logs
-type JobLogMsg struct {
-	JobID  int64
-	Errors []string
-	Err    error
-}
