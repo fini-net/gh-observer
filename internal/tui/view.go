@@ -35,7 +35,8 @@ func (m Model) View() tea.View {
 
 		// Add historical averages status
 		if !m.noAvg {
-			if m.avgFetchPending {
+			isFetching := m.avgFetchPending || len(m.pendingWorkflowFetch) > 0
+			if isFetching {
 				// Fetch in progress - show elapsed time
 				elapsed := time.Since(m.avgFetchStartTime)
 				updatedLine += m.styles.Running.Render(fmt.Sprintf("  •  Fetching historical averages... (%s)", timing.FormatDuration(elapsed)))
