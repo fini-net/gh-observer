@@ -72,7 +72,7 @@ func (m Model) View() tea.View {
 			b.WriteString(m.renderSummary(check, widths))
 		}
 
-		if check.Conclusion == "failure" || check.Conclusion == "timed_out" {
+		if (check.Conclusion == "failure" || check.Conclusion == "timed_out") && len(check.Annotations) > 0 {
 			b.WriteString(m.renderErrorBox(check, widths))
 		}
 	}
@@ -92,54 +92,32 @@ func (m Model) View() tea.View {
 	return tea.NewView(b.String())
 }
 
-// renderErrorBox displays error annotations for failed checks, prioritizing FAILURE-level
-// annotations over WARNINGs, and includes job log errors when available.
+// renderErrorBox displays error annotations for failed checks
 func (m Model) renderErrorBox(check ghclient.CheckRunInfo, widths ColumnWidths) string {
 	var b strings.Builder
-	indent := widths.QueueWidth + 3
 
-	// Separate annotations by level
-	var failures, warnings []ghclient.Annotation
 	for _, ann := range check.Annotations {
-		switch ann.AnnotationLevel {
-		case "failure":
-			failures = append(failures, ann)
-		case "warning":
-			warnings = append(warnings, ann)
-		}
-	}
-
-	// Render FAILURE annotations first (prominent)
-	for _, ann := range failures {
-		errorMsg := formatAnnotationMsg(ann)
-		if errorMsg == "" {
+		var errorMsg string
+		if ann.Message != "" {
+			errorMsg = ann.Message
+			if ann.Title != "" {
+				errorMsg = ann.Title + ": " + errorMsg
+			}
+		} else if ann.Title != "" {
+			errorMsg = ann.Title
+		} else {
 			continue
+		}
+
+		if ann.Path != "" {
+			if ann.StartLine > 0 {
+				errorMsg = fmt.Sprintf("%s:%d - %s", ann.Path, ann.StartLine, errorMsg)
+			} else {
+				errorMsg = fmt.Sprintf("%s - %s", ann.Path, errorMsg)
+			}
 		}
 		b.WriteString("  ")
 		b.WriteString(m.styles.ErrorBox.Render(errorMsg))
-		b.WriteString("\n")
-	}
-
-	// Get job log errors if available
-	jobID, _ := ghclient.ParseJobIDFromURL(check.DetailsURL)
-	logErrors := m.jobLogErrors[jobID]
-
-	// Render job log errors
-	if len(logErrors) > 0 {
-		fmt.Fprintf(&b, "%s%s\n", strings.Repeat(" ", indent), m.styles.Info.Render("From job logs:"))
-		for _, errMsg := range logErrors {
-			fmt.Fprintf(&b, "%s  %s\n", strings.Repeat(" ", indent), m.styles.ErrorBox.Render(errMsg))
-		}
-	}
-
-	// Render WARNING annotations (dimmed)
-	for _, ann := range warnings {
-		errorMsg := formatAnnotationMsg(ann)
-		if errorMsg == "" {
-			continue
-		}
-		b.WriteString("  ")
-		b.WriteString(m.styles.WarningBox.Render("⚠ " + errorMsg))
 		b.WriteString("\n")
 	}
 
@@ -148,31 +126,6 @@ func (m Model) renderErrorBox(check ghclient.CheckRunInfo, widths ColumnWidths) 
 	}
 
 	return b.String()
-}
-
-// formatAnnotationMsg formats an annotation message for display
-func formatAnnotationMsg(ann ghclient.Annotation) string {
-	var errorMsg string
-	if ann.Message != "" {
-		errorMsg = ann.Message
-		if ann.Title != "" {
-			errorMsg = ann.Title + ": " + errorMsg
-		}
-	} else if ann.Title != "" {
-		errorMsg = ann.Title
-	} else {
-		return ""
-	}
-
-	if ann.Path != "" {
-		if ann.StartLine > 0 {
-			errorMsg = fmt.Sprintf("%s:%d - %s", ann.Path, ann.StartLine, errorMsg)
-		} else {
-			errorMsg = fmt.Sprintf("%s - %s", ann.Path, errorMsg)
-		}
-	}
-
-	return errorMsg
 }
 
 // renderDescription displays check description as a dimmed line below the check

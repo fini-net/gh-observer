@@ -88,14 +88,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case JobLogMsg:
-		// Clear pending flag and store results
-		delete(m.logFetchPending, msg.JobID)
-		if msg.Err == nil && len(msg.Errors) > 0 {
-			m.jobLogErrors[msg.JobID] = msg.Errors
-		}
-		return m, nil
-
 	case ErrorMsg:
 		m.err = msg.Err
 		return m, nil
@@ -147,8 +139,6 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	cmds = append(cmds, m.fetchLogsForFailedChecks(msg.CheckRuns)...)
-
 	if allChecksComplete(m.checkRuns) {
 		m.exitCode = determineExitCode(m.checkRuns)
 		m.checksComplete = true
@@ -160,30 +150,6 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
-}
-
-// fetchLogsForFailedChecks returns commands to fetch logs for failed checks.
-func (m *Model) fetchLogsForFailedChecks(checks []ghclient.CheckRunInfo) []tea.Cmd {
-	var cmds []tea.Cmd
-	if m.rateLimitRemaining < minRateLimitForFetch {
-		return cmds
-	}
-
-	for _, check := range checks {
-		if check.Conclusion != "failure" && check.Conclusion != "timed_out" {
-			continue
-		}
-		jobID, err := ghclient.ParseJobIDFromURL(check.DetailsURL)
-		if err != nil {
-			continue
-		}
-		if m.logFetchPending[jobID] || m.jobLogErrors[jobID] != nil {
-			continue
-		}
-		m.logFetchPending[jobID] = true
-		cmds = append(cmds, fetchJobLogs(m.ctx, m.owner, m.repo, jobID))
-	}
-	return cmds
 }
 
 // tick creates a command that sends a TickMsg after duration d
@@ -236,22 +202,6 @@ func fetchJobAverages(ctx context.Context, owner, repo string, checkRuns []ghcli
 			NewRunIDToWorkflowID:  newRunIDToWorkflowID,
 			NewFetchedWorkflowIDs: newFetchedWorkflowIDs,
 		}
-	}
-}
-
-// fetchJobLogs fetches actual job logs for a failed check to extract error lines.
-func fetchJobLogs(ctx context.Context, owner, repo string, jobID int64) tea.Cmd {
-	return func() tea.Msg {
-		client, err := ghclient.NewClient(ctx)
-		if err != nil {
-			return JobLogMsg{JobID: jobID, Err: err}
-		}
-
-		errors, err := ghclient.FetchJobLogs(ctx, client, owner, repo, jobID)
-		if err != nil {
-			return JobLogMsg{JobID: jobID, Err: err}
-		}
-		return JobLogMsg{JobID: jobID, Errors: errors}
 	}
 }
 
