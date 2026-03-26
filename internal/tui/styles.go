@@ -17,6 +17,12 @@ type Styles struct {
 	Info        lipgloss.Style
 	ErrorBox    lipgloss.Style
 	Description lipgloss.Style
+	LogError    lipgloss.Style
+	LogWarning  lipgloss.Style
+	LogNotice   lipgloss.Style
+	LogGroup    lipgloss.Style
+	LogDebug    lipgloss.Style
+	LogDefault  lipgloss.Style
 }
 
 // NewStyles creates styled renderers based on config colors
@@ -35,5 +41,11 @@ func NewStyles(successColor, failureColor, runningColor, queuedColor int) Styles
 			PaddingLeft(1).
 			Foreground(lipgloss.Color("243")),
 		Description: lipgloss.NewStyle().Foreground(lipgloss.Color("243")),
+		LogError:    lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true),
+		LogWarning:  lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
+		LogNotice:   lipgloss.NewStyle().Foreground(lipgloss.Color("12")),
+		LogGroup:    lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true),
+		LogDebug:    lipgloss.NewStyle().Foreground(lipgloss.Color("243")),
+		LogDefault:  lipgloss.NewStyle().Foreground(lipgloss.Color("243")),
 	}
 }

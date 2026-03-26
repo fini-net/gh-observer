@@ -52,3 +52,13 @@ type JobAveragesPartialMsg struct {
 	Averages   map[string]time.Duration
 	Err        error
 }
+
+// SlowJobLogMsg contains log lines for a slow-running job
+type SlowJobLogMsg struct {
+	JobID int64
+	Lines []ghclient.LogLine
+	Err   error
+}
+
+// SlowLogTickMsg triggers periodic log fetching for in-progress jobs
+type SlowLogTickMsg struct{}

@@ -10,13 +10,19 @@ import (
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
+const slowLogFetchInterval = 2 * time.Second
+
 // Init initializes the model
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.spinner.Tick,
 		fetchPRInfo(m.ctx, m.token, m.owner, m.repo, m.prNumber),
 		tick(m.refreshInterval),
-	)
+	}
+	if m.slowLogsEnabled {
+		cmds = append(cmds, tickSlowLogs())
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update handles messages
@@ -151,6 +157,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case SlowLogTickMsg:
+		if !m.slowLogsEnabled {
+			return m, nil
+		}
+		// Fetch logs for in-progress jobs running >1 minute
+		return m, tea.Batch(m.fetchSlowJobLogs(), tickSlowLogs())
+
+	case SlowJobLogMsg:
+		delete(m.slowLogFetchPending, msg.JobID)
+		m.slowLogLastFetch[msg.JobID] = time.Now()
+		if msg.Err == nil && len(msg.Lines) > 0 {
+			m.jobSlowLogs[msg.JobID] = msg.Lines
+		}
+		return m, nil
+
 	case ErrorMsg:
 		m.err = msg.Err
 		return m, nil
@@ -220,6 +241,13 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 func tick(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(t time.Time) tea.Msg {
 		return TickMsg(t)
+	})
+}
+
+// tickSlowLogs creates a command that sends a SlowLogTickMsg after the slowLogFetchInterval
+func tickSlowLogs() tea.Cmd {
+	return tea.Tick(slowLogFetchInterval, func(t time.Time) tea.Msg {
+		return SlowLogTickMsg{}
 	})
 }
 
@@ -317,6 +345,58 @@ func fetchCheckRuns(ctx context.Context, token, owner, repo string, prNumber int
 			CheckRuns:          checkRuns,
 			RateLimitRemaining: rateLimit,
 		}
+	}
+}
+
+// fetchSlowJobLogs creates commands to fetch logs for in-progress jobs running >1 minute
+func (m *Model) fetchSlowJobLogs() tea.Cmd {
+	var cmds []tea.Cmd
+
+	for _, check := range m.checkRuns {
+		if check.Status != "in_progress" || check.StartedAt == nil {
+			continue
+		}
+
+		// Only fetch for jobs running >1 minute
+		if time.Since(*check.StartedAt) < time.Minute {
+			continue
+		}
+
+		jobID, err := ghclient.ParseJobIDFromURL(check.DetailsURL)
+		if err != nil {
+			continue
+		}
+
+		// Skip if fetch is pending or was fetched recently (< 1.5s ago)
+		if m.slowLogFetchPending[jobID] {
+			continue
+		}
+
+		if last, ok := m.slowLogLastFetch[jobID]; ok && time.Since(last) < 1500*time.Millisecond {
+			continue
+		}
+
+		m.slowLogFetchPending[jobID] = true
+		cmds = append(cmds, fetchSlowJobLogLines(m.ctx, m.owner, m.repo, jobID))
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// fetchSlowJobLogLines fetches the last N log lines for a job
+func fetchSlowJobLogLines(ctx context.Context, owner, repo string, jobID int64) tea.Cmd {
+	return func() tea.Msg {
+		client, err := ghclient.NewClient(ctx)
+		if err != nil {
+			return SlowJobLogMsg{JobID: jobID, Err: err}
+		}
+
+		lines, err := ghclient.FetchLastNJobLines(ctx, client, owner, repo, jobID, 5)
+		if err != nil {
+			return SlowJobLogMsg{JobID: jobID, Err: err}
+		}
+
+		return SlowJobLogMsg{JobID: jobID, Lines: lines}
 	}
 }
 

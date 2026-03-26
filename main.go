@@ -24,9 +24,11 @@ func main() {
 }
 
 var quickFlag bool
+var noSlowLogsFlag bool
 
 func init() {
 	rootCmd.Flags().BoolVarP(&quickFlag, "quick", "q", false, "Skip fetching historical average runtimes")
+	rootCmd.Flags().BoolVar(&noSlowLogsFlag, "no-slow-logs", false, "Disable live log display for slow-running jobs")
 }
 
 var rootCmd = &cobra.Command{
@@ -201,7 +203,8 @@ func run(args []string) int {
 	}
 
 	// Create model
-	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag)
+	slowLogsEnabled := !noSlowLogsFlag
+	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag, slowLogsEnabled)
 
 	// Run TUI (keeps output visible after exit)
 	p := tea.NewProgram(model)

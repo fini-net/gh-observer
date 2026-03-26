@@ -58,6 +58,12 @@ type Model struct {
 	noAvg                   bool
 	firstCheckSeenAt        time.Time
 
+	// Slow job log tracking (for jobs running >1 minute)
+	slowLogsEnabled     bool
+	slowLogFetchPending map[int64]bool
+	slowLogLastFetch    map[int64]time.Time
+	jobSlowLogs         map[int64][]ghclient.LogLine
+
 	// Set when all checks complete; used to defer quit until avgFetchDone
 	checksComplete bool
 }
@@ -71,7 +77,7 @@ type ColumnWidths struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool) Model {
+func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool, slowLogsEnabled bool) Model {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	return Model{
@@ -87,11 +93,15 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 		styles:                  styles,
 		enableLinks:             enableLinks,
 		noAvg:                   noAvg,
+		slowLogsEnabled:         slowLogsEnabled,
 		jobAverages:             make(map[string]time.Duration),
 		runIDToWorkflowID:       make(map[int64]int64),
 		fetchedWorkflowIDs:      make(map[int64]bool),
 		pendingWorkflowFetch:    make(map[int64]bool),
 		dispatchedWorkflowFetch: make(map[int64]bool),
+		slowLogFetchPending:     make(map[int64]bool),
+		slowLogLastFetch:        make(map[int64]time.Time),
+		jobSlowLogs:             make(map[int64][]ghclient.LogLine),
 	}
 }
 

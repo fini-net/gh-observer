@@ -76,6 +76,10 @@ func (m Model) View() tea.View {
 		if (check.Conclusion == "failure" || check.Conclusion == "timed_out") && len(check.Annotations) > 0 {
 			b.WriteString(m.renderErrorBox(check, widths))
 		}
+
+		if m.slowLogsEnabled {
+			b.WriteString(m.renderSlowJobLogs(check, widths))
+		}
 	}
 
 	b.WriteString("\n")
@@ -211,6 +215,53 @@ func (m Model) renderStartupPhase() string {
 	} else {
 		b.WriteString(m.styles.Queued.Render("No checks found.\n"))
 		b.WriteString("  This PR may not have workflows configured, or they may have been skipped.\n")
+	}
+
+	return b.String()
+}
+
+// renderSlowJobLogs displays live logs for jobs running longer than 1 minute
+func (m Model) renderSlowJobLogs(check ghclient.CheckRunInfo, widths ColumnWidths) string {
+	if check.Status != "in_progress" || check.StartedAt == nil {
+		return ""
+	}
+
+	if time.Since(*check.StartedAt) < time.Minute {
+		return ""
+	}
+
+	jobID, err := ghclient.ParseJobIDFromURL(check.DetailsURL)
+	if err != nil {
+		return ""
+	}
+
+	lines := m.jobSlowLogs[jobID]
+	if len(lines) == 0 {
+		return ""
+	}
+
+	indent := widths.QueueWidth + 3
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "%s%s\n", strings.Repeat(" ", indent), m.styles.Info.Render("│ Last 5 lines:"))
+
+	for _, line := range lines {
+		var styled string
+		switch line.Style {
+		case "error":
+			styled = m.styles.LogError.Render(line.Text)
+		case "warning":
+			styled = m.styles.LogWarning.Render(line.Text)
+		case "notice":
+			styled = m.styles.LogNotice.Render(line.Text)
+		case "group":
+			styled = m.styles.LogGroup.Render(line.Text)
+		case "debug":
+			styled = m.styles.LogDebug.Render(line.Text)
+		default:
+			styled = m.styles.LogDefault.Render(line.Text)
+		}
+		fmt.Fprintf(&b, "%s%s\n", strings.Repeat(" ", indent), m.styles.Queued.Render("│ "+styled))
 	}
 
 	return b.String()
