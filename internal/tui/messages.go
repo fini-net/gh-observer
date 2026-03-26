@@ -60,5 +60,12 @@ type SlowJobLogMsg struct {
 	Err   error
 }
 
+// SlowJobLogFinalMsg contains final log lines for a completed job
+type SlowJobLogFinalMsg struct {
+	JobID int64
+	Lines []ghclient.LogLine
+	Err   error
+}
+
 // SlowLogTickMsg triggers periodic log fetching for in-progress jobs
 type SlowLogTickMsg struct{}

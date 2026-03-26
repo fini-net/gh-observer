@@ -63,6 +63,7 @@ type Model struct {
 	slowLogFetchPending map[int64]bool
 	slowLogLastFetch    map[int64]time.Time
 	jobSlowLogs         map[int64][]ghclient.LogLine
+	slowLogFetchedFinal map[int64]bool // tracks completed jobs that have had final log fetch
 
 	// Set when all checks complete; used to defer quit until avgFetchDone
 	checksComplete bool
@@ -102,6 +103,7 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 		slowLogFetchPending:     make(map[int64]bool),
 		slowLogLastFetch:        make(map[int64]time.Time),
 		jobSlowLogs:             make(map[int64][]ghclient.LogLine),
+		slowLogFetchedFinal:     make(map[int64]bool),
 	}
 }
 

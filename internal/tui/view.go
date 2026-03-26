@@ -222,11 +222,29 @@ func (m Model) renderStartupPhase() string {
 
 // renderSlowJobLogs displays live logs for jobs running longer than 1 minute
 func (m Model) renderSlowJobLogs(check ghclient.CheckRunInfo, widths ColumnWidths) string {
-	if check.Status != "in_progress" || check.StartedAt == nil {
+	// Show logs for in-progress jobs OR completed jobs (success/failure)
+	if check.Status != "in_progress" && check.Status != "completed" {
 		return ""
 	}
 
-	if time.Since(*check.StartedAt) < time.Minute {
+	// Skip incomplete completed jobs (queued, waiting, etc.)
+	if check.Status == "completed" && (check.Conclusion == "" || check.Conclusion == "pending") {
+		return ""
+	}
+
+	if check.StartedAt == nil {
+		return ""
+	}
+
+	// Only show logs for jobs running >1 minute (for in-progress) or total runtime >1 minute (for completed)
+	var runtime time.Duration
+	if check.Status == "in_progress" {
+		runtime = time.Since(*check.StartedAt)
+	} else if check.CompletedAt != nil {
+		runtime = check.CompletedAt.Sub(*check.StartedAt)
+	}
+
+	if runtime < time.Minute {
 		return ""
 	}
 
