@@ -40,8 +40,12 @@ func ParseJobIDFromURL(detailsURL string) (int64, error) {
 // It uses a ring buffer for O(n) memory usage regardless of log size.
 // Non-fatal: returns nil, nil if the job has no logs yet.
 func FetchLastNJobLines(ctx context.Context, client *gogithub.Client, owner, repo string, jobID int64, n int) ([]LogLine, error) {
-	logURL, _, err := client.Actions.GetWorkflowJobLogs(ctx, owner, repo, jobID, 0)
+	logURL, ghResp, err := client.Actions.GetWorkflowJobLogs(ctx, owner, repo, jobID, 0)
 	if err != nil {
+		if ghResp != nil && ghResp.StatusCode == http.StatusNotFound {
+			// Log blob not available yet (job still initializing).
+			return nil, nil
+		}
 		return nil, fmt.Errorf("get job log URL: %w", err)
 	}
 
@@ -78,8 +82,12 @@ func RawJobName(checkName string) string {
 // the per-job log endpoint hasn't made the blob available yet.
 // Non-fatal: returns nil, nil if the job or ZIP is not available yet.
 func FetchInProgressJobLogs(ctx context.Context, client *gogithub.Client, owner, repo string, runID int64, rawJobName string, n int) ([]LogLine, error) {
-	zipURL, _, err := client.Actions.GetWorkflowRunLogs(ctx, owner, repo, runID, 0)
+	zipURL, ghResp, err := client.Actions.GetWorkflowRunLogs(ctx, owner, repo, runID, 0)
 	if err != nil {
+		if ghResp != nil && ghResp.StatusCode == http.StatusNotFound {
+			// ZIP not available yet (run still in progress).
+			return nil, nil
+		}
 		return nil, fmt.Errorf("get run logs URL: %w", err)
 	}
 
