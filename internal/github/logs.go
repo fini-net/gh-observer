@@ -54,6 +54,11 @@ func FetchLastNJobLines(ctx context.Context, client *gogithub.Client, owner, rep
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		// Blob not available yet (e.g. job still initializing); try again next tick.
+		return nil, nil
+	}
+
 	return parseLastNLines(resp.Body, n), nil
 }
 
