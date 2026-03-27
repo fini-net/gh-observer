@@ -52,3 +52,10 @@ type JobAveragesPartialMsg struct {
 	Averages   map[string]time.Duration
 	Err        error
 }
+
+// SlowJobLogsMsg contains the last N log lines fetched for a slow in-progress job
+type SlowJobLogsMsg struct {
+	JobURL string
+	Lines  []ghclient.LogLine
+	Err    error
+}
