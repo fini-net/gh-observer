@@ -1,7 +1,9 @@
 package github
 
 import (
+	"archive/zip"
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -60,6 +62,72 @@ func FetchLastNJobLines(ctx context.Context, client *gogithub.Client, owner, rep
 	}
 
 	return parseLastNLines(resp.Body, n), nil
+}
+
+// RawJobName extracts the job name portion from a display name like "Workflow / Job".
+// This matches the directory name GitHub uses inside a run logs ZIP file.
+func RawJobName(checkName string) string {
+	if idx := strings.LastIndex(checkName, " / "); idx >= 0 {
+		return checkName[idx+3:]
+	}
+	return checkName
+}
+
+// FetchInProgressJobLogs downloads the run's log ZIP and returns the last n lines
+// from the most recent step of the named job. Works for in-progress runs where
+// the per-job log endpoint hasn't made the blob available yet.
+// Non-fatal: returns nil, nil if the job or ZIP is not available yet.
+func FetchInProgressJobLogs(ctx context.Context, client *gogithub.Client, owner, repo string, runID int64, rawJobName string, n int) ([]LogLine, error) {
+	zipURL, _, err := client.Actions.GetWorkflowRunLogs(ctx, owner, repo, runID, 0)
+	if err != nil {
+		return nil, fmt.Errorf("get run logs URL: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, zipURL.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("build run logs request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch run logs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		// ZIP not available yet; try again next tick.
+		return nil, nil
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read run logs: %w", err)
+	}
+
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("parse run logs zip: %w", err)
+	}
+
+	// Walk ZIP files in order; the last file under rawJobName/ is the newest step.
+	prefix := rawJobName + "/"
+	var lastFile *zip.File
+	for _, f := range r.File {
+		if strings.HasPrefix(f.Name, prefix) && !f.FileInfo().IsDir() {
+			lastFile = f
+		}
+	}
+	if lastFile == nil {
+		return nil, nil
+	}
+
+	rc, err := lastFile.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+
+	return parseLastNLines(rc, n), nil
 }
 
 // parseLastNLines reads from r and returns the last n non-empty log lines.

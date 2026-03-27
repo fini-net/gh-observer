@@ -194,7 +194,6 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 			continue
 		}
 		if cr.Status == "completed" {
-			delete(m.slowLogs, cr.DetailsURL)
 			delete(m.slowLogFetching, cr.DetailsURL)
 			delete(m.slowLogErr, cr.DetailsURL)
 			continue
@@ -209,7 +208,7 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 			continue
 		}
 		m.slowLogFetching[cr.DetailsURL] = true
-		cmds = append(cmds, fetchSlowJobLogs(m.ctx, m.owner, m.repo, cr.DetailsURL))
+		cmds = append(cmds, fetchSlowJobLogs(m.ctx, m.owner, m.repo, cr.DetailsURL, cr.Name))
 	}
 
 	allComplete := allChecksComplete(msg.CheckRuns)
@@ -355,7 +354,9 @@ func fetchCheckRuns(ctx context.Context, token, owner, repo string, prNumber int
 }
 
 // fetchSlowJobLogs fetches the last N log lines for a slow in-progress job.
-func fetchSlowJobLogs(ctx context.Context, owner, repo, detailsURL string) tea.Cmd {
+// It tries the per-job endpoint first and falls back to the run logs ZIP for
+// in-progress jobs where the per-job blob isn't available yet.
+func fetchSlowJobLogs(ctx context.Context, owner, repo, detailsURL, checkName string) tea.Cmd {
 	return func() tea.Msg {
 		client, err := ghclient.NewClient(ctx)
 		if err != nil {
@@ -366,6 +367,19 @@ func fetchSlowJobLogs(ctx context.Context, owner, repo, detailsURL string) tea.C
 			return SlowJobLogsMsg{JobURL: detailsURL, Err: err}
 		}
 		lines, err := ghclient.FetchLastNJobLines(ctx, client, owner, repo, jobID, slowLogLineCount)
+		if err != nil {
+			return SlowJobLogsMsg{JobURL: detailsURL, Err: err}
+		}
+		if len(lines) > 0 {
+			return SlowJobLogsMsg{JobURL: detailsURL, Lines: lines}
+		}
+		// Per-job endpoint returned nothing (blob not available for in-progress jobs).
+		// Fall back to the run logs ZIP which works for in-progress runs.
+		runID, err := ghclient.ParseRunIDFromURL(detailsURL)
+		if err != nil {
+			return SlowJobLogsMsg{JobURL: detailsURL}
+		}
+		lines, err = ghclient.FetchInProgressJobLogs(ctx, client, owner, repo, runID, ghclient.RawJobName(checkName), slowLogLineCount)
 		if err != nil {
 			return SlowJobLogsMsg{JobURL: detailsURL, Err: err}
 		}

@@ -77,11 +77,11 @@ func (m Model) View() tea.View {
 			b.WriteString(m.renderErrorBox(check, widths))
 		}
 
-		if check.Status == "in_progress" && check.StartedAt != nil &&
+		if lines, ok := m.slowLogs[check.DetailsURL]; ok {
+			b.WriteString(m.renderSlowJobLogs(lines, widths))
+		} else if check.Status == "in_progress" && check.StartedAt != nil &&
 			time.Since(*check.StartedAt) >= slowLogThreshold {
-			if lines, ok := m.slowLogs[check.DetailsURL]; ok {
-				b.WriteString(m.renderSlowJobLogs(lines, widths))
-			} else if err, ok := m.slowLogErr[check.DetailsURL]; ok {
+			if err, ok := m.slowLogErr[check.DetailsURL]; ok {
 				b.WriteString(m.renderSlowLogError(err, widths))
 			}
 		}
