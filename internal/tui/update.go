@@ -88,7 +88,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// If checks already finished while we were fetching, quit now
-		if m.checksComplete {
+		if m.checksComplete && len(m.slowLogFetchPending) == 0 {
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -118,7 +118,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			// If checks already finished while we were fetching, and no pending fetches, quit now
-			if m.checksComplete && len(m.pendingWorkflowFetch) == 0 {
+			if m.checksComplete && len(m.pendingWorkflowFetch) == 0 && len(m.slowLogFetchPending) == 0 {
 				m.quitting = true
 				return m, tea.Quit
 			}
@@ -126,7 +126,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Error case: check if we should quit
-		if m.checksComplete && len(m.pendingWorkflowFetch) == 0 {
+		if m.checksComplete && len(m.pendingWorkflowFetch) == 0 && len(m.slowLogFetchPending) == 0 {
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -150,7 +150,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err == nil {
 				m.avgFetchErr = nil
 			}
-			if m.checksComplete {
+			if m.checksComplete && len(m.slowLogFetchPending) == 0 {
 				m.quitting = true
 				return m, tea.Quit
 			}
@@ -177,6 +177,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.slowLogFetchedFinal[msg.JobID] = true
 		if msg.Err == nil && len(msg.Lines) > 0 {
 			m.jobSlowLogs[msg.JobID] = msg.Lines
+		}
+		if m.checksComplete && !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 && len(m.slowLogFetchPending) == 0 {
+			m.quitting = true
+			return m, tea.Quit
 		}
 		return m, nil
 
@@ -234,8 +238,12 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	if allChecksComplete(m.checkRuns) {
 		m.exitCode = determineExitCode(m.checkRuns)
 		m.checksComplete = true
-		// Only quit if no pending/dispatched workflow fetches
-		if !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 {
+		// Trigger final log fetch immediately rather than waiting for next tick
+		if m.slowLogsEnabled {
+			cmds = append(cmds, m.fetchSlowJobLogs())
+		}
+		// Only quit if no pending fetches (avg, workflow history, or slow logs)
+		if !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 && len(m.slowLogFetchPending) == 0 {
 			m.quitting = true
 			cmds = append(cmds, tea.Quit)
 		}
