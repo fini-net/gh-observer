@@ -131,6 +131,18 @@ func TestParseLastNLines(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "last n lines are endgroup markers - should return earlier content",
+			input: "2026-03-26T18:00:00Z Real output line\n" +
+				"2026-03-26T18:00:01Z ##[endgroup]\n" +
+				"2026-03-26T18:00:02Z ##[endgroup]\n" +
+				"2026-03-26T18:00:03Z ##[endgroup]\n" +
+				"2026-03-26T18:00:04Z ##[endgroup]\n" +
+				"2026-03-26T18:00:05Z ##[endgroup]",
+			n:       5,
+			wantLen: 1,
+			wantErr: false,
+		},
+		{
 			name:    "invalid n",
 			input:   "line1\nline2",
 			n:       0,

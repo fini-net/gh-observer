@@ -60,13 +60,17 @@ func parseLastNLines(reader io.Reader, n int) ([]LogLine, error) {
 	buf := make([]byte, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
-	ring := make([]string, n)
+	ring := make([]LogLine, n)
 	idx := 0
 	count := 0
 	wrapped := false
 
 	for scanner.Scan() {
-		ring[idx] = scanner.Text()
+		logLine := parseLogLine(scanner.Text())
+		if logLine.Text == "" {
+			continue // skip empty lines and endgroup markers before inserting
+		}
+		ring[idx] = logLine
 		idx++
 		if idx == n {
 			idx = 0
@@ -96,11 +100,7 @@ func parseLastNLines(reader io.Reader, n int) ([]LogLine, error) {
 
 	for i := 0; i < resultCount; i++ {
 		pos := (startIdx + i) % n
-		line := ring[pos]
-		logLine := parseLogLine(line)
-		if logLine.Text != "" {
-			result = append(result, logLine)
-		}
+		result = append(result, ring[pos])
 	}
 
 	return result, nil
