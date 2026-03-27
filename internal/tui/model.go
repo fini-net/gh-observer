@@ -60,6 +60,11 @@ type Model struct {
 
 	// Set when all checks complete; used to defer quit until avgFetchDone
 	checksComplete bool
+
+	// Slow job live log display
+	slowLogs        map[string][]ghclient.LogLine // keyed by DetailsURL
+	slowLogFetching map[string]bool               // prevents duplicate in-flight fetches
+	slowLogErr      map[string]error              // per-job fetch errors, keyed by DetailsURL
 }
 
 // ColumnWidths holds pre-calculated column widths for aligned rendering
@@ -92,6 +97,9 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 		fetchedWorkflowIDs:      make(map[int64]bool),
 		pendingWorkflowFetch:    make(map[int64]bool),
 		dispatchedWorkflowFetch: make(map[int64]bool),
+		slowLogs:                make(map[string][]ghclient.LogLine),
+		slowLogFetching:         make(map[string]bool),
+		slowLogErr:              make(map[string]error),
 	}
 }
 

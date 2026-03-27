@@ -10,4 +10,7 @@ const (
 	minRateLimitForFetch = 100
 
 	historyFetchDelay = 10 * time.Second
+
+	slowLogThreshold = 1 * time.Minute
+	slowLogLineCount = 5
 )

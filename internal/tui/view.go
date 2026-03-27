@@ -76,6 +76,10 @@ func (m Model) View() tea.View {
 		if (check.Conclusion == "failure" || check.Conclusion == "timed_out") && len(check.Annotations) > 0 {
 			b.WriteString(m.renderErrorBox(check, widths))
 		}
+
+		if lines, ok := m.slowLogs[check.DetailsURL]; ok {
+			b.WriteString(m.renderSlowJobLogs(lines, widths))
+		}
 	}
 
 	b.WriteString("\n")
@@ -136,6 +140,29 @@ func (m Model) renderSummary(check ghclient.CheckRunInfo, widths ColumnWidths) s
 	}
 	indent := widths.QueueWidth + 3
 	return fmt.Sprintf("%s%s\n", strings.Repeat(" ", indent), m.styles.Description.Render(check.Summary))
+}
+
+// renderSlowJobLogs displays the last N log lines for a slow in-progress job
+func (m Model) renderSlowJobLogs(lines []ghclient.LogLine, widths ColumnWidths) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	indent := strings.Repeat(" ", widths.QueueWidth+3)
+	var b strings.Builder
+	for _, line := range lines {
+		var styled string
+		switch line.Level {
+		case "error":
+			styled = m.styles.Failure.Render(line.Text)
+		case "warning":
+			styled = m.styles.Running.Render(line.Text)
+		default:
+			styled = m.styles.Description.Render(line.Text)
+		}
+		b.WriteString(indent + styled + "\n")
+	}
+	b.WriteString("\n")
+	return b.String()
 }
 
 // renderCheckRun displays a single check run with aligned columns

@@ -151,6 +151,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case SlowJobLogsMsg:
+		delete(m.slowLogFetching, msg.JobURL)
+		if msg.Err != nil {
+			m.slowLogErr[msg.JobURL] = msg.Err
+		} else if len(msg.Lines) > 0 {
+			m.slowLogs[msg.JobURL] = msg.Lines
+			delete(m.slowLogErr, msg.JobURL)
+		}
+		return m, nil
+
 	case ErrorMsg:
 		m.err = msg.Err
 		return m, nil
@@ -177,6 +187,30 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmds []tea.Cmd
+
+	// Clean up log state for completed jobs and trigger fetches for slow in-progress jobs.
+	for _, cr := range msg.CheckRuns {
+		if cr.DetailsURL == "" {
+			continue
+		}
+		if cr.Status == "completed" {
+			delete(m.slowLogFetching, cr.DetailsURL)
+			delete(m.slowLogs, cr.DetailsURL)
+			delete(m.slowLogErr, cr.DetailsURL)
+			continue
+		}
+		if cr.Status != "in_progress" || cr.StartedAt == nil {
+			continue
+		}
+		if time.Since(*cr.StartedAt) < slowLogThreshold {
+			continue
+		}
+		if m.slowLogFetching[cr.DetailsURL] {
+			continue
+		}
+		m.slowLogFetching[cr.DetailsURL] = true
+		cmds = append(cmds, fetchSlowJobLogs(m.ctx, m.owner, m.repo, cr.DetailsURL))
+	}
 
 	allComplete := allChecksComplete(msg.CheckRuns)
 	elapsed := time.Since(m.firstCheckSeenAt)
@@ -317,6 +351,25 @@ func fetchCheckRuns(ctx context.Context, token, owner, repo string, prNumber int
 			CheckRuns:          checkRuns,
 			RateLimitRemaining: rateLimit,
 		}
+	}
+}
+
+// fetchSlowJobLogs fetches the last N log lines for a slow in-progress job.
+func fetchSlowJobLogs(ctx context.Context, owner, repo, detailsURL string) tea.Cmd {
+	return func() tea.Msg {
+		client, err := ghclient.NewClient(ctx)
+		if err != nil {
+			return SlowJobLogsMsg{JobURL: detailsURL, Err: err}
+		}
+		jobID, err := ghclient.ParseJobIDFromURL(detailsURL)
+		if err != nil {
+			return SlowJobLogsMsg{JobURL: detailsURL, Err: err}
+		}
+		lines, err := ghclient.FetchLastNJobLines(ctx, client, owner, repo, jobID, slowLogLineCount)
+		if err != nil {
+			return SlowJobLogsMsg{JobURL: detailsURL, Err: err}
+		}
+		return SlowJobLogsMsg{JobURL: detailsURL, Lines: lines}
 	}
 }
 

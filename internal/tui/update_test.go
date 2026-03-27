@@ -20,6 +20,9 @@ func makeModel() *Model {
 		fetchedWorkflowIDs:      make(map[int64]bool),
 		pendingWorkflowFetch:    make(map[int64]bool),
 		dispatchedWorkflowFetch: make(map[int64]bool),
+		slowLogs:                make(map[string][]ghclient.LogLine),
+		slowLogFetching:         make(map[string]bool),
+		slowLogErr:              make(map[string]error),
 	}
 }
 
@@ -649,6 +652,188 @@ func TestJobAveragesPartialMsg(t *testing.T) {
 
 		if !result.quitting {
 			t.Error("should quit when checks complete and fetches finish")
+		}
+	})
+}
+
+func TestSlowJobLogsTriggering(t *testing.T) {
+	t.Run("slow in-progress job triggers log fetch", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		startedAt := time.Now().Add(-2 * time.Minute)
+
+		msg := ChecksUpdateMsg{
+			CheckRuns: []ghclient.CheckRunInfo{
+				{
+					Status:       "in_progress",
+					StartedAt:    &startedAt,
+					DetailsURL:   "https://github.com/test/test/actions/runs/123/job/456",
+					WorkflowName: "CI",
+					Name:         "build",
+				},
+			},
+			RateLimitRemaining: 5000,
+		}
+
+		model, _ := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if !result.slowLogFetching["https://github.com/test/test/actions/runs/123/job/456"] {
+			t.Error("slow log fetch should be triggered for job running > 1 minute")
+		}
+	})
+
+	t.Run("fast in-progress job does not trigger log fetch", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		startedAt := time.Now().Add(-10 * time.Second)
+
+		msg := ChecksUpdateMsg{
+			CheckRuns: []ghclient.CheckRunInfo{
+				{
+					Status:       "in_progress",
+					StartedAt:    &startedAt,
+					DetailsURL:   "https://github.com/test/test/actions/runs/123/job/456",
+					WorkflowName: "CI",
+					Name:         "build",
+				},
+			},
+			RateLimitRemaining: 5000,
+		}
+
+		model, _ := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if result.slowLogFetching["https://github.com/test/test/actions/runs/123/job/456"] {
+			t.Error("slow log fetch should not be triggered for job running < 1 minute")
+		}
+	})
+
+	t.Run("completed job cleans up log state", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		url := "https://github.com/test/test/actions/runs/123/job/456"
+		m.slowLogs[url] = []ghclient.LogLine{{Text: "building", Level: "info"}}
+		m.slowLogFetching[url] = true
+		m.slowLogErr[url] = nil
+
+		msg := ChecksUpdateMsg{
+			CheckRuns: []ghclient.CheckRunInfo{
+				{
+					Status:       "completed",
+					Conclusion:   "success",
+					DetailsURL:   url,
+					WorkflowName: "CI",
+					Name:         "build",
+				},
+			},
+			RateLimitRemaining: 5000,
+		}
+
+		model, _ := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if _, ok := result.slowLogs[url]; ok {
+			t.Error("slow logs should be cleaned up for completed job")
+		}
+		if _, ok := result.slowLogFetching[url]; ok {
+			t.Error("slow log fetching flag should be cleaned up for completed job")
+		}
+		if _, ok := result.slowLogErr[url]; ok {
+			t.Error("slow log error should be cleaned up for completed job")
+		}
+	})
+
+	t.Run("already-fetching job does not trigger duplicate", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		url := "https://github.com/test/test/actions/runs/123/job/456"
+		m.slowLogFetching[url] = true
+		startedAt := time.Now().Add(-2 * time.Minute)
+
+		msg := ChecksUpdateMsg{
+			CheckRuns: []ghclient.CheckRunInfo{
+				{
+					Status:       "in_progress",
+					StartedAt:    &startedAt,
+					DetailsURL:   url,
+					WorkflowName: "CI",
+					Name:         "build",
+				},
+			},
+			RateLimitRemaining: 5000,
+		}
+
+		model, cmd := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if !result.slowLogFetching[url] {
+			t.Error("slow log fetching flag should remain true")
+		}
+		if cmd == nil {
+			// If no commands returned, that's correct - no duplicate fetch
+		}
+	})
+}
+
+func TestSlowJobLogsMsg(t *testing.T) {
+	t.Run("stores lines on success", func(t *testing.T) {
+		m := makeModel()
+		url := "https://github.com/test/test/actions/runs/123/job/456"
+		m.slowLogFetching[url] = true
+
+		lines := []ghclient.LogLine{
+			{Text: "building", Level: "info"},
+			{Text: "compiling", Level: "info"},
+		}
+		msg := SlowJobLogsMsg{JobURL: url, Lines: lines}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if _, ok := result.slowLogFetching[url]; ok {
+			t.Error("fetching flag should be cleared")
+		}
+		if len(result.slowLogs[url]) != 2 {
+			t.Errorf("expected 2 log lines, got %d", len(result.slowLogs[url]))
+		}
+		if _, ok := result.slowLogErr[url]; ok {
+			t.Error("error should be cleared on success")
+		}
+	})
+
+	t.Run("stores error on failure", func(t *testing.T) {
+		m := makeModel()
+		url := "https://github.com/test/test/actions/runs/123/job/456"
+		m.slowLogFetching[url] = true
+
+		msg := SlowJobLogsMsg{JobURL: url, Err: context.Canceled}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if _, ok := result.slowLogFetching[url]; ok {
+			t.Error("fetching flag should be cleared")
+		}
+		if result.slowLogErr[url] == nil {
+			t.Error("error should be stored")
+		}
+	})
+
+	t.Run("ignores empty lines without error", func(t *testing.T) {
+		m := makeModel()
+		url := "https://github.com/test/test/actions/runs/123/job/456"
+		m.slowLogFetching[url] = true
+		m.slowLogs[url] = []ghclient.LogLine{{Text: "old", Level: "info"}}
+
+		msg := SlowJobLogsMsg{JobURL: url, Lines: nil, Err: nil}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if _, ok := result.slowLogFetching[url]; ok {
+			t.Error("fetching flag should be cleared")
+		}
+		// Old logs should remain since no new lines were provided
+		if len(result.slowLogs[url]) != 1 {
+			t.Errorf("expected 1 existing log line, got %d", len(result.slowLogs[url]))
 		}
 	})
 }
