@@ -13,8 +13,13 @@ func TestParseJobIDFromURL(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "standard job URL",
+			name: "singular job URL",
 			url:  "https://github.com/owner/repo/actions/runs/12345678/job/98765432",
+			want: 98765432,
+		},
+		{
+			name: "plural jobs URL",
+			url:  "https://github.com/owner/repo/actions/runs/12345678/jobs/98765432",
 			want: 98765432,
 		},
 		{

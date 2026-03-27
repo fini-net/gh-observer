@@ -18,8 +18,13 @@ func TestParseRunIDFromURL(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:   "valid CheckRun URL",
+			name:   "singular job URL",
 			url:    "https://github.com/owner/repo/actions/runs/12345678/job/987654321",
+			wantID: 12345678,
+		},
+		{
+			name:   "plural jobs URL",
+			url:    "https://github.com/owner/repo/actions/runs/12345678/jobs/987654321",
 			wantID: 12345678,
 		},
 		{
@@ -121,6 +126,22 @@ func TestDiscoverWorkflows(t *testing.T) {
 			},
 			wantRunIDs:      map[int64]int64{123: 789},
 			wantWorkflowIDs: nil,
+		},
+		{
+			name: "plural jobs URL is parsed correctly",
+			checkRuns: []CheckRunInfo{
+				{Name: "test", Status: "completed", DetailsURL: "https://github.com/owner/repo/actions/runs/123/jobs/456"},
+			},
+			knownRunIDToWorkflowID:  map[int64]int64{},
+			knownFetchedWorkflowIDs: map[int64]bool{},
+			mockHandler: func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/repos/owner/repo/actions/runs/123" {
+					w.Header().Set("Content-Type", "application/json")
+					w.Write([]byte(`{"id":123,"workflow_id":789}`))
+				}
+			},
+			wantRunIDs:      map[int64]int64{123: 789},
+			wantWorkflowIDs: []int64{789},
 		},
 	}
 

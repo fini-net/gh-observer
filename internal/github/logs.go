@@ -13,7 +13,7 @@ import (
 	gogithub "github.com/google/go-github/v84/github"
 )
 
-var jobIDRegexp = regexp.MustCompile(`/actions/runs/\d+/job/(\d+)`)
+var jobIDRegexp = regexp.MustCompile(`/actions/runs/\d+/jobs?/(\d+)`)
 
 var timestampRegexp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z `)
 
