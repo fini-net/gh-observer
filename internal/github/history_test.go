@@ -19,7 +19,7 @@ func TestParseRunIDFromURL(t *testing.T) {
 	}{
 		{
 			name:   "valid CheckRun URL",
-			url:    "https://github.com/owner/repo/actions/runs/12345678/job/987654321",
+			url:    "https://github.com/owner/repo/actions/runs/12345678/jobs/987654321",
 			wantID: 12345678,
 		},
 		{
@@ -82,7 +82,7 @@ func TestDiscoverWorkflows(t *testing.T) {
 		{
 			name: "cached run ID mapping is reused",
 			checkRuns: []CheckRunInfo{
-				{Name: "test", Status: "completed", DetailsURL: "https://github.com/owner/repo/actions/runs/123/job/456"},
+				{Name: "test", Status: "completed", DetailsURL: "https://github.com/owner/repo/actions/runs/123/jobs/456"},
 			},
 			knownRunIDToWorkflowID:  map[int64]int64{123: 789},
 			knownFetchedWorkflowIDs: map[int64]bool{789: true},
@@ -93,7 +93,7 @@ func TestDiscoverWorkflows(t *testing.T) {
 		{
 			name: "fetches workflow run for new run ID",
 			checkRuns: []CheckRunInfo{
-				{Name: "test", Status: "completed", DetailsURL: "https://github.com/owner/repo/actions/runs/123/job/456"},
+				{Name: "test", Status: "completed", DetailsURL: "https://github.com/owner/repo/actions/runs/123/jobs/456"},
 			},
 			knownRunIDToWorkflowID:  map[int64]int64{},
 			knownFetchedWorkflowIDs: map[int64]bool{},
@@ -109,7 +109,7 @@ func TestDiscoverWorkflows(t *testing.T) {
 		{
 			name: "skips unfetched workflow IDs",
 			checkRuns: []CheckRunInfo{
-				{Name: "test", Status: "completed", DetailsURL: "https://github.com/owner/repo/actions/runs/123/job/456"},
+				{Name: "test", Status: "completed", DetailsURL: "https://github.com/owner/repo/actions/runs/123/jobs/456"},
 			},
 			knownRunIDToWorkflowID:  map[int64]int64{},
 			knownFetchedWorkflowIDs: map[int64]bool{789: true},

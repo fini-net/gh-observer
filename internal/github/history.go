@@ -10,7 +10,7 @@ import (
 	"github.com/google/go-github/v84/github"
 )
 
-var runIDRegexp = regexp.MustCompile(`/actions/runs/(\d+)/job/`)
+var runIDRegexp = regexp.MustCompile(`/actions/runs/(\d+)/jobs/`)
 
 // ParseRunIDFromURL extracts the workflow run ID from a GitHub Actions details URL.
 func ParseRunIDFromURL(detailsURL string) (int64, error) {
