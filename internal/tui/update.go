@@ -153,8 +153,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case SlowJobLogsMsg:
 		delete(m.slowLogFetching, msg.JobURL)
-		if msg.Err == nil && len(msg.Lines) > 0 {
+		if msg.Err != nil {
+			m.slowLogErr[msg.JobURL] = msg.Err
+		} else if len(msg.Lines) > 0 {
 			m.slowLogs[msg.JobURL] = msg.Lines
+			delete(m.slowLogErr, msg.JobURL)
 		}
 		return m, nil
 
@@ -193,6 +196,7 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 		if cr.Status == "completed" {
 			delete(m.slowLogs, cr.DetailsURL)
 			delete(m.slowLogFetching, cr.DetailsURL)
+			delete(m.slowLogErr, cr.DetailsURL)
 			continue
 		}
 		if cr.Status != "in_progress" || cr.StartedAt == nil {

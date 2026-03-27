@@ -14,7 +14,7 @@ func TestParseJobIDFromURL(t *testing.T) {
 	}{
 		{
 			name: "standard job URL",
-			url:  "https://github.com/owner/repo/actions/runs/12345678/jobs/98765432",
+			url:  "https://github.com/owner/repo/actions/runs/12345678/job/98765432",
 			want: 98765432,
 		},
 		{

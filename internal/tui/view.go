@@ -81,6 +81,8 @@ func (m Model) View() tea.View {
 			time.Since(*check.StartedAt) >= slowLogThreshold {
 			if lines, ok := m.slowLogs[check.DetailsURL]; ok {
 				b.WriteString(m.renderSlowJobLogs(lines, widths))
+			} else if err, ok := m.slowLogErr[check.DetailsURL]; ok {
+				b.WriteString(m.renderSlowLogError(err, widths))
 			}
 		}
 	}
@@ -221,6 +223,12 @@ func (m Model) renderSlowJobLogs(lines []ghclient.LogLine, widths ColumnWidths) 
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+// renderSlowLogError displays a fetch error for a slow in-progress job
+func (m Model) renderSlowLogError(err error, widths ColumnWidths) string {
+	indent := strings.Repeat(" ", widths.QueueWidth+3)
+	return indent + m.styles.Failure.Render("log fetch error: "+err.Error()) + "\n\n"
 }
 
 // renderStartupPhase shows helpful message during GitHub Actions startup delay
