@@ -219,6 +219,24 @@ Precompiled binaries are available for:
 
 All binaries include supply chain security attestations for verification.
 
+## Known Limitation: Live Logs for Slow Jobs
+
+We'd love to show you live (non-error) logs while your jobs are still running —
+especially for jobs that take over a minute. Unfortunately, the
+[GitHub Actions API no longer returns logs in real-time](https://github.com/orgs/community/discussions/154834).
+The logs endpoint returns a 404 while a job is in progress and only serves logs
+after the job completes. This makes streaming or tailing job logs via the API
+impossible today.
+
+Multiple attempts to work around this (see
+[#127](https://github.com/fini-net/gh-observer/issues/127)) have confirmed
+there is no viable alternative. GitLab supports this; GitHub does not (yet).
+
+If live job logs would help your workflow, please
+[upvote and comment on the community discussion](https://github.com/orgs/community/discussions/154834)
+to let GitHub know this matters. The more voices, the more likely we'll get a
+real-time log streaming API.
+
 ## Development
 
 This project uses [just](https://github.com/casey/just) for task automation:
