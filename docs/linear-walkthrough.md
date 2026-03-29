@@ -28,16 +28,13 @@ The application uses [Cobra](https://github.com/spf13/cobra) for CLI argument pa
 - **Arguments**: Maximum of 1 argument (optional PR number or full PR URL)
 - **Flags**:
   - `--quick` / `-q`: Skip fetching historical average runtimes
-  - `--slow-nonerror`: Show logs for successful jobs running longer than 1 minute
 - **Execution**: Calls `run(args)` and exits with the returned exit code
 
 ```go
 var quickFlag bool
-var slowNonerrorFlag bool
 
 func init() {
     rootCmd.Flags().BoolVarP(&quickFlag, "quick", "q", false, "Skip fetching historical average runtimes")
-    rootCmd.Flags().BoolVar(&slowNonerrorFlag, "slow-nonerror", false, "Show logs for successful jobs running longer than 1 minute")
 }
 
 var rootCmd = &cobra.Command{
@@ -143,11 +140,11 @@ Located at `internal/github/client.go`. Token acquisition strategy:
 2. **Fallback**: Run `gh auth token` command
 3. **Error**: Return message if both fail
 
-#### Step 5: Mode Selection (`main.go:247-251`)
+#### Step 5: Mode Selection (`main.go:197-201`)
 
 ```go
 if !term.IsTerminal(int(os.Stdout.Fd())) {
-    return runSnapshot(ctx, token, owner, repo, prNumber, cfg.EnableLinks, quickFlag, slowNonerrorFlag)
+    return runSnapshot(ctx, token, owner, repo, prNumber, cfg.EnableLinks, quickFlag)
 }
 ```
 
@@ -245,24 +242,9 @@ if !quick {
 }
 ```
 
-Located at `internal/github/history.go:41-162`. Fetches recent completed workflow runs to calculate average job durations.
+Located at `internal/github/history.go:31-153`. Fetches recent completed workflow runs to calculate average job durations.
 
-#### Step 5: Fetch Slow Job Logs (if `--slow-nonerror`)
-
-```go
-jobSlowLogs := make(map[int64][]string)
-if slowNonerror {
-    for _, check := range checkRuns {
-        // Only for in_progress or completed success with runtime > 1 minute
-        ...
-        lines, err := ghclient.FetchLastNJobLines(ctx, client, owner, repo, jobID, 5)
-    }
-}
-```
-
-Located at `internal/github/logs.go:225-306`. Fetches the last N lines from job logs.
-
-#### Step 6: Calculate Column Widths
+#### Step 5: Calculate Column Widths
 
 ```go
 widths := tui.CalculateColumnWidths(checkRuns, headCommitTime, jobAverages)
@@ -304,13 +286,13 @@ if check.Status == "completed" {
 
 TUI mode runs when stdout is a terminal, providing real-time updates.
 
-### Model Creation (`main.go:254`)
+### Model Creation (`main.go:204`)
 
 ```go
-model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag, slowNonerrorFlag)
+model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag)
 ```
 
-Located at `internal/tui/model.go:81-107`. Initializes the Bubbletea model:
+Located at `internal/tui/model.go:74-96`. Initializes the Bubbletea model:
 
 ```go
 type Model struct {
@@ -332,24 +314,17 @@ type Model struct {
     rateLimitRemaining int
     
     // Historical job averages (incrementally updated)
-    jobAverages          map[string]time.Duration
-    runIDToWorkflowID    map[int64]int64
-    fetchedWorkflowIDs   map[int64]bool
-    avgFetchPending      bool
-    avgFetchStartTime    time.Time
-    avgFetchLastDuration time.Duration
-    avgFetchErr          error
-    noAvg                bool
-    
-    // Job log errors (fetched async for failed checks)
-    jobLogErrors    map[int64][]string
-    logFetchPending map[int64]bool
-    
-    // Slow non-error job logs
-    slowNonerror        bool
-    jobSlowLogs         map[int64][]string
-    slowLogFetchPending map[int64]bool
-    slowLogLastFetch    map[int64]time.Time
+    jobAverages             map[string]time.Duration
+    runIDToWorkflowID       map[int64]int64
+    fetchedWorkflowIDs      map[int64]bool
+    pendingWorkflowFetch    map[int64]bool
+    dispatchedWorkflowFetch map[int64]bool
+    avgFetchPending         bool
+    avgFetchStartTime       time.Time
+    avgFetchLastDuration    time.Duration
+    avgFetchErr             error
+    noAvg                   bool
+    firstCheckSeenAt        time.Time
     
     // UI state
     spinner         spinner.Model
@@ -431,16 +406,16 @@ type JobAveragesMsg struct {         // Historical averages received
     Err                   error
 }
 
-type JobLogMsg struct {              // Failed job logs received
-    JobID  int64
-    Errors []string
-    Err    error
+type WorkflowsDiscoveredMsg struct {  // Workflow discovery complete
+    NewRunIDToWorkflowID map[int64]int64
+    WorkflowIDsToFetch   []int64
+    Err                  error
 }
 
-type SlowJobLogMsg struct {          // Slow job logs received
-    JobID int64
-    Lines []string
-    Err   error
+type JobAveragesPartialMsg struct {   // Partial history for single workflow
+    WorkflowID int64
+    Averages   map[string]time.Duration
+    Err        error
 }
 
 type ErrorMsg struct {               // Error occurred
@@ -529,32 +504,74 @@ case JobAveragesMsg:
     return m, nil
 ```
 
-**Incremental Caching**: The `runIDToWorkflowID` and `fetchedWorkflowIDs` maps prevent redundant API calls across polling cycles.
+**Streamed Fetching**: This message (now deprecated) was used for batch fetching. Current code uses `WorkflowsDiscoveredMsg` and `JobAveragesPartialMsg` for streaming.
 
-#### Message: Job Log Received (`update.go:91-106`)
-
-For failed checks and slow jobs, logs are fetched asynchronously:
+#### Message: Workflows Discovered (`update.go:91-127`)
 
 ```go
-case JobLogMsg:
-    delete(m.logFetchPending, msg.JobID)
-    if msg.Err == nil && len(msg.Errors) > 0 {
-        m.jobLogErrors[msg.JobID] = msg.Errors
+case WorkflowsDiscoveredMsg:
+    if msg.Err != nil {
+        m.avgFetchPending = false
+        m.avgFetchErr = msg.Err
+    } else {
+        // Add new run→workflow mappings to cache
+        maps.Copy(m.runIDToWorkflowID, msg.NewRunIDToWorkflowID)
+        // Track pending workflow fetches and dispatch them immediately
+        var workflowCmds []tea.Cmd
+        for _, wfID := range msg.WorkflowIDsToFetch {
+            if !m.dispatchedWorkflowFetch[wfID] {
+                m.pendingWorkflowFetch[wfID] = true
+                m.dispatchedWorkflowFetch[wfID] = true
+                workflowCmds = append(workflowCmds, fetchWorkflowHistory(m.ctx, m.owner, m.repo, wfID))
+            }
+        }
+        // If no new fetches, discovery phase is complete
+        if len(workflowCmds) == 0 {
+            m.avgFetchPending = false
+            if len(m.pendingWorkflowFetch) == 0 {
+                m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
+            }
+        }
+        // ...
     }
-    return m, nil
+```
 
-case SlowJobLogMsg:
-    delete(m.slowLogFetchPending, msg.JobID)
-    m.slowLogLastFetch[msg.JobID] = time.Now()
-    if msg.Err == nil && len(msg.Lines) > 0 {
-        m.jobSlowLogs[msg.JobID] = msg.Lines
+**Two-Phase Approach**: Discovery phase maps run IDs to workflow IDs, then dispatches individual workflow history fetches.
+
+#### Message: Partial Averages Received (`update.go:129-152`)
+
+```go
+case JobAveragesPartialMsg:
+    // Remove from pending set
+    delete(m.pendingWorkflowFetch, msg.WorkflowID)
+    m.fetchedWorkflowIDs[msg.WorkflowID] = true
+
+    if msg.Err == nil && msg.Averages != nil {
+        // Merge averages into model
+        maps.Copy(m.jobAverages, msg.Averages)
+    }
+
+    // Check if all workflow fetches are done
+    if len(m.pendingWorkflowFetch) == 0 {
+        // Discovery phase complete - record duration and clear error on success
+        m.avgFetchPending = false
+        m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
+        if msg.Err == nil {
+            m.avgFetchErr = nil
+        }
+        if m.checksComplete {
+            m.quitting = true
+            return m, tea.Quit
+        }
     }
     return m, nil
 ```
 
-### handleChecksUpdate (`internal/tui/update.go:117-166`)
+**Incremental Merging**: Each workflow's averages are merged as they arrive.
 
-The check update logic is refactored into a dedicated method:
+### handleChecksUpdate (`internal/tui/update.go:163-217`)
+
+The check update logic includes streaming historical average fetching:
 
 ```go
 func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
@@ -571,19 +588,26 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 
     var cmds []tea.Cmd
 
-    // Fetch historical averages for new workflows
-    if !m.noAvg && !m.avgFetchPending && m.rateLimitRemaining >= minRateLimitForFetch {
-        // ... fetch logic
+    // Track first check seen time for delayed history fetch
+    if m.firstCheckSeenAt.IsZero() && len(msg.CheckRuns) > 0 {
+        m.firstCheckSeenAt = time.Now()
     }
 
-    // Fetch logs for failed and slow checks
-    cmds = append(cmds, m.fetchLogsForFailedChecks(msg.CheckRuns)...)
-    cmds = append(cmds, m.fetchLogsForSlowChecks(msg.CheckRuns)...)
+    // Fetch historical averages after delay or when checks complete
+    allComplete := allChecksComplete(msg.CheckRuns)
+    elapsed := time.Since(m.firstCheckSeenAt)
+    readyForHistory := !m.noAvg && !m.firstCheckSeenAt.IsZero() && (allComplete || elapsed >= historyFetchDelay)
+    if readyForHistory && !m.avgFetchPending && m.rateLimitRemaining >= minRateLimitForFetch {
+        // Discover workflows and dispatch individual fetches
+        cmd := discoverWorkflows(m.ctx, m.owner, m.repo, msg.CheckRuns, m.runIDToWorkflowID, m.fetchedWorkflowIDs)
+        cmds = append(cmds, cmd)
+    }
 
     if allChecksComplete(m.checkRuns) {
         m.exitCode = determineExitCode(m.checkRuns)
         m.checksComplete = true
-        if !m.avgFetchPending {
+        // Only quit if no pending/dispatched workflow fetches
+        if !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 {
             m.quitting = true
             cmds = append(cmds, tea.Quit)
         }
@@ -593,6 +617,13 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
     return m, tea.Batch(cmds...)
 }
 ```
+
+**Key Changes**:
+
+1. **Delayed History Fetch**: Waits 10 seconds after first check appears before fetching history (via `historyFetchDelay` constant)
+2. **Streaming Discovery**: Uses `discoverWorkflows()` to find workflow IDs, then dispatches individual `fetchWorkflowHistory()` calls
+3. **Pending Tracking**: Tracks `pendingWorkflowFetch` and `dispatchedWorkflowFetch` maps to coordinate concurrent fetches
+4. **Exit Coordination**: Waits for all workflow fetches to complete before quitting
 
 ### Check Sorting (`internal/tui/display.go:250-268`)
 
@@ -734,7 +765,9 @@ func parsePRViewWithRepo(jsonOutput []byte) (int, string, string, error) {
 
 ### Historical Job Averages (`internal/github/history.go`)
 
-The `FetchJobAverages()` function calculates ETA estimates:
+The application uses a **streaming approach** to fetch historical averages efficiently:
+
+**Legacy Function** (`FetchJobAverages` at lines 31-153):
 
 ```go
 func FetchJobAverages(
@@ -754,38 +787,41 @@ func FetchJobAverages(
 }
 ```
 
-**Incremental Caching**: Returns `newRunIDToWorkflowID` and `newFetchedWorkflowIDs` for the caller to cache, avoiding redundant API calls across polling cycles.
-
-### Job Log Fetching (`internal/github/logs.go`)
-
-Two functions for fetching job logs:
-
-#### `FetchJobLogs()` - Error Context for Failed Checks
+**Streaming Functions** (added in issue #136):
 
 ```go
-func FetchJobLogs(ctx context.Context, client *github.Client, owner, repo string, jobID int64) ([]string, error) {
-    logURL, _, err := client.Actions.GetWorkflowJobLogs(ctx, owner, repo, jobID, 0)
-    // Follow redirect and parse
-    return parseErrorLines(resp.Body), nil
-}
+// DiscoverWorkflows resolves run IDs to workflow IDs.
+// Returns new run ID → workflow ID mappings and the list of workflow IDs that need fetching.
+func DiscoverWorkflows(
+    ctx context.Context,
+    client *github.Client,
+    owner, repo string,
+    checkRuns []CheckRunInfo,
+    knownRunIDToWorkflowID map[int64]int64,
+    knownFetchedWorkflowIDs map[int64]bool,
+) (newRunIDToWorkflowID map[int64]int64, workflowIDsToFetch []int64, err error)
+
+// FetchWorkflowHistory fetches historical job durations for a single workflow.
+// Returns averaged durations per job name for the given workflow.
+func FetchWorkflowHistory(
+    ctx context.Context,
+    client *github.Client,
+    owner, repo string,
+    workflowID int64,
+) (map[string]time.Duration, error)
 ```
 
-`parseErrorLines()` extracts up to 3 relevant error lines:
+**Streaming Flow** (`internal/tui/update.go:253-287`):
 
-1. Lines containing `##[error]` markers
-2. Shell error patterns (`command not found`, `No such file or directory`)
-3. Context from preceding lines for generic exit code errors
+1. `handleChecksUpdate()` detects checks have arrived
+2. Waits for `historyFetchDelay` (10s) after first checks appear
+3. Dispatches `discoverWorkflows()` command
+4. `WorkflowsDiscoveredMsg` returns workflow IDs to fetch
+5. For each workflow ID, dispatches `fetchWorkflowHistory()` command
+6. Each `JobAveragesPartialMsg` merges results incrementally
+7. When `pendingWorkflowFetch` is empty, discovery phase completes
 
-#### `FetchLastNJobLines()` - Last N Lines for Slow Jobs
-
-```go
-func FetchLastNJobLines(ctx context.Context, client *github.Client, owner, repo string, jobID int64, n int) ([]string, error) {
-    // Uses ring buffer for O(N) memory
-    return parseLastNLines(resp.Body, n), nil
-}
-```
-
-Used when `--slow-nonerror` flag is set to show recent log lines for jobs running > 1 minute.
+**Incremental Caching**: The `runIDToWorkflowID`, `fetchedWorkflowIDs`, `pendingWorkflowFetch`, and `dispatchedWorkflowFetch` maps prevent redundant API calls across polling cycles.
 
 ### Helper Modules
 
@@ -874,11 +910,11 @@ func FinalDuration(check ghclient.CheckRunInfo) time.Duration {
 const (
     slowJobThreshold     = 2 * time.Minute
     verySlowJobThreshold = 3 * time.Minute
-    slowLogRuntimeMin    = time.Minute
-    slowLogFetchInterval = 10 * time.Second
 
     rateBackoffThreshold = 10
     minRateLimitForFetch = 100
+
+    historyFetchDelay = 10 * time.Second
 )
 ```
 
@@ -886,18 +922,42 @@ const (
 
 - `slowJobThreshold`: Time before showing "Still waiting" message
 - `verySlowJobThreshold`: Time before showing "No checks found" message
-- `slowLogRuntimeMin`: Minimum runtime before fetching slow job logs
-- `slowLogFetchInterval`: Cooldown between slow log fetches
 - `rateBackoffThreshold`: Remaining API calls before tripling poll interval
-- `minRateLimitForFetch`: Minimum rate limit to fetch historical averages/logs
+- `minRateLimitForFetch`: Minimum rate limit to fetch historical averages
+- `historyFetchDelay`: Delay before starting historical average fetch (prevents premature API calls during check startup)
 
-### View Function (`internal/tui/view.go:14-98`)
+### View Function (`internal/tui/view.go:14-94`)
 
-Renders the entire UI every frame, now including historical averages:
+Renders the entire UI every frame, including historical averages status:
 
 ```go
 func (m Model) View() tea.View {
     // ... header with PR title and averages status
+    
+    var updatedLine string
+    if !m.headCommitTime.IsZero() {
+        timeSincePush := time.Since(m.headCommitTime)
+        updatedLine = fmt.Sprintf("Updated %s ago  •  Pushed %s ago",
+            timing.FormatDuration(timeSinceUpdate),
+            timing.FormatDuration(timeSincePush))
+    }
+    
+    // Add historical averages status
+    if !m.noAvg {
+        isFetching := m.avgFetchPending || len(m.pendingWorkflowFetch) > 0
+        if isFetching {
+            // Fetch in progress - show elapsed time
+            elapsed := time.Since(m.avgFetchStartTime)
+            updatedLine += m.styles.Running.Render(fmt.Sprintf("  •  Fetching historical averages... (%s)", timing.FormatDuration(elapsed)))
+        } else if m.avgFetchErr != nil {
+            // Fetch failed
+            updatedLine += m.styles.Queued.Render("  •  Historical averages unavailable")
+        } else if m.avgFetchLastDuration > 0 {
+            // Fetch succeeded - show workflow count and last fetch duration
+            wfCount := len(m.fetchedWorkflowIDs)
+            updatedLine += m.styles.Info.Render(fmt.Sprintf("  •  Historical averages ready (%d workflows, %s)", wfCount, timing.FormatDuration(m.avgFetchLastDuration)))
+        }
+    }
     
     // Column headers now include 4th column
     headerQueue, headerName, headerDuration, headerAvg := FormatHeaderColumns(widths)
@@ -910,11 +970,6 @@ func (m Model) View() tea.View {
         // Error context for failed checks
         if check.Conclusion == "failure" || check.Conclusion == "timed_out" {
             b.WriteString(m.renderErrorBox(check, widths))
-        }
-        
-        // Slow job logs (if --slow-nonerror)
-        if m.slowNonerror {
-            b.WriteString(m.renderSlowJobLogs(check, widths))
         }
     }
     
@@ -944,35 +999,46 @@ func FormatHeaderColumns(widths ColumnWidths) (string, string, string, string) {
 - "ThisRun" - Current run duration
 - "HistAvg" - Historical average duration
 
-### Error Annotation Display (`internal/tui/view.go:100-156`)
+### Error Annotation Display (`internal/tui/view.go:96-130`)
 
 ```go
 func (m Model) renderErrorBox(check ghclient.CheckRunInfo, widths ColumnWidths) string {
-    // Separate annotations by level (failure vs warning)
-    var failures, warnings []ghclient.Annotation
+    var b strings.Builder
+
     for _, ann := range check.Annotations {
-        switch ann.AnnotationLevel {
-        case "failure":
-            failures = append(failures, ann)
-        case "warning":
-            warnings = append(warnings, ann)
+        var errorMsg string
+        if ann.Message != "" {
+            errorMsg = ann.Message
+            if ann.Title != "" {
+                errorMsg = ann.Title + ": " + errorMsg
+            }
+        } else if ann.Title != "" {
+            errorMsg = ann.Title
+        } else {
+            continue
         }
+
+        if ann.Path != "" {
+            if ann.StartLine > 0 {
+                errorMsg = fmt.Sprintf("%s:%d - %s", ann.Path, ann.StartLine, errorMsg)
+            } else {
+                errorMsg = fmt.Sprintf("%s - %s", ann.Path, errorMsg)
+            }
+        }
+        b.WriteString("  ")
+        b.WriteString(m.styles.ErrorBox.Render(errorMsg))
+        b.WriteString("\n")
     }
-    
-    // Render FAILURE annotations first (prominent)
-    // Then job log errors (from FetchJobLogs)
-    // Then WARNING annotations (dimmed)
+
+    if b.Len() > 0 {
+        b.WriteString("\n")
+    }
+
+    return b.String()
 }
 ```
 
-**Example Output**:
-
-```text
-1m 5s  ✗  Test Suite / unit tests  5m 30s
-  ┃ src/parser_test.go:42 - undefined: TestData
-  ┃ From job logs:
-  ┃   Process completed with exit code 1
-```
+Annotations are fetched directly via GraphQL and include path, line number, title, and message.
 
 ---
 
@@ -1049,9 +1115,6 @@ main.go:185 run()
         ├── ghclient.FetchJobAverages() (unless --quick)
         │   └── Returns: map[jobName]averageDuration
         │
-        ├── ghclient.FetchLastNJobLines() (if --slow-nonerror)
-        │   └── Returns last N lines for slow jobs
-        │
         ├── tui.CalculateColumnWidths()
         │   └── Returns: ColumnWidths{Queue, Name, Duration, Avg}
         │
@@ -1067,10 +1130,12 @@ main.go:185 run()
 ### TUI Mode Flow
 
 ```text
-main.go:254 (TUI mode)
+main.go:204 (TUI mode)
     │
-    ├── tui.NewModel()                              [internal/tui/model.go:81]
+    ├── tui.NewModel()                              [internal/tui/model.go:74]
     │   └── Returns: Model{ctx, token, owner, repo, prNumber, spinner, ...}
+    │       - Initializes empty maps: jobAverages, runIDToWorkflowID, 
+    │         fetchedWorkflowIDs, pendingWorkflowFetch, dispatchedWorkflowFetch
     │
     ├── tea.NewProgram(model)
     │   └── Creates program with model
@@ -1102,20 +1167,28 @@ main.go:254 (TUI mode)
                 ├── [ChecksUpdateMsg received]
                 │   └── handleChecksUpdate()
                 │       ├── SortCheckRuns() by duration
-                │       ├── Fetch historical averages (if new workflows)
-                │       ├── Fetch logs for failed checks
-                │       ├── Fetch logs for slow checks (--slow-nonerror)
-                │       └── Check completion → exit
+                │       ├── Track firstCheckSeenAt (when checks first appear)
+                │       ├── Check: elapsed >= historyFetchDelay OR allComplete?
+                │       │   └── YES: Dispatch discoverWorkflows()
+                │       └── Check completion → exit (if no pending fetches)
                 │
-                ├── [JobAveragesMsg received]
+                ├── [WorkflowsDiscoveredMsg received]
+                │   ├── Store: runIDToWorkflowID mappings
+                │   ├── For each workflowID in WorkflowIDsToFetch:
+                │   │   ├── Mark: pendingWorkflowFetch[wfID] = true
+                │   │   ├── Mark: dispatchedWorkflowFetch[wfID] = true
+                │   │   └── Dispatch: fetchWorkflowHistory(wfID)
+                │   └── If no fetches: discovery phase complete
+                │
+                ├── [JobAveragesPartialMsg received]
+                │   ├── Remove from: pendingWorkflowFetch
+                │   ├── Mark in: fetchedWorkflowIDs
+                │   ├── Merge averages into: jobAverages
+                │   └── If pendingWorkflowFetch empty: discovery complete
+                │
+                ├── [JobAveragesMsg received]         [Legacy batch approach]
                 │   ├── Store averages in model
                 │   └── If checks complete: quit
-                │
-                ├── [JobLogMsg received]
-                │   └── Store error lines for failed check
-                │
-                ├── [SlowJobLogMsg received]
-                │   └── Store last N lines for slow check
                 │
                 ├── [spinner.TickMsg received]
                 │   └── Update spinner animation
@@ -1222,10 +1295,10 @@ gh-observer demonstrates several best practices:
 3. **Graceful error handling**: Non-fatal errors during polling, fatal errors at initialization
 4. **Terminal-aware output**: Snapshot mode for CI, TUI mode for interactive use
 5. **Rate limit awareness**: Backoff strategy and remaining quota display
-6. **Incremental caching**: Historical averages cached efficiently across polling cycles
-7. **User feedback**: Startup phase messaging, real-time updates, error context from logs
+6. **Streaming data fetching**: Historical averages fetched per-workflow to reduce latency and provide early feedback
+7. **User feedback**: Startup phase messaging, real-time updates, fetch progress display
 8. **Fork support**: Correctly identifies upstream repository for forked PRs
-9. **Historical averages**: Provides ETA estimates from past job runtimes
-10. **Log context**: Extracts meaningful errors from failed job logs
+9. **Delayed fetching**: Waits 10 seconds after first checks appear before fetching historical averages
+10. **Concurrent coordination**: Uses pending/dispatched tracking to coordinate multiple async fetches
 
 The codebase follows the Elm Architecture pattern through Bubbletea, making the state management predictable and testable. The linear execution flow from initialization through polling to exit is clear and well-structured.
