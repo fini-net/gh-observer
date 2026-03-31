@@ -26,7 +26,7 @@ jobs:
       - name: Super-Linter
         # continue-on-error suppresses email notifications for expected failures
         continue-on-error: true
-        uses: super-linter/super-linter@61abc07d755095a68f4987d1c2c3d1d64408f1f9 # v8
+        uses: super-linter/super-linter@9e863354e3ff62e0727d37183162c4a88873df41 # v8
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VALIDATE_GO: false
