@@ -230,15 +230,6 @@ The `internal/github/history.go` module fetches historical job runtimes for ETA 
 - Uses incremental caching via `knownRunIDToWorkflowID` and `knownFetchedWorkflowIDs` maps to avoid redundant API calls across polling cycles
 - Non-fatal: skips individual failures and returns whatever data was collected
 
-### Job log fetching
-
-The `internal/github/logs.go` module retrieves job logs to surface error context in the TUI:
-
-- `FetchJobLogs()` - Returns up to 3 most relevant error lines from a failed job's logs, looking for `##[error]` markers and surrounding context
-- `FetchLastNJobLines()` - Returns the last N lines from a slow/in-progress job's logs using a ring buffer (O(N) memory)
-- Both functions strip GitHub Actions timestamp prefixes from log lines
-- `FetchJobLogs()` includes smart context extraction: for generic "exit code" errors it captures the preceding meaningful line; for shell errors it pattern-matches (`command not found`, `No such file or directory`, etc.)
-
 ### Key timing calculations
 
 The `internal/timing/calculator.go` module provides three core metrics:
@@ -372,7 +363,8 @@ gh-observer && echo "All checks passed!"
 - `github.com/spf13/cobra` - CLI framework for command-line argument parsing
 - `github.com/spf13/viper` - Configuration management
 - `golang.org/x/oauth2` - OAuth2 authentication for GitHub
-- `github.com/charmbracelet/x/term` - Terminal detection for snapshot vs interactive mode
+- `golang.org/x/term` - Terminal detection for snapshot vs interactive mode
+- `github.com/muesli/termenv` - Terminal color profile detection
 
 ## Important implementation notes
 
@@ -387,4 +379,5 @@ gh-observer && echo "All checks passed!"
 - Network errors during polling are non-fatal (stored in `m.err` but polling continues)
 - The application polls every 5s by default, configurable via `refresh_interval`
 - Terminal detection uses `term.IsTerminal(os.Stdout.Fd())` to switch between TUI and snapshot modes
+- `--quick` / `-q` flag skips fetching historical average runtimes (faster startup, no ETA estimation)
 - `.repo.toml` file configures repo metadata and feature flags (used by just recipes for Claude/Copilot reviews)
