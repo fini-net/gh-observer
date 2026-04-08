@@ -31,14 +31,6 @@ type ErrorMsg struct {
 	Err error
 }
 
-// JobAveragesMsg contains historical job average durations and cache state
-type JobAveragesMsg struct {
-	Averages              map[string]time.Duration
-	NewRunIDToWorkflowID  map[int64]int64
-	NewFetchedWorkflowIDs []int64
-	Err                   error
-}
-
 // WorkflowsDiscoveredMsg is sent when workflow discovery completes
 type WorkflowsDiscoveredMsg struct {
 	NewRunIDToWorkflowID map[int64]int64
