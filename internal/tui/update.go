@@ -64,30 +64,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ChecksUpdateMsg:
 		return m.handleChecksUpdate(msg)
 
-	case JobAveragesMsg:
-		m.avgFetchPending = false
-		m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
-
-		if msg.Err != nil {
-			m.avgFetchErr = msg.Err
-		} else {
-			// Merge averages
-			maps.Copy(m.jobAverages, msg.Averages)
-			// Add new run→workflow mappings to cache
-			maps.Copy(m.runIDToWorkflowID, msg.NewRunIDToWorkflowID)
-			// Mark newly-fetched workflow IDs
-			for _, wfID := range msg.NewFetchedWorkflowIDs {
-				m.fetchedWorkflowIDs[wfID] = true
-			}
-		}
-
-		// If checks already finished while we were fetching, quit now
-		if m.checksComplete {
-			m.quitting = true
-			return m, tea.Quit
-		}
-		return m, nil
-
 	case WorkflowsDiscoveredMsg:
 		if msg.Err != nil {
 			m.avgFetchPending = false
@@ -282,25 +258,6 @@ func fetchWorkflowHistory(ctx context.Context, owner, repo string, workflowID in
 		return JobAveragesPartialMsg{
 			WorkflowID: workflowID,
 			Averages:   averages,
-		}
-	}
-}
-
-// fetchJobAverages fetches historical average runtimes for newly-discovered workflows.
-func fetchJobAverages(ctx context.Context, owner, repo string, checkRuns []ghclient.CheckRunInfo, knownRunIDToWorkflowID map[int64]int64, knownFetchedWorkflowIDs map[int64]bool) tea.Cmd {
-	return func() tea.Msg {
-		client, err := ghclient.NewClient(ctx)
-		if err != nil {
-			return JobAveragesMsg{Err: err}
-		}
-		averages, newRunIDToWorkflowID, newFetchedWorkflowIDs, err := ghclient.FetchJobAverages(ctx, client, owner, repo, checkRuns, knownRunIDToWorkflowID, knownFetchedWorkflowIDs)
-		if err != nil {
-			return JobAveragesMsg{Err: err}
-		}
-		return JobAveragesMsg{
-			Averages:              averages,
-			NewRunIDToWorkflowID:  newRunIDToWorkflowID,
-			NewFetchedWorkflowIDs: newFetchedWorkflowIDs,
 		}
 	}
 }
