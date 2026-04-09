@@ -11,6 +11,14 @@ import (
 	"github.com/muesli/termenv"
 )
 
+// ColumnWidths holds pre-calculated column widths for aligned rendering
+type ColumnWidths struct {
+	QueueWidth    int // Right-aligned queue latency
+	NameWidth     int // Left-aligned check name
+	DurationWidth int // Right-aligned duration
+	AvgWidth      int // Right-aligned historical average
+}
+
 // FormatQueueLatency returns the queue time text or placeholder
 func FormatQueueLatency(check ghclient.CheckRunInfo, headCommitTime time.Time) string {
 	if check.Status == "queued" {
