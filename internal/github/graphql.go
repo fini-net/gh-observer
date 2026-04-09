@@ -117,9 +117,9 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 		commit := query.Repository.PullRequest.Commits.Nodes[0]
 		contexts := commit.Commit.StatusCheckRollup.Contexts.Nodes
 
-		for _, context := range contexts {
-			if context.Typename == "StatusContext" {
-				statusContext := context.StatusContext
+		for _, node := range contexts {
+			if node.Typename == "StatusContext" {
+				statusContext := node.StatusContext
 				state := strings.ToLower(statusContext.State)
 
 				var status, conclusion string
@@ -148,11 +148,11 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 				continue
 			}
 
-			if context.Typename != "CheckRun" {
+			if node.Typename != "CheckRun" {
 				continue
 			}
 
-			checkRun := context.CheckRunContext
+			checkRun := node.CheckRunContext
 			workflowName := ""
 
 			if checkRun.CheckSuite.WorkflowRun.Workflow.Name != "" {
