@@ -1,0 +1,7 @@
+{
+  "threshold": 0,
+  "absolute": true,
+  "ignore": [
+    "**/docs/**"
+  ]
+}
