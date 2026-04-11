@@ -41,3 +41,4 @@ go.work.sum
 /.opencode/plans/
 /.opencode/bun.lock
 /.opencode/package.json
+/.opencode/package-lock.json
