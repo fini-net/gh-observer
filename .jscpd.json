@@ -1,6 +1,7 @@
 {
   "threshold": 0,
   "ignore": [
-    "**/docs/**"
+    "**/docs/**",
+    "docs/*"
   ]
 }
