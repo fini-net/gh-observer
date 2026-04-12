@@ -101,17 +101,6 @@ func GetPRWithRepo(prNumber int) (int, string, string, error) {
 	return parsePRViewWithRepo(output)
 }
 
-// ParseOwnerRepo extracts owner and repo from git remote origin
-func ParseOwnerRepo() (string, string, error) {
-	cmd := exec.Command("git", "remote", "get-url", "origin")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", "", fmt.Errorf("failed to get git remote: %w", err)
-	}
-
-	return parseOwnerRepoFromURL(strings.TrimSpace(string(output)))
-}
-
 // parseOwnerRepoFromURL extracts owner and repo from a remote URL string
 func parseOwnerRepoFromURL(url string) (string, string, error) {
 	// Parse SSH format: git@github.com:owner/repo.git
