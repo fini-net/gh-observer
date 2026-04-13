@@ -97,6 +97,10 @@ type pullRequestQuery struct {
 	}
 }
 
+type graphqlQuerier interface {
+	Query(ctx context.Context, q interface{}, variables map[string]interface{}) error
+}
+
 // contextNodesToCheckRuns converts GraphQL context nodes to CheckRunInfo slice
 func contextNodesToCheckRuns(nodes []contextNode) []CheckRunInfo {
 	var checkRuns []CheckRunInfo
@@ -186,7 +190,10 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNum
 	src := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	httpClient := oauth2.NewClient(ctx, src)
 	client := githubv4.NewClient(httpClient)
+	return fetchCheckRunsGraphQL(ctx, client, owner, repo, prNumber)
+}
 
+func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, repo string, prNumber int) ([]CheckRunInfo, int, error) {
 	var allCheckRuns []CheckRunInfo
 	var cursor *githubv4.String
 	rateLimitRemaining := 5000
