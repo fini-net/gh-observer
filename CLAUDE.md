@@ -23,6 +23,9 @@ This repo uses `just` for all development tasks:
 
 - `just prweb` - Open current PR in web browser
 - `just pr_update` - Update PR description with current commits (done automatically by `again`)
+- `just pr_checks` - Watch GHAs then check for Copilot suggestions
+- `just claude_review` - Claude's latest PR code review
+- `just pr_verify` - Add or append to Verify section from stdin
 - `just deps-update` - Update Go dependencies and tidy go.mod/go.sum
 - `just test2cast <pr>` - Record asciinema demo of watching a specific PR
 - `just release_status` - Check release workflow status and list binaries
@@ -78,7 +81,7 @@ The `.github/workflows/release.yml` workflow:
 
 - **Trigger**: Push of tags matching `v*` pattern
 - **Action**: Uses `cli/gh-extension-precompile@v2`
-- **Go Version**: Auto-detected from `go.mod` (currently 1.26.1) via `go_version_file` parameter
+- **Go Version**: Auto-detected from `go.mod` (currently 1.26.2) via `go_version_file` parameter
 - **Security**: Generates attestations with `generate_attestations: true`
 - **Permissions**: Requires `contents: write`, `id-token: write`, `attestations: write`
 
@@ -191,11 +194,14 @@ The TUI follows the Elm Architecture pattern (Model-View-Update):
   - `TickMsg` - Periodic refresh (every 5s configurable)
   - `PRInfoMsg` - PR metadata (title, SHA, timestamps)
   - `ChecksUpdateMsg` - Check run status updates
+  - `WorkflowsDiscoveredMsg` - Workflow discovery results (run→workflow ID mappings)
+  - `JobAveragesPartialMsg` - Per-workflow history fetch results (averages for one workflow)
   - `tea.KeyMsg` - Keyboard input (q to quit)
 - **View** (`internal/tui/view.go`) - Renders the terminal UI
 - **Display** (`internal/tui/display.go`) - Column formatting, alignment widths, URL building for check hyperlinks
 - **Styles** (`internal/tui/styles.go`) - Lipgloss color scheme and styling
 - **Messages** (`internal/tui/messages.go`) - Custom message types for async operations
+- **Constants** (`internal/tui/constants.go`) - Tuning thresholds: `slowJobThreshold` (2m), `verySlowJobThreshold` (3m), `rateBackoffThreshold` (10), `minRateLimitForFetch` (100), `historyFetchDelay` (10s)
 
 ### GraphQL architecture
 
@@ -213,6 +219,7 @@ Repository → PullRequest → Commits → StatusCheckRollup → CheckRun
 - Single API call gets all data (workflow name + check status)
 - More efficient than REST API (fewer API calls, less rate limit usage)
 - Returns enriched `CheckRunInfo` with workflow name included
+- Supports cursor-based pagination for PRs with more than 100 status contexts
 
 **Display format** - Check names shown as "Workflow Name / Job Name":
 
@@ -221,14 +228,24 @@ Repository → PullRequest → Commits → StatusCheckRollup → CheckRun
 - "Claude Code Review / claude-review"
 - "Checkov" (legacy checks without workflow show job name only)
 
+**Error annotations** - Failed checks display inline error details:
+
+- `CheckRunInfo` includes `Summary` and `Annotations` fields
+- `Annotation` struct captures message, path, line number, title, and severity level
+- First 5 annotations per check are fetched via GraphQL
+- Failed checks render a summary line and error box with file paths and messages
+
 ### Historical job averages
 
-The `internal/github/history.go` module fetches historical job runtimes for ETA estimation:
+The `internal/github/history.go` module fetches historical job runtimes for ETA estimation using a two-phase approach:
 
-- `FetchJobAverages()` - Walks run IDs from current check run URLs → workflow IDs → recent completed runs → job durations, then averages them per job name
-- Results are keyed by bare job name (matching `CheckRunInfo.Name`)
-- Uses incremental caching via `knownRunIDToWorkflowID` and `knownFetchedWorkflowIDs` maps to avoid redundant API calls across polling cycles
+- **Phase 1: Discovery** (`DiscoverWorkflows()`) - Resolves run IDs from current check run URLs to workflow IDs, respecting the incremental cache (`knownRunIDToWorkflowID`, `knownFetchedWorkflowIDs`)
+- **Phase 2: Per-workflow fetch** (`FetchWorkflowHistory()`) - Fetches recent completed runs for each workflow ID in parallel, averaging job durations per job name
+- The TUI dispatches these phases sequentially: `WorkflowsDiscoveredMsg` triggers parallel `FetchWorkflowHistory` calls, with each result delivered as a `JobAveragesPartialMsg`
+- Uses incremental caching to avoid redundant API calls across polling cycles
+- History fetch is gated by `minRateLimitForFetch` (100) and delayed by `historyFetchDelay` (10s) after first check appears
 - Non-fatal: skips individual failures and returns whatever data was collected
+- The legacy monolithic `FetchJobAverages()` remains available for snapshot mode
 
 ### Key timing calculations
 
@@ -257,14 +274,26 @@ The `internal/github/` package provides API interaction with both REST and Graph
 
 - `GetCurrentPR()` - Auto-detects PR number from current branch via `gh pr view`
 
+- `GetCurrentPRWithRepo()` - Auto-detects PR number and owner/repo from current branch (correctly handles forked repos by deriving owner/repo from the PR URL)
+
+- `GetPRWithRepo(prNumber)` - Fetches PR number and owner/repo for an explicit PR number (correctly handles forks)
+
 - `ParseOwnerRepo()` - Extracts owner/repo from git remote origin (supports SSH and HTTPS formats)
+
+- `ParsePRURL(prURL)` - Extracts owner, repo, and PR number from a GitHub PR URL (supports `https://github.com/owner/repo/pull/NNN` format)
 
 - `FetchPRInfo()` - Retrieves PR metadata (title, SHA, timestamps) via REST API
 
 - `FetchCheckRunsGraphQL()` - Fetches check runs with workflow names via GraphQL
   - Uses single GraphQL query for efficiency
-  - Returns `CheckRunInfo` with workflow name, job name, status, and timestamps
-  - Matches the approach used by `gh pr checks --watch`
+  - Supports cursor-based pagination for PRs with more than 100 status contexts
+  - Returns `CheckRunInfo` with workflow name, job name, status, timestamps, summary, and annotations
+
+- `FetchCheckRuns()` - REST-based fallback for fetching check runs (used internally by snapshot mode)
+
+- `FailureConclusion()` - Returns true if a conclusion indicates a failed check (failure, timed_out, or action_required)
+
+- `ParseTimestamp()` - Parses GitHub API timestamps using `TimestampFormat` ("2006-01-02T15:04:05Z")
 
 ### Configuration system
 
@@ -272,6 +301,7 @@ User configuration lives in `~/.config/gh-observer/config.yaml`:
 
 ```yaml
 refresh_interval: 5s  # How often to poll GitHub API
+enable_links: true    # Whether to render hyperlinks in terminal (default: true)
 colors:
   success: 10  # ANSI 256-color code for completed checks
   failure: 9   # ANSI 256-color code for failed checks
@@ -336,6 +366,9 @@ gh-observer
 
 # Watch specific PR number
 gh-observer 123
+
+# Watch PR on external repository by URL
+gh-observer https://github.com/owner/repo/pull/123
 
 # Use in CI pipelines (exits with check status)
 gh-observer && echo "All checks passed!"
