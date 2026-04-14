@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -156,26 +155,18 @@ func run(args []string) int {
 
 	if len(args) > 0 {
 		arg := args[0]
-		// Check if argument is a PR URL
-		if strings.Contains(arg, "github.com") && strings.Contains(arg, "/pull/") {
-			// URL provided: parse owner/repo/number from URL
-			owner, repo, prNumber, err = ghclient.ParsePRURL(arg)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to parse PR URL: %v\n", err)
-				return 1
-			}
-		} else {
-			// PR number provided: use gh pr view to get correct repo (handles forks)
-			n, err := strconv.Atoi(arg)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Invalid PR number or URL: %s\n", arg)
-				return 1
-			}
+		if owner, repo, prNumber, err = ghclient.ParsePRURL(arg); err == nil {
+			// valid PR URL
+		} else if n, convErr := strconv.Atoi(arg); convErr == nil {
+			// numeric PR number
 			prNumber, owner, repo, err = ghclient.GetPRWithRepo(n)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to get PR #%d: %v\n", n, err)
 				return 1
 			}
+		} else {
+			fmt.Fprintf(os.Stderr, "Invalid PR number or URL: %s\n", arg)
+			return 1
 		}
 	} else {
 		// Auto-detect PR from current branch (correctly handles forks)
