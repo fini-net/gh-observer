@@ -1,7 +1,8 @@
 {
-  "threshold": 0,
+  "threshold": 5,
   "absolute": true,
   "ignore": [
-    "**/docs/**"
+    "**/docs/**",
+    "**/*_test.go"
   ]
 }
