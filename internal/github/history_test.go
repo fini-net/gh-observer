@@ -48,6 +48,107 @@ func TestParseRunIDFromURL(t *testing.T) {
 	}
 }
 
+func TestAverageJobDurations(t *testing.T) {
+	tests := []struct {
+		name         string
+		mockHandler  http.HandlerFunc
+		runIDs       []int64
+		wantAverages map[string]time.Duration
+	}{
+		{
+			name:   "empty run IDs returns nil",
+			runIDs: []int64{},
+			mockHandler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+			},
+			wantAverages: nil,
+		},
+		{
+			name:   "fetches and averages job durations across runs",
+			runIDs: []int64{1, 2},
+			mockHandler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/repos/owner/repo/actions/runs/1/jobs" {
+					w.Write([]byte(`{"jobs":[
+						{"name":"build","started_at":"2024-01-01T00:00:00Z","completed_at":"2024-01-01T00:02:00Z"},
+						{"name":"test","started_at":"2024-01-01T00:00:00Z","completed_at":"2024-01-01T00:03:00Z"}
+					]}`))
+				} else if r.URL.Path == "/repos/owner/repo/actions/runs/2/jobs" {
+					w.Write([]byte(`{"jobs":[
+						{"name":"build","started_at":"2024-01-01T00:00:00Z","completed_at":"2024-01-01T00:04:00Z"}
+					]}`))
+				}
+			},
+			wantAverages: map[string]time.Duration{
+				"build": 3 * time.Minute,
+				"test":  3 * time.Minute,
+			},
+		},
+		{
+			name:   "skips jobs missing timestamps",
+			runIDs: []int64{1},
+			mockHandler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/repos/owner/repo/actions/runs/1/jobs" {
+					w.Write([]byte(`{"jobs":[
+						{"name":"build","started_at":"2024-01-01T00:00:00Z","completed_at":"2024-01-01T00:01:00Z"},
+						{"name":"broken"}
+					]}`))
+				}
+			},
+			wantAverages: map[string]time.Duration{
+				"build": time.Minute,
+			},
+		},
+		{
+			name:   "API error on one run skips it",
+			runIDs: []int64{1, 2},
+			mockHandler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/repos/owner/repo/actions/runs/1/jobs" {
+					w.WriteHeader(http.StatusInternalServerError)
+				} else if r.URL.Path == "/repos/owner/repo/actions/runs/2/jobs" {
+					w.Write([]byte(`{"jobs":[
+						{"name":"lint","started_at":"2024-01-01T00:00:00Z","completed_at":"2024-01-01T00:00:30Z"}
+					]}`))
+				}
+			},
+			wantAverages: map[string]time.Duration{
+				"lint": 30 * time.Second,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(tt.mockHandler)
+			defer server.Close()
+			client := github.NewClient(nil)
+			client.BaseURL, _ = client.BaseURL.Parse(server.URL + "/")
+
+			averages := averageJobDurations(
+				context.Background(),
+				client,
+				"owner",
+				"repo",
+				tt.runIDs,
+			)
+
+			if tt.wantAverages == nil {
+				if averages != nil {
+					t.Errorf("averageJobDurations() averages = %v, want nil", averages)
+				}
+			} else {
+				for k, v := range tt.wantAverages {
+					if averages[k] != v {
+						t.Errorf("averageJobDurations() averages[%s] = %v, want %v", k, averages[k], v)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestDiscoverWorkflows(t *testing.T) {
 	tests := []struct {
 		name                    string
