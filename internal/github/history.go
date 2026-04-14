@@ -118,9 +118,21 @@ func FetchJobAverages(
 		return nil, newRunIDToWorkflowID, workflowIDsToFetch, nil
 	}
 
-	// Step 5: per historical run_id, collect job durations by name
+	averages = averageJobDurations(ctx, client, owner, repo, historicalRunIDs)
+
+	return averages, newRunIDToWorkflowID, workflowIDsToFetch, nil
+}
+
+// averageJobDurations fetches jobs for the given run IDs and returns
+// averaged durations per job name.
+func averageJobDurations(
+	ctx context.Context,
+	client *github.Client,
+	owner, repo string,
+	runIDs []int64,
+) map[string]time.Duration {
 	jobDurations := map[string][]time.Duration{}
-	for _, runID := range historicalRunIDs {
+	for _, runID := range runIDs {
 		jobs, _, err := client.Actions.ListWorkflowJobs(ctx, owner, repo, runID, &github.ListWorkflowJobsOptions{
 			Filter:      "latest",
 			ListOptions: github.ListOptions{PerPage: 100},
@@ -139,8 +151,11 @@ func FetchJobAverages(
 		}
 	}
 
-	// Step 6: average durations per job name
-	averages = make(map[string]time.Duration, len(jobDurations))
+	if len(jobDurations) == 0 {
+		return nil
+	}
+
+	averages := make(map[string]time.Duration, len(jobDurations))
 	for name, durations := range jobDurations {
 		var total time.Duration
 		for _, d := range durations {
@@ -149,7 +164,7 @@ func FetchJobAverages(
 		averages[name] = total / time.Duration(len(durations))
 	}
 
-	return averages, newRunIDToWorkflowID, workflowIDsToFetch, nil
+	return averages
 }
 
 // DiscoverWorkflows resolves run IDs to workflow IDs.
@@ -237,38 +252,7 @@ func FetchWorkflowHistory(
 		return nil, nil
 	}
 
-	jobDurations := map[string][]time.Duration{}
-	for _, runID := range historicalRunIDs {
-		jobs, _, apiErr := client.Actions.ListWorkflowJobs(ctx, owner, repo, runID, &github.ListWorkflowJobsOptions{
-			Filter:      "latest",
-			ListOptions: github.ListOptions{PerPage: 100},
-		})
-		if apiErr != nil {
-			continue
-		}
-		for _, job := range jobs.Jobs {
-			if job.Name == nil || job.StartedAt == nil || job.CompletedAt == nil {
-				continue
-			}
-			dur := job.CompletedAt.Sub(job.StartedAt.Time)
-			if dur > 0 {
-				jobDurations[*job.Name] = append(jobDurations[*job.Name], dur)
-			}
-		}
-	}
-
-	if len(jobDurations) == 0 {
-		return nil, nil
-	}
-
-	averages := make(map[string]time.Duration, len(jobDurations))
-	for name, durations := range jobDurations {
-		var total time.Duration
-		for _, d := range durations {
-			total += d
-		}
-		averages[name] = total / time.Duration(len(durations))
-	}
+	averages := averageJobDurations(ctx, client, owner, repo, historicalRunIDs)
 
 	return averages, nil
 }
