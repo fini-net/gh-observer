@@ -86,6 +86,26 @@ func TestParsePRURL(t *testing.T) {
 			url:     "https://github.com",
 			wantErr: true,
 		},
+		{
+			name:    "deceptive string with github.com and /pull/",
+			url:     "notes-about-github.com-api-/pull/123.md",
+			wantErr: true,
+		},
+		{
+			name:    "URL with extra path segments before pull",
+			url:     "https://github.com/owner/repo/blob/main/pull/123",
+			wantErr: true,
+		},
+		{
+			name:    "URL with query params",
+			url:     "https://github.com/owner/repo/pull/123?w=1",
+			wantErr: true,
+		},
+		{
+			name:    "URL with hash fragment",
+			url:     "https://github.com/owner/repo/pull/123#issuecomment",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
