@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/fini-net/gh-observer/internal/debug"
 	"github.com/google/go-github/v84/github"
 )
 
@@ -65,6 +66,7 @@ func FetchJobAverages(
 	for runID := range runIDSet {
 		// Check cache first
 		if wfID, ok := knownRunIDToWorkflowID[runID]; ok {
+			debug.Log("workflow cache hit (fetch)", "run_id", runID, "workflow_id", wfID)
 			workflowIDSet[wfID] = true
 			continue
 		}
@@ -72,6 +74,7 @@ func FetchJobAverages(
 		// Fetch workflow ID for new run ID
 		run, _, err := client.Actions.GetWorkflowRunByID(ctx, owner, repo, runID)
 		if err != nil {
+			debug.Log("workflow run fetch failed", "run_id", runID, "err", err)
 			continue
 		}
 		if run.WorkflowID != nil {
@@ -105,6 +108,7 @@ func FetchJobAverages(
 			ListOptions: github.ListOptions{PerPage: 10},
 		})
 		if err != nil {
+			debug.Log("workflow runs list failed", "workflow_id", wfID, "err", err)
 			continue
 		}
 		for _, run := range runs.WorkflowRuns {
@@ -202,12 +206,14 @@ func DiscoverWorkflows(
 
 	for runID := range runIDSet {
 		if wfID, ok := knownRunIDToWorkflowID[runID]; ok {
+			debug.Log("discover cache hit", "run_id", runID, "workflow_id", wfID)
 			workflowIDSet[wfID] = true
 			continue
 		}
 
 		run, _, apiErr := client.Actions.GetWorkflowRunByID(ctx, owner, repo, runID)
 		if apiErr != nil {
+			debug.Log("discover workflow run fetch failed", "run_id", runID, "err", apiErr)
 			continue
 		}
 		if run.WorkflowID != nil {
@@ -238,8 +244,11 @@ func FetchWorkflowHistory(
 		ListOptions: github.ListOptions{PerPage: 10},
 	})
 	if err != nil {
+		debug.Log("fetch workflow history failed", "workflow_id", workflowID, "err", err)
 		return nil, err
 	}
+
+	debug.Log("fetch workflow history", "workflow_id", workflowID, "runs", len(runs.WorkflowRuns))
 
 	var historicalRunIDs []int64
 	for _, run := range runs.WorkflowRuns {

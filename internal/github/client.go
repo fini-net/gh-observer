@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/fini-net/gh-observer/internal/debug"
 	"github.com/google/go-github/v84/github"
 	"golang.org/x/oauth2"
 )
@@ -19,9 +20,11 @@ func GetToken() (string, error) {
 	// Fall back to gh CLI
 	if token == "" {
 		cmd := exec.Command("gh", "auth", "token")
-		output, err := cmd.Output()
+		output, err := cmd.CombinedOutput()
 		if err == nil {
 			token = strings.TrimSpace(string(output))
+		} else {
+			debug.Log("gh auth token failed", "err", err, "output", strings.TrimSpace(string(output)))
 		}
 	}
 

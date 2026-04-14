@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fini-net/gh-observer/internal/debug"
 	"github.com/shurcooL/githubv4"
 	"golang.org/x/oauth2"
 )
@@ -213,8 +214,11 @@ func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, re
 
 		err := client.Query(ctx, &query, variables)
 		if err != nil {
+			debug.Log("graphql query failed", "owner", owner, "repo", repo, "pr", prNumber, "err", err)
 			return nil, rateLimitRemaining, err
 		}
+
+		debug.Log("graphql query success", "owner", owner, "repo", repo, "pr", prNumber, "rate_limit_remaining", query.RateLimit.Remaining)
 
 		if query.RateLimit.Remaining < rateLimitRemaining {
 			rateLimitRemaining = query.RateLimit.Remaining
