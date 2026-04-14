@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/fini-net/gh-observer/internal/config"
+	"github.com/fini-net/gh-observer/internal/debug"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
 	"github.com/fini-net/gh-observer/internal/tui"
@@ -23,9 +24,11 @@ func main() {
 }
 
 var quickFlag bool
+var debugFlag bool
 
 func init() {
 	rootCmd.Flags().BoolVarP(&quickFlag, "quick", "q", false, "Skip fetching historical average runtimes")
+	rootCmd.Flags().BoolVarP(&debugFlag, "debug", "d", false, "Log suppressed errors and internal state to a file")
 }
 
 var rootCmd = &cobra.Command{
@@ -133,6 +136,15 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 
 func run(args []string) int {
 	ctx := context.Background()
+
+	if debugFlag {
+		if err := debug.Enable(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to enable debug logging: %v\n", err)
+			return 1
+		}
+		defer debug.Close()
+		fmt.Fprintf(os.Stderr, "Debug log: %s\n", debug.LogPath())
+	}
 
 	// Load configuration
 	cfg, err := config.Load()

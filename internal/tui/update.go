@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"github.com/fini-net/gh-observer/internal/debug"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
@@ -37,6 +38,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TickMsg:
 		// Check rate limit before polling
 		if m.rateLimitRemaining < rateBackoffThreshold {
+			debug.Log("rate limit backoff", "remaining", m.rateLimitRemaining, "threshold", rateBackoffThreshold)
 			// Back off if rate limited
 			return m, tick(m.refreshInterval * 3)
 		}
@@ -148,6 +150,8 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	m.lastUpdate = time.Now()
 	m.err = nil
 
+	debug.Log("checks update", "count", len(msg.CheckRuns), "rate_limit_remaining", msg.RateLimitRemaining)
+
 	if m.firstCheckSeenAt.IsZero() && len(msg.CheckRuns) > 0 {
 		m.firstCheckSeenAt = time.Now()
 	}
@@ -165,9 +169,13 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 			}
 			runID, err := ghclient.ParseRunIDFromURL(cr.DetailsURL)
 			if err != nil {
+				debug.Log("run ID parse error", "url", cr.DetailsURL, "err", err)
 				continue
 			}
-			if _, known := m.runIDToWorkflowID[runID]; !known {
+			if _, known := m.runIDToWorkflowID[runID]; known {
+				debug.Log("workflow cache hit", "run_id", runID)
+			} else {
+				debug.Log("workflow cache miss", "run_id", runID)
 				newRunIDs = append(newRunIDs, runID)
 			}
 		}
@@ -213,8 +221,14 @@ func fetchPRInfo(ctx context.Context, token, owner, repo string, prNumber int) t
 			return PRInfoMsg{Err: err}
 		}
 
-		createdAt, _ := ghclient.ParseTimestamp(prInfo.CreatedAt)
-		headCommitTime, _ := ghclient.ParseTimestamp(prInfo.HeadCommitDate)
+		createdAt, err := ghclient.ParseTimestamp(prInfo.CreatedAt)
+		if err != nil {
+			debug.Log("timestamp parse error", "field", "CreatedAt", "value", prInfo.CreatedAt, "err", err)
+		}
+		headCommitTime, err := ghclient.ParseTimestamp(prInfo.HeadCommitDate)
+		if err != nil {
+			debug.Log("timestamp parse error", "field", "HeadCommitDate", "value", prInfo.HeadCommitDate, "err", err)
+		}
 
 		return PRInfoMsg{
 			Number:         prInfo.Number,

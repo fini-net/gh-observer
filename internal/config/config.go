@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/fini-net/gh-observer/internal/debug"
 	"github.com/spf13/viper"
 )
 
@@ -39,7 +40,9 @@ func Load() (*Config, error) {
 	v.SetConfigType("yaml")
 
 	// Ignore errors if config doesn't exist - we'll use defaults
-	_ = v.ReadInConfig()
+	if err := v.ReadInConfig(); err != nil {
+		debug.Log("config read error", "err", err)
+	}
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
