@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -34,7 +35,11 @@ func Load() (*Config, error) {
 	v.SetDefault("enable_links", true)
 
 	// Config location: ~/.config/gh-observer/config.yaml
-	configDir := filepath.Join(os.Getenv("HOME"), ".config", "gh-observer")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("detecting home directory: %w", err)
+	}
+	configDir := filepath.Join(home, ".config", "gh-observer")
 	v.AddConfigPath(configDir)
 	v.SetConfigName("config")
 	v.SetConfigType("yaml")
