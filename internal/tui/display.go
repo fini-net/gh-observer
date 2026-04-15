@@ -115,12 +115,18 @@ func FormatCheckNameWithTruncate(check ghclient.CheckRunInfo, maxWidth int) stri
 			return string([]rune(name)[:maxWidth-1]) + ellipsis
 		}
 
-		// Truncate just the job name part, leaving room for ellipsis
+		jobRunes := []rune(check.Name)
 		availableWidth := maxWidth - prefixRunes - 1 // -1 for ellipsis display cell
 		if availableWidth <= 0 {
-			return string([]rune(prefix)[:maxWidth-1]) + ellipsis
+			if maxWidth <= 1 {
+				return string([]rune(ellipsis)[:maxWidth])
+			}
+			return string([]rune(name)[:maxWidth-1]) + ellipsis
 		}
-		return prefix + string([]rune(check.Name)[:availableWidth]) + ellipsis
+		if availableWidth >= len(jobRunes) {
+			return prefix + check.Name
+		}
+		return prefix + string(jobRunes[:availableWidth]) + ellipsis
 	}
 
 	// No workflow name - simple truncation
