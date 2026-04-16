@@ -5,10 +5,10 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
+	"github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 )
 
@@ -96,44 +96,26 @@ func FormatCheckName(check ghclient.CheckRunInfo) string {
 // FormatCheckNameWithTruncate formats the check name and truncates if needed
 func FormatCheckNameWithTruncate(check ghclient.CheckRunInfo, maxWidth int) string {
 	name := FormatCheckName(check)
-	if utf8.RuneCountInString(name) <= maxWidth {
+	if runewidth.StringWidth(name) <= maxWidth {
 		return name
 	}
 
-	ellipsis := "…"
-
-	// If there's a workflow name, try to preserve "Workflow / " structure
 	if check.WorkflowName != "" {
 		prefix := check.WorkflowName + " / "
-		prefixRunes := utf8.RuneCountInString(prefix)
+		prefixWidth := runewidth.StringWidth(prefix)
 
-		// If even the prefix alone exceeds maxWidth, truncate the whole string
-		if prefixRunes >= maxWidth {
-			if maxWidth <= 1 {
-				return string([]rune(ellipsis)[:maxWidth])
-			}
-			return string([]rune(name)[:maxWidth-1]) + ellipsis
+		if prefixWidth >= maxWidth {
+			return runewidth.Truncate(name, maxWidth, "…")
 		}
 
-		jobRunes := []rune(check.Name)
-		availableWidth := maxWidth - prefixRunes - 1 // -1 for ellipsis display cell
-		if availableWidth <= 0 {
-			if maxWidth <= 1 {
-				return string([]rune(ellipsis)[:maxWidth])
-			}
-			return string([]rune(name)[:maxWidth-1]) + ellipsis
-		}
-		if availableWidth >= len(jobRunes) {
+		remainingWidth := maxWidth - prefixWidth
+		if runewidth.StringWidth(check.Name) <= remainingWidth {
 			return prefix + check.Name
 		}
-		return prefix + string(jobRunes[:availableWidth]) + ellipsis
+		return prefix + runewidth.Truncate(check.Name, remainingWidth, "…")
 	}
 
-	// No workflow name - simple truncation
-	if maxWidth <= 1 {
-		return string([]rune(ellipsis)[:maxWidth])
-	}
-	return string([]rune(name)[:maxWidth-1]) + ellipsis
+	return runewidth.Truncate(name, maxWidth, "…")
 }
 
 // FormatLink wraps text in an OSC 8 terminal hyperlink
@@ -144,13 +126,13 @@ func FormatLink(url, text string) string {
 	return termenv.Hyperlink(url, text)
 }
 
-// BuildNameColumn returns a left-aligned name column of exactly widths.NameWidth visible
-// characters. If enableLinks is true and the check has a DetailsURL, the visible text is
-// wrapped in an OSC 8 hyperlink; padding spaces are appended outside the link so that
-// rune-based width measurement stays accurate for the rest of the line.
+// BuildNameColumn returns a left-aligned name column of exactly widths.NameWidth
+// terminal display cells. If enableLinks is true and the check has a DetailsURL, the
+// visible text is wrapped in an OSC 8 hyperlink; padding spaces are appended outside
+// the link so that display-width measurement stays accurate for the rest of the line.
 func BuildNameColumn(check ghclient.CheckRunInfo, widths ColumnWidths, enableLinks bool) string {
 	name := FormatCheckNameWithTruncate(check, widths.NameWidth)
-	paddingLen := max(widths.NameWidth-utf8.RuneCountInString(name), 0)
+	paddingLen := max(widths.NameWidth-runewidth.StringWidth(name), 0)
 	padding := strings.Repeat(" ", paddingLen)
 	if enableLinks && check.DetailsURL != "" {
 		return FormatLink(check.DetailsURL, name) + padding
@@ -187,12 +169,12 @@ func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime tim
 
 	for _, check := range checkRuns {
 		queueText := FormatQueueLatency(check, headCommitTime)
-		if utf8.RuneCountInString(queueText) > widths.QueueWidth {
-			widths.QueueWidth = utf8.RuneCountInString(queueText)
+		if runewidth.StringWidth(queueText) > widths.QueueWidth {
+			widths.QueueWidth = runewidth.StringWidth(queueText)
 		}
 
 		name := FormatCheckName(check)
-		nameLen := utf8.RuneCountInString(name)
+		nameLen := runewidth.StringWidth(name)
 		if nameLen > widths.NameWidth && nameLen <= maxNameWidth {
 			widths.NameWidth = nameLen
 		} else if nameLen > maxNameWidth {
@@ -200,13 +182,13 @@ func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime tim
 		}
 
 		durationText := FormatDuration(check)
-		if utf8.RuneCountInString(durationText) > widths.DurationWidth {
-			widths.DurationWidth = utf8.RuneCountInString(durationText)
+		if runewidth.StringWidth(durationText) > widths.DurationWidth {
+			widths.DurationWidth = runewidth.StringWidth(durationText)
 		}
 
 		avgText := FormatAvg(check, jobAverages)
-		if utf8.RuneCountInString(avgText) > widths.AvgWidth {
-			widths.AvgWidth = utf8.RuneCountInString(avgText)
+		if runewidth.StringWidth(avgText) > widths.AvgWidth {
+			widths.AvgWidth = runewidth.StringWidth(avgText)
 		}
 	}
 
@@ -215,16 +197,16 @@ func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime tim
 
 // FormatAlignedColumns formats the four columns with proper padding
 func FormatAlignedColumns(queueText, nameText, durationText, avgText string, widths ColumnWidths) (string, string, string, string) {
-	queuePadding := max(widths.QueueWidth-utf8.RuneCountInString(queueText), 0)
+	queuePadding := max(widths.QueueWidth-runewidth.StringWidth(queueText), 0)
 	queueCol := strings.Repeat(" ", queuePadding) + queueText
 
-	namePadding := max(widths.NameWidth-utf8.RuneCountInString(nameText), 0)
+	namePadding := max(widths.NameWidth-runewidth.StringWidth(nameText), 0)
 	nameCol := nameText + strings.Repeat(" ", namePadding)
 
-	durationPadding := max(widths.DurationWidth-utf8.RuneCountInString(durationText), 0)
+	durationPadding := max(widths.DurationWidth-runewidth.StringWidth(durationText), 0)
 	durationCol := strings.Repeat(" ", durationPadding) + durationText
 
-	avgPadding := max(widths.AvgWidth-utf8.RuneCountInString(avgText), 0)
+	avgPadding := max(widths.AvgWidth-runewidth.StringWidth(avgText), 0)
 	avgCol := strings.Repeat(" ", avgPadding) + avgText
 
 	return queueCol, nameCol, durationCol, avgCol
@@ -256,10 +238,7 @@ func FormatDescription(description string, widths ColumnWidths) string {
 	}
 	totalWidth := widths.QueueWidth + 1 + 1 + widths.NameWidth + 2 + widths.DurationWidth + 2 + widths.AvgWidth
 	maxLen := max(totalWidth-4, 20)
-	if utf8.RuneCountInString(description) > maxLen {
-		return string([]rune(description)[:maxLen-1]) + "…"
-	}
-	return description
+	return runewidth.Truncate(description, maxLen, "…")
 }
 
 // SortCheckRuns sorts check runs with three criteria:

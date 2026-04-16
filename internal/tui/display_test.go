@@ -145,7 +145,7 @@ func TestFormatCheckNameWithTruncate(t *testing.T) {
 				Name:         "テストビルド",
 			},
 			maxWidth: 10,
-			want:     "CI / テストビ…",
+			want:     "CI / テス…",
 		},
 		{
 			name: "emoji in job name no truncation",
@@ -163,7 +163,7 @@ func TestFormatCheckNameWithTruncate(t *testing.T) {
 				Name:         "🚀 deploy-prod",
 			},
 			maxWidth: 15,
-			want:     "Build / 🚀 depl…",
+			want:     "Build / 🚀 dep…",
 		},
 		{
 			name: "CJK workflow name truncation",
@@ -172,7 +172,7 @@ func TestFormatCheckNameWithTruncate(t *testing.T) {
 				Name:         "テスト",
 			},
 			maxWidth: 10,
-			want:     "検証ワークフロー …",
+			want:     "検証ワー…",
 		},
 		{
 			name: "no workflow CJK truncation",
@@ -181,7 +181,7 @@ func TestFormatCheckNameWithTruncate(t *testing.T) {
 				Name:         "ビルドテスト実行",
 			},
 			maxWidth: 5,
-			want:     "ビルドテ…",
+			want:     "ビル…",
 		},
 	}
 
@@ -234,8 +234,8 @@ func TestBuildNameColumnCJK(t *testing.T) {
 		Name:         "ビルド",
 	}
 	got := BuildNameColumn(check, widths, false)
-	// "CI / ビルド" = 8 runes, so 12 padding spaces
-	want := "CI / ビルド            "
+	// "CI / ビルド" has display width 11, so 9 padding spaces
+	want := "CI / ビルド         "
 	if got != want {
 		t.Errorf("BuildNameColumn() = %q, want %q", got, want)
 	}
@@ -249,19 +249,19 @@ func TestFormatAlignedColumnsCJK(t *testing.T) {
 		AvgWidth:      5,
 	}
 	queueCol, nameCol, durationCol, avgCol := FormatAlignedColumns("30s", "ビルド", "1m", "--", widths)
-	// "ビルド" = 3 runes, NameWidth=10, padding=7
-	if nameCol != "ビルド       " {
-		t.Errorf("nameCol = %q, want %q", nameCol, "ビルド       ")
+	// "ビルド" has display width 6, NameWidth=10, padding=4
+	if nameCol != "ビルド    " {
+		t.Errorf("nameCol = %q, want %q", nameCol, "ビルド    ")
 	}
-	// "30s" = 3 runes, QueueWidth=5, padding=2
+	// "30s" = 3 display cells, QueueWidth=5, padding=2
 	if queueCol != "  30s" {
 		t.Errorf("queueCol = %q, want %q", queueCol, "  30s")
 	}
-	// "1m" = 2 runes, DurationWidth=5, padding=3
+	// "1m" = 2 display cells, DurationWidth=5, padding=3
 	if durationCol != "   1m" {
 		t.Errorf("durationCol = %q, want %q", durationCol, "   1m")
 	}
-	// "--" = 2 runes, AvgWidth=5, padding=3
+	// "--" = 2 display cells, AvgWidth=5, padding=3
 	if avgCol != "   --" {
 		t.Errorf("avgCol = %q, want %q", avgCol, "   --")
 	}
@@ -277,11 +277,11 @@ func TestCalculateColumnWidthsCJK(t *testing.T) {
 	}
 	widths := CalculateColumnWidths(checks, time.Time{}, nil)
 
-	// "🚀配信ワークフロー実行プロセス / deploy" = 24 runes
-	// "ビルドテスト実行チェックを確認するプロセス" = 21 runes
-	// max of these is 24
-	if widths.NameWidth != 24 {
-		t.Errorf("NameWidth = %d, want 24", widths.NameWidth)
+	// "🚀配信ワークフロー実行プロセス / deploy" has display width 39
+	// "ビルドテスト実行チェックを確認するプロセス" has display width 42, capped at maxNameWidth=60
+	// max of these display widths is 42
+	if widths.NameWidth != 42 {
+		t.Errorf("NameWidth = %d, want 42", widths.NameWidth)
 	}
 }
 
@@ -293,9 +293,9 @@ func TestFormatDescriptionCJK(t *testing.T) {
 		AvgWidth:      5,
 	}
 	// totalWidth = 5+1+1+10+2+5+2+5 = 31, maxLen = 27
-	// 29 CJK runes > 27, so truncate to 26 runes + "…"
+	// Display width of the CJK string is 58, truncated to 27 display cells
 	got := FormatDescription("テスト実行の詳細説明を入力してくださいここに追加情報ですよ", widths)
-	want := "テスト実行の詳細説明を入力してくださいここに追加情報…"
+	want := "テスト実行の詳細説明を入力…"
 	if got != want {
 		t.Errorf("FormatDescription() = %q, want %q", got, want)
 	}
