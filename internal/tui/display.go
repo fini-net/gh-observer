@@ -126,10 +126,10 @@ func FormatLink(url, text string) string {
 	return termenv.Hyperlink(url, text)
 }
 
-// BuildNameColumn returns a left-aligned name column of exactly widths.NameWidth visible
-// characters. If enableLinks is true and the check has a DetailsURL, the visible text is
-// wrapped in an OSC 8 hyperlink; padding spaces are appended outside the link so that
-// rune-based width measurement stays accurate for the rest of the line.
+// BuildNameColumn returns a left-aligned name column of exactly widths.NameWidth
+// terminal display cells. If enableLinks is true and the check has a DetailsURL, the
+// visible text is wrapped in an OSC 8 hyperlink; padding spaces are appended outside
+// the link so that display-width measurement stays accurate for the rest of the line.
 func BuildNameColumn(check ghclient.CheckRunInfo, widths ColumnWidths, enableLinks bool) string {
 	name := FormatCheckNameWithTruncate(check, widths.NameWidth)
 	paddingLen := max(widths.NameWidth-runewidth.StringWidth(name), 0)
