@@ -1,5 +1,6 @@
 # gh observer
 
+![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/fini-net/gh-observer/badge)
 ![GitHub Issues](https://img.shields.io/github/issues/fini-net/gh-observer)
 ![GitHub Pull Requests](https://img.shields.io/github/issues-pr/fini-net/gh-observer)
 ![GitHub License](https://img.shields.io/github/license/fini-net/gh-observer)
