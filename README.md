@@ -12,7 +12,10 @@ runtime metrics, queue latency, and better handling of startup delays.
 
 ## Why?
 
-The existing `gh pr checks --watch` doesn't show how long checks have been running, doesn't handle the 30-90s startup delay well, and doesn't show queue latency. This creates anxiety when watching CI runs - "is it stuck or just slow?"
+The existing `gh pr checks --watch` doesn't show how long checks have been
+running, doesn't handle the 30-90s startup delay well, and doesn't show queue
+latency. This creates anxiety when watching CI runs - "is it stuck or just
+slow?"
 
 ## Features
 
