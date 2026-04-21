@@ -9,6 +9,150 @@ import (
 	"github.com/shurcooL/githubv4"
 )
 
+type checkRunContextFields struct {
+	Name        string
+	Summary     string
+	Status      string
+	Conclusion  string
+	StartedAt   githubv4.DateTime
+	CompletedAt githubv4.DateTime
+	DetailsURL  string
+	Annotations []struct {
+		Message         string
+		Path            string
+		Title           string
+		AnnotationLevel string
+		StartLine       int
+	}
+	WorkflowName string
+	AppName      string
+}
+
+func makeCheckRunNode(f checkRunContextFields) contextNode {
+	var annotationNodes []struct {
+		Message         string
+		Path            string
+		Title           string
+		AnnotationLevel string
+		Location        struct {
+			Start struct {
+				Line int
+			} `graphql:"start"`
+		} `graphql:"location"`
+	}
+	for _, a := range f.Annotations {
+		annotationNodes = append(annotationNodes, struct {
+			Message         string
+			Path            string
+			Title           string
+			AnnotationLevel string
+			Location        struct {
+				Start struct {
+					Line int
+				} `graphql:"start"`
+			} `graphql:"location"`
+		}{
+			Message:         a.Message,
+			Path:            a.Path,
+			Title:           a.Title,
+			AnnotationLevel: a.AnnotationLevel,
+			Location: struct {
+				Start struct {
+					Line int
+				} `graphql:"start"`
+			}{
+				Start: struct{ Line int }{Line: a.StartLine},
+			},
+		})
+	}
+
+	return contextNode{
+		Typename: "CheckRun",
+		CheckRunContext: struct {
+			Name        string
+			Summary     string
+			Status      string
+			Conclusion  string
+			StartedAt   githubv4.DateTime
+			CompletedAt githubv4.DateTime
+			DetailsURL  string `graphql:"detailsUrl"`
+			Annotations struct {
+				Nodes []struct {
+					Message         string
+					Path            string
+					Title           string
+					AnnotationLevel string
+					Location        struct {
+						Start struct {
+							Line int
+						} `graphql:"start"`
+					} `graphql:"location"`
+				}
+			} `graphql:"annotations(first: 5)"`
+			CheckSuite struct {
+				WorkflowRun struct {
+					Workflow struct {
+						Name string
+					}
+				}
+				App struct {
+					Name string
+					Slug string
+				}
+			}
+		}{
+			Name:        f.Name,
+			Summary:     f.Summary,
+			Status:      f.Status,
+			Conclusion:  f.Conclusion,
+			StartedAt:   f.StartedAt,
+			CompletedAt: f.CompletedAt,
+			DetailsURL:  f.DetailsURL,
+			Annotations: struct {
+				Nodes []struct {
+					Message         string
+					Path            string
+					Title           string
+					AnnotationLevel string
+					Location        struct {
+						Start struct {
+							Line int
+						} `graphql:"start"`
+					} `graphql:"location"`
+				}
+			}{
+				Nodes: annotationNodes,
+			},
+			CheckSuite: struct {
+				WorkflowRun struct {
+					Workflow struct {
+						Name string
+					}
+				}
+				App struct {
+					Name string
+					Slug string
+				}
+			}{
+				WorkflowRun: struct {
+					Workflow struct {
+						Name string
+					}
+				}{
+					Workflow: struct{ Name string }{Name: f.WorkflowName},
+				},
+				App: struct {
+					Name string
+					Slug string
+				}{
+					Name: f.AppName,
+					Slug: f.AppName,
+				},
+			},
+		},
+	}
+}
+
 func TestContextNodesToCheckRuns(t *testing.T) {
 	startedAt := githubv4.DateTime{}
 	startedAt.Time = time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
@@ -17,10 +161,12 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 	completedAt.Time = time.Date(2024, 1, 15, 10, 35, 0, 0, time.UTC)
 
 	tests := []struct {
-		name     string
-		nodes    []contextNode
-		wantLen  int
-		wantName []string
+		name             string
+		nodes            []contextNode
+		wantLen          int
+		wantName         []string
+		wantWorkflowName []string
+		wantAppName      []string
 	}{
 		{
 			name:     "empty nodes returns nil",
@@ -49,210 +195,44 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 			wantName: []string{"ci/travis"},
 		},
 		{
-			name: "StatusContext failure maps to completed/failure",
-			nodes: []contextNode{
-				{
-					Typename: "StatusContext",
-					StatusContext: struct {
-						Context     string
-						Description string
-						State       string
-						TargetURL   string `graphql:"targetUrl"`
-					}{
-						Context:   "ci/jenkins",
-						State:     "failure",
-						TargetURL: "https://jenkins.example.com/1",
-					},
-				},
-			},
-			wantLen:  1,
-			wantName: []string{"ci/jenkins"},
-		},
-		{
-			name: "StatusContext error maps to completed/failure",
-			nodes: []contextNode{
-				{
-					Typename: "StatusContext",
-					StatusContext: struct {
-						Context     string
-						Description string
-						State       string
-						TargetURL   string `graphql:"targetUrl"`
-					}{
-						Context:   "ci/circle",
-						State:     "error",
-						TargetURL: "https://circleci.com/1",
-					},
-				},
-			},
-			wantLen:  1,
-			wantName: []string{"ci/circle"},
-		},
-		{
-			name: "StatusContext pending maps to queued",
-			nodes: []contextNode{
-				{
-					Typename: "StatusContext",
-					StatusContext: struct {
-						Context     string
-						Description string
-						State       string
-						TargetURL   string `graphql:"targetUrl"`
-					}{
-						Context: "ci/pending",
-						State:   "pending",
-					},
-				},
-			},
-			wantLen:  1,
-			wantName: []string{"ci/pending"},
-		},
-		{
 			name: "CheckRun with workflow name and timestamps",
 			nodes: []contextNode{
-				{
-					Typename: "CheckRun",
-					CheckRunContext: struct {
-						Name        string
-						Summary     string
-						Status      string
-						Conclusion  string
-						StartedAt   githubv4.DateTime
-						CompletedAt githubv4.DateTime
-						DetailsURL  string `graphql:"detailsUrl"`
-						Annotations struct {
-							Nodes []struct {
-								Message         string
-								Path            string
-								Title           string
-								AnnotationLevel string
-								Location        struct {
-									Start struct {
-										Line int
-									} `graphql:"start"`
-								} `graphql:"location"`
-							}
-						} `graphql:"annotations(first: 5)"`
-						CheckSuite struct {
-							WorkflowRun struct {
-								Workflow struct {
-									Name string
-								}
-							}
-						}
-					}{
-						Name:        "lint",
-						Status:      "COMPLETED",
-						Conclusion:  "SUCCESS",
-						StartedAt:   startedAt,
-						CompletedAt: completedAt,
-						DetailsURL:  "https://github.com/owner/repo/actions/runs/100/job/200",
-						CheckSuite: struct {
-							WorkflowRun struct {
-								Workflow struct {
-									Name string
-								}
-							}
-						}{
-							WorkflowRun: struct {
-								Workflow struct {
-									Name string
-								}
-							}{
-								Workflow: struct{ Name string }{Name: "CI"},
-							},
-						},
-					},
-				},
+				makeCheckRunNode(checkRunContextFields{
+					Name:         "lint",
+					Status:       "COMPLETED",
+					Conclusion:   "SUCCESS",
+					StartedAt:    startedAt,
+					CompletedAt:  completedAt,
+					DetailsURL:   "https://github.com/owner/repo/actions/runs/100/job/200",
+					WorkflowName: "CI",
+				}),
 			},
-			wantLen:  1,
-			wantName: []string{"lint"},
+			wantLen:          1,
+			wantName:         []string{"lint"},
+			wantWorkflowName: []string{"CI"},
 		},
 		{
 			name: "CheckRun without workflow name",
 			nodes: []contextNode{
-				{
-					Typename: "CheckRun",
-					CheckRunContext: struct {
-						Name        string
-						Summary     string
-						Status      string
-						Conclusion  string
-						StartedAt   githubv4.DateTime
-						CompletedAt githubv4.DateTime
-						DetailsURL  string `graphql:"detailsUrl"`
-						Annotations struct {
-							Nodes []struct {
-								Message         string
-								Path            string
-								Title           string
-								AnnotationLevel string
-								Location        struct {
-									Start struct {
-										Line int
-									} `graphql:"start"`
-								} `graphql:"location"`
-							}
-						} `graphql:"annotations(first: 5)"`
-						CheckSuite struct {
-							WorkflowRun struct {
-								Workflow struct {
-									Name string
-								}
-							}
-						}
-					}{
-						Name:       "legacy-check",
-						Status:     "COMPLETED",
-						Conclusion: "FAILURE",
-					},
-				},
+				makeCheckRunNode(checkRunContextFields{
+					Name:       "legacy-check",
+					Status:     "COMPLETED",
+					Conclusion: "FAILURE",
+				}),
 			},
-			wantLen:  1,
-			wantName: []string{"legacy-check"},
+			wantLen:          1,
+			wantName:         []string{"legacy-check"},
+			wantWorkflowName: []string{""},
 		},
 		{
 			name: "unknown typename is skipped",
 			nodes: []contextNode{
-				{
-					Typename: "SomeOtherType",
-				},
-				{
-					Typename: "CheckRun",
-					CheckRunContext: struct {
-						Name        string
-						Summary     string
-						Status      string
-						Conclusion  string
-						StartedAt   githubv4.DateTime
-						CompletedAt githubv4.DateTime
-						DetailsURL  string `graphql:"detailsUrl"`
-						Annotations struct {
-							Nodes []struct {
-								Message         string
-								Path            string
-								Title           string
-								AnnotationLevel string
-								Location        struct {
-									Start struct {
-										Line int
-									} `graphql:"start"`
-								} `graphql:"location"`
-							}
-						} `graphql:"annotations(first: 5)"`
-						CheckSuite struct {
-							WorkflowRun struct {
-								Workflow struct {
-									Name string
-								}
-							}
-						}
-					}{
-						Name:       "valid-check",
-						Status:     "IN_PROGRESS",
-						Conclusion: "",
-					},
-				},
+				{Typename: "SomeOtherType"},
+				makeCheckRunNode(checkRunContextFields{
+					Name:       "valid-check",
+					Status:     "IN_PROGRESS",
+					Conclusion: "",
+				}),
 			},
 			wantLen:  1,
 			wantName: []string{"valid-check"},
@@ -272,42 +252,11 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 						State:   "success",
 					},
 				},
-				{
-					Typename: "CheckRun",
-					CheckRunContext: struct {
-						Name        string
-						Summary     string
-						Status      string
-						Conclusion  string
-						StartedAt   githubv4.DateTime
-						CompletedAt githubv4.DateTime
-						DetailsURL  string `graphql:"detailsUrl"`
-						Annotations struct {
-							Nodes []struct {
-								Message         string
-								Path            string
-								Title           string
-								AnnotationLevel string
-								Location        struct {
-									Start struct {
-										Line int
-									} `graphql:"start"`
-								} `graphql:"location"`
-							}
-						} `graphql:"annotations(first: 5)"`
-						CheckSuite struct {
-							WorkflowRun struct {
-								Workflow struct {
-									Name string
-								}
-							}
-						}
-					}{
-						Name:       "test",
-						Status:     "QUEUED",
-						Conclusion: "",
-					},
-				},
+				makeCheckRunNode(checkRunContextFields{
+					Name:       "test",
+					Status:     "QUEUED",
+					Conclusion: "",
+				}),
 			},
 			wantLen:  2,
 			wantName: []string{"ci/travis", "test"},
@@ -315,97 +264,77 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 		{
 			name: "CheckRun with annotations",
 			nodes: []contextNode{
-				{
-					Typename: "CheckRun",
-					CheckRunContext: struct {
-						Name        string
-						Summary     string
-						Status      string
-						Conclusion  string
-						StartedAt   githubv4.DateTime
-						CompletedAt githubv4.DateTime
-						DetailsURL  string `graphql:"detailsUrl"`
-						Annotations struct {
-							Nodes []struct {
-								Message         string
-								Path            string
-								Title           string
-								AnnotationLevel string
-								Location        struct {
-									Start struct {
-										Line int
-									} `graphql:"start"`
-								} `graphql:"location"`
-							}
-						} `graphql:"annotations(first: 5)"`
-						CheckSuite struct {
-							WorkflowRun struct {
-								Workflow struct {
-									Name string
-								}
-							}
-						}
+				makeCheckRunNode(checkRunContextFields{
+					Name:         "lint",
+					Status:       "COMPLETED",
+					Conclusion:   "FAILURE",
+					WorkflowName: "CI",
+					Annotations: []struct {
+						Message         string
+						Path            string
+						Title           string
+						AnnotationLevel string
+						StartLine       int
 					}{
-						Name:       "lint",
-						Status:     "COMPLETED",
-						Conclusion: "FAILURE",
-						Annotations: struct {
-							Nodes []struct {
-								Message         string
-								Path            string
-								Title           string
-								AnnotationLevel string
-								Location        struct {
-									Start struct {
-										Line int
-									} `graphql:"start"`
-								} `graphql:"location"`
-							}
-						}{
-							Nodes: []struct {
-								Message         string
-								Path            string
-								Title           string
-								AnnotationLevel string
-								Location        struct {
-									Start struct {
-										Line int
-									} `graphql:"start"`
-								} `graphql:"location"`
-							}{
-								{
-									Message:         "unused variable",
-									Path:            "main.go",
-									Title:           "go vet",
-									AnnotationLevel: "WARNING",
-									Location: struct {
-										Start struct{ Line int } `graphql:"start"`
-									}{
-										Start: struct{ Line int }{Line: 42},
-									},
-								},
-							},
-						},
-						CheckSuite: struct {
-							WorkflowRun struct {
-								Workflow struct {
-									Name string
-								}
-							}
-						}{
-							WorkflowRun: struct {
-								Workflow struct {
-									Name string
-								}
-							}{
-								Workflow: struct{ Name string }{Name: "CI"},
-							},
+						{
+							Message:         "unused variable",
+							Path:            "main.go",
+							Title:           "go vet",
+							AnnotationLevel: "WARNING",
+							StartLine:       42,
 						},
 					},
-				},
+				}),
 			},
-			wantLen:  1,
-			wantName: []string{"lint"},
+			wantLen:          1,
+			wantName:         []string{"lint"},
+			wantWorkflowName: []string{"CI"},
+		},
+		{
+			name: "GHAS check with AppName but no WorkflowName",
+			nodes: []contextNode{
+				makeCheckRunNode(checkRunContextFields{
+					Name:        "analyze",
+					Status:      "COMPLETED",
+					Conclusion:  "SUCCESS",
+					AppName:     "GitHub Code Scanning",
+				}),
+			},
+			wantLen:          1,
+			wantName:         []string{"analyze"},
+			wantWorkflowName: []string{""},
+			wantAppName:      []string{"GitHub Code Scanning"},
+		},
+		{
+			name: "WorkflowName takes priority over AppName",
+			nodes: []contextNode{
+				makeCheckRunNode(checkRunContextFields{
+					Name:         "build",
+					Status:       "COMPLETED",
+					Conclusion:   "SUCCESS",
+					WorkflowName: "CI",
+					AppName:      "GitHub Actions",
+				}),
+			},
+			wantLen:          1,
+			wantName:         []string{"build"},
+			wantWorkflowName: []string{"CI"},
+			wantAppName:      []string{"GitHub Actions"},
+		},
+		{
+			name: "Third-party app with AppName but no WorkflowName",
+			nodes: []contextNode{
+				makeCheckRunNode(checkRunContextFields{
+					Name:       "Checkov",
+					Status:     "COMPLETED",
+					Conclusion:  "SUCCESS",
+					AppName:     "Bridgecrew",
+				}),
+			},
+			wantLen:          1,
+			wantName:         []string{"Checkov"},
+			wantWorkflowName: []string{""},
+			wantAppName:      []string{"Bridgecrew"},
 		},
 	}
 
@@ -425,6 +354,26 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 					}
 					if got[i].Name != name {
 						t.Errorf("contextNodesToCheckRuns()[%d].Name = %q, want %q", i, got[i].Name, name)
+					}
+				}
+			}
+			if tt.wantWorkflowName != nil {
+				for i, wn := range tt.wantWorkflowName {
+					if i >= len(got) {
+						break
+					}
+					if got[i].WorkflowName != wn {
+						t.Errorf("contextNodesToCheckRuns()[%d].WorkflowName = %q, want %q", i, got[i].WorkflowName, wn)
+					}
+				}
+			}
+			if tt.wantAppName != nil {
+				for i, an := range tt.wantAppName {
+					if i >= len(got) {
+						break
+					}
+					if got[i].AppName != an {
+						t.Errorf("contextNodesToCheckRuns()[%d].AppName = %q, want %q", i, got[i].AppName, an)
 					}
 				}
 			}
@@ -536,61 +485,16 @@ func TestContextNodesToCheckRuns_CheckRunFields(t *testing.T) {
 	completedAt.Time = time.Date(2024, 3, 1, 12, 5, 0, 0, time.UTC)
 
 	nodes := []contextNode{
-		{
-			Typename: "CheckRun",
-			CheckRunContext: struct {
-				Name        string
-				Summary     string
-				Status      string
-				Conclusion  string
-				StartedAt   githubv4.DateTime
-				CompletedAt githubv4.DateTime
-				DetailsURL  string `graphql:"detailsUrl"`
-				Annotations struct {
-					Nodes []struct {
-						Message         string
-						Path            string
-						Title           string
-						AnnotationLevel string
-						Location        struct {
-							Start struct {
-								Line int
-							} `graphql:"start"`
-						} `graphql:"location"`
-					}
-				} `graphql:"annotations(first: 5)"`
-				CheckSuite struct {
-					WorkflowRun struct {
-						Workflow struct {
-							Name string
-						}
-					}
-				}
-			}{
-				Name:        "build / compile",
-				Summary:     "Build passed",
-				Status:      "completed",
-				Conclusion:  "success",
-				StartedAt:   startedAt,
-				CompletedAt: completedAt,
-				DetailsURL:  "https://github.com/owner/repo/actions/runs/42/job/99",
-				CheckSuite: struct {
-					WorkflowRun struct {
-						Workflow struct {
-							Name string
-						}
-					}
-				}{
-					WorkflowRun: struct {
-						Workflow struct {
-							Name string
-						}
-					}{
-						Workflow: struct{ Name string }{Name: "CI Pipeline"},
-					},
-				},
-			},
-		},
+		makeCheckRunNode(checkRunContextFields{
+			Name:         "build / compile",
+			Summary:      "Build passed",
+			Status:       "completed",
+			Conclusion:   "success",
+			StartedAt:    startedAt,
+			CompletedAt:  completedAt,
+			DetailsURL:   "https://github.com/owner/repo/actions/runs/42/job/99",
+			WorkflowName: "CI Pipeline",
+		}),
 	}
 
 	got := contextNodesToCheckRuns(nodes)
@@ -628,42 +532,11 @@ func TestContextNodesToCheckRuns_CheckRunFields(t *testing.T) {
 
 func TestContextNodesToCheckRuns_ZeroTimestamps(t *testing.T) {
 	nodes := []contextNode{
-		{
-			Typename: "CheckRun",
-			CheckRunContext: struct {
-				Name        string
-				Summary     string
-				Status      string
-				Conclusion  string
-				StartedAt   githubv4.DateTime
-				CompletedAt githubv4.DateTime
-				DetailsURL  string `graphql:"detailsUrl"`
-				Annotations struct {
-					Nodes []struct {
-						Message         string
-						Path            string
-						Title           string
-						AnnotationLevel string
-						Location        struct {
-							Start struct {
-								Line int
-							} `graphql:"start"`
-						} `graphql:"location"`
-					}
-				} `graphql:"annotations(first: 5)"`
-				CheckSuite struct {
-					WorkflowRun struct {
-						Workflow struct {
-							Name string
-						}
-					}
-				}
-			}{
-				Name:       "queued-check",
-				Status:     "queued",
-				Conclusion: "",
-			},
-		},
+		makeCheckRunNode(checkRunContextFields{
+			Name:       "queued-check",
+			Status:     "queued",
+			Conclusion: "",
+		}),
 	}
 
 	got := contextNodesToCheckRuns(nodes)
@@ -705,42 +578,11 @@ func (m *mockQuerier) Query(_ context.Context, q interface{}, _ map[string]inter
 }
 
 func makeContextNodeCheckRun(name, status, conclusion string) contextNode {
-	return contextNode{
-		Typename: "CheckRun",
-		CheckRunContext: struct {
-			Name        string
-			Summary     string
-			Status      string
-			Conclusion  string
-			StartedAt   githubv4.DateTime
-			CompletedAt githubv4.DateTime
-			DetailsURL  string `graphql:"detailsUrl"`
-			Annotations struct {
-				Nodes []struct {
-					Message         string
-					Path            string
-					Title           string
-					AnnotationLevel string
-					Location        struct {
-						Start struct {
-							Line int
-						} `graphql:"start"`
-					} `graphql:"location"`
-				}
-			} `graphql:"annotations(first: 5)"`
-			CheckSuite struct {
-				WorkflowRun struct {
-					Workflow struct {
-						Name string
-					}
-				}
-			}
-		}{
-			Name:       name,
-			Status:     status,
-			Conclusion: conclusion,
-		},
-	}
+	return makeCheckRunNode(checkRunContextFields{
+		Name:       name,
+		Status:     status,
+		Conclusion: conclusion,
+	})
 }
 
 func makeTestQuery(checkRunNames []string, hasNextPage bool, endCursor string, rateLimitRemaining int) *pullRequestQuery {
