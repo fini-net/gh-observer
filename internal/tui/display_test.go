@@ -82,6 +82,38 @@ func TestFormatCheckName(t *testing.T) {
 			},
 			want: "Code scanning / Checkov",
 		},
+		{
+			name: "GHAS check with AppName fallback",
+			check: ghclient.CheckRunInfo{
+				AppName: "GitHub Code Scanning",
+				Name:    "analyze",
+			},
+			want: "GitHub Code Scanning / analyze",
+		},
+		{
+			name: "WorkflowName takes priority over AppName",
+			check: ghclient.CheckRunInfo{
+				WorkflowName: "CI",
+				AppName:     "GitHub Actions",
+				Name:        "test",
+			},
+			want: "CI / test",
+		},
+		{
+			name: "third-party app with AppName",
+			check: ghclient.CheckRunInfo{
+				AppName: "Bridgecrew",
+				Name:    "Checkov",
+			},
+			want: "Bridgecrew / Checkov",
+		},
+		{
+			name: "no workflow or app name",
+			check: ghclient.CheckRunInfo{
+				Name: "legacy-check",
+			},
+			want: "legacy-check",
+		},
 	}
 
 	for _, tt := range tests {
@@ -190,6 +222,34 @@ func TestFormatCheckNameWithTruncate(t *testing.T) {
 			},
 			maxWidth: 5,
 			want:     "ビル…",
+		},
+		{
+			name: "AppName fallback no truncation",
+			check: ghclient.CheckRunInfo{
+				AppName: "GitHub Code Scanning",
+				Name:    "analyze",
+			},
+			maxWidth: 30,
+			want:     "GitHub Code Scanning / analyze",
+		},
+		{
+			name: "AppName fallback truncation",
+			check: ghclient.CheckRunInfo{
+				AppName: "GitHub Code Scanning",
+				Name:    "very-long-job-name-here",
+			},
+			maxWidth: 28,
+			want:     "GitHub Code Scanning / very…",
+		},
+		{
+			name: "WorkflowName priority over AppName in truncation",
+			check: ghclient.CheckRunInfo{
+				WorkflowName: "CI",
+				AppName:     "GitHub Actions",
+				Name:        "very-long-job-name-here",
+			},
+			maxWidth: 15,
+			want:     "CI / very-long…",
 		},
 	}
 

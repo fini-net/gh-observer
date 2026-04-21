@@ -85,10 +85,13 @@ func GetCheckIcon(status, conclusion string) string {
 	}
 }
 
-// FormatCheckName formats the check name as "Workflow / Job" or just "Job"
+// FormatCheckName formats the check name as "Workflow / Job", "App / Job", or just "Job"
 func FormatCheckName(check ghclient.CheckRunInfo) string {
 	if check.WorkflowName != "" {
 		return fmt.Sprintf("%s / %s", check.WorkflowName, check.Name)
+	}
+	if check.AppName != "" {
+		return fmt.Sprintf("%s / %s", check.AppName, check.Name)
 	}
 	return check.Name
 }
@@ -100,8 +103,14 @@ func FormatCheckNameWithTruncate(check ghclient.CheckRunInfo, maxWidth int) stri
 		return name
 	}
 
+	prefix := ""
 	if check.WorkflowName != "" {
-		prefix := check.WorkflowName + " / "
+		prefix = check.WorkflowName + " / "
+	} else if check.AppName != "" {
+		prefix = check.AppName + " / "
+	}
+
+	if prefix != "" {
 		prefixWidth := runewidth.StringWidth(prefix)
 
 		if prefixWidth >= maxWidth {
@@ -109,10 +118,11 @@ func FormatCheckNameWithTruncate(check ghclient.CheckRunInfo, maxWidth int) stri
 		}
 
 		remainingWidth := maxWidth - prefixWidth
-		if runewidth.StringWidth(check.Name) <= remainingWidth {
-			return prefix + check.Name
+		jobName := check.Name
+		if runewidth.StringWidth(jobName) <= remainingWidth {
+			return prefix + jobName
 		}
-		return prefix + runewidth.Truncate(check.Name, remainingWidth, "…")
+		return prefix + runewidth.Truncate(jobName, remainingWidth, "…")
 	}
 
 	return runewidth.Truncate(name, maxWidth, "…")

@@ -25,6 +25,7 @@ type checkRunContextFields struct {
 		StartLine       int
 	}
 	WorkflowName string
+	AppName      string
 }
 
 func makeCheckRunNode(f checkRunContextFields) contextNode {
@@ -94,6 +95,10 @@ func makeCheckRunNode(f checkRunContextFields) contextNode {
 						Name string
 					}
 				}
+				App struct {
+					Name string
+					Slug string
+				}
 			}
 		}{
 			Name:        f.Name,
@@ -124,6 +129,10 @@ func makeCheckRunNode(f checkRunContextFields) contextNode {
 						Name string
 					}
 				}
+				App struct {
+					Name string
+					Slug string
+				}
 			}{
 				WorkflowRun: struct {
 					Workflow struct {
@@ -131,6 +140,13 @@ func makeCheckRunNode(f checkRunContextFields) contextNode {
 					}
 				}{
 					Workflow: struct{ Name string }{Name: f.WorkflowName},
+				},
+				App: struct {
+					Name string
+					Slug string
+				}{
+					Name: f.AppName,
+					Slug: f.AppName,
 				},
 			},
 		},
@@ -150,6 +166,7 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 		wantLen          int
 		wantName         []string
 		wantWorkflowName []string
+		wantAppName      []string
 	}{
 		{
 			name:     "empty nodes returns nil",
@@ -273,6 +290,52 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 			wantName:         []string{"lint"},
 			wantWorkflowName: []string{"CI"},
 		},
+		{
+			name: "GHAS check with AppName but no WorkflowName",
+			nodes: []contextNode{
+				makeCheckRunNode(checkRunContextFields{
+					Name:        "analyze",
+					Status:      "COMPLETED",
+					Conclusion:  "SUCCESS",
+					AppName:     "GitHub Code Scanning",
+				}),
+			},
+			wantLen:          1,
+			wantName:         []string{"analyze"},
+			wantWorkflowName: []string{""},
+			wantAppName:      []string{"GitHub Code Scanning"},
+		},
+		{
+			name: "WorkflowName takes priority over AppName",
+			nodes: []contextNode{
+				makeCheckRunNode(checkRunContextFields{
+					Name:         "build",
+					Status:       "COMPLETED",
+					Conclusion:   "SUCCESS",
+					WorkflowName: "CI",
+					AppName:      "GitHub Actions",
+				}),
+			},
+			wantLen:          1,
+			wantName:         []string{"build"},
+			wantWorkflowName: []string{"CI"},
+			wantAppName:      []string{"GitHub Actions"},
+		},
+		{
+			name: "Third-party app with AppName but no WorkflowName",
+			nodes: []contextNode{
+				makeCheckRunNode(checkRunContextFields{
+					Name:       "Checkov",
+					Status:     "COMPLETED",
+					Conclusion:  "SUCCESS",
+					AppName:     "Bridgecrew",
+				}),
+			},
+			wantLen:          1,
+			wantName:         []string{"Checkov"},
+			wantWorkflowName: []string{""},
+			wantAppName:      []string{"Bridgecrew"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -301,6 +364,16 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 					}
 					if got[i].WorkflowName != wn {
 						t.Errorf("contextNodesToCheckRuns()[%d].WorkflowName = %q, want %q", i, got[i].WorkflowName, wn)
+					}
+				}
+			}
+			if tt.wantAppName != nil {
+				for i, an := range tt.wantAppName {
+					if i >= len(got) {
+						break
+					}
+					if got[i].AppName != an {
+						t.Errorf("contextNodesToCheckRuns()[%d].AppName = %q, want %q", i, got[i].AppName, an)
 					}
 				}
 			}

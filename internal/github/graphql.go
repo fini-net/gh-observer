@@ -23,6 +23,7 @@ type Annotation struct {
 type CheckRunInfo struct {
 	Name         string
 	WorkflowName string
+	AppName      string
 	Summary      string
 	Status       string
 	Conclusion   string
@@ -56,13 +57,17 @@ type contextNode struct {
 				} `graphql:"location"`
 			}
 		} `graphql:"annotations(first: 5)"`
-		CheckSuite struct {
-			WorkflowRun struct {
-				Workflow struct {
-					Name string
-				}
+	CheckSuite struct {
+		WorkflowRun struct {
+			Workflow struct {
+				Name string
 			}
 		}
+		App struct {
+			Name string
+			Slug string
+		}
+	}
 	} `graphql:"... on CheckRun"`
 	StatusContext struct {
 		Context     string
@@ -143,6 +148,7 @@ func contextNodesToCheckRuns(nodes []contextNode) []CheckRunInfo {
 
 		checkRun := node.CheckRunContext
 		workflowName := checkRun.CheckSuite.WorkflowRun.Workflow.Name
+		appName := checkRun.CheckSuite.App.Name
 
 		var startedAt, completedAt *time.Time
 		if !checkRun.StartedAt.IsZero() {
@@ -168,6 +174,7 @@ func contextNodesToCheckRuns(nodes []contextNode) []CheckRunInfo {
 		checkRuns = append(checkRuns, CheckRunInfo{
 			Name:         checkRun.Name,
 			WorkflowName: workflowName,
+			AppName:      appName,
 			Summary:      checkRun.Summary,
 			Status:       strings.ToLower(checkRun.Status),
 			Conclusion:   strings.ToLower(checkRun.Conclusion),
