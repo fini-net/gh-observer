@@ -17,7 +17,6 @@ type checkRunContextFields struct {
 	StartedAt   githubv4.DateTime
 	CompletedAt githubv4.DateTime
 	DetailsURL  string
-	AppSlug     string
 	Annotations []struct {
 		Message         string
 		Path            string
@@ -76,9 +75,6 @@ func makeCheckRunNode(f checkRunContextFields) contextNode {
 			StartedAt   githubv4.DateTime
 			CompletedAt githubv4.DateTime
 			DetailsURL  string `graphql:"detailsUrl"`
-			App         struct {
-				Slug string
-			}
 			Annotations struct {
 				Nodes []struct {
 					Message         string
@@ -107,9 +103,6 @@ func makeCheckRunNode(f checkRunContextFields) contextNode {
 			StartedAt:   f.StartedAt,
 			CompletedAt: f.CompletedAt,
 			DetailsURL:  f.DetailsURL,
-			App: struct{ Slug string }{
-				Slug: f.AppSlug,
-			},
 			Annotations: struct {
 				Nodes []struct {
 					Message         string
@@ -213,49 +206,6 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 			wantLen:          1,
 			wantName:         []string{"legacy-check"},
 			wantWorkflowName: []string{""},
-		},
-		{
-			name: "GHAS check run gets Code scanning workflow name",
-			nodes: []contextNode{
-				makeCheckRunNode(checkRunContextFields{
-					Name:       "Checkov",
-					Status:     "COMPLETED",
-					Conclusion: "SUCCESS",
-					AppSlug:    "github-advanced-security",
-				}),
-			},
-			wantLen:          1,
-			wantName:         []string{"Checkov"},
-			wantWorkflowName: []string{"Code scanning"},
-		},
-		{
-			name: "GHAS zizmor gets Code scanning workflow name",
-			nodes: []contextNode{
-				makeCheckRunNode(checkRunContextFields{
-					Name:       "zizmor",
-					Status:     "COMPLETED",
-					Conclusion: "SUCCESS",
-					AppSlug:    "github-advanced-security",
-				}),
-			},
-			wantLen:          1,
-			wantName:         []string{"zizmor"},
-			wantWorkflowName: []string{"Code scanning"},
-		},
-		{
-			name: "GHAS check with existing workflow name keeps it",
-			nodes: []contextNode{
-				makeCheckRunNode(checkRunContextFields{
-					Name:         "zizmor",
-					Status:       "COMPLETED",
-					Conclusion:   "SUCCESS",
-					AppSlug:      "github-advanced-security",
-					WorkflowName: "GHA security analysis with zizmor",
-				}),
-			},
-			wantLen:          1,
-			wantName:         []string{"zizmor"},
-			wantWorkflowName: []string{"GHA security analysis with zizmor"},
 		},
 		{
 			name: "unknown typename is skipped",
@@ -527,49 +477,6 @@ func TestContextNodesToCheckRuns_ZeroTimestamps(t *testing.T) {
 	}
 	if got[0].CompletedAt != nil {
 		t.Errorf("CompletedAt should be nil for zero timestamp, got %v", got[0].CompletedAt)
-	}
-}
-
-func TestContextNodesToCheckRuns_GHASAppSlug(t *testing.T) {
-	nodes := []contextNode{
-		makeCheckRunNode(checkRunContextFields{
-			Name:       "Checkov",
-			Status:     "COMPLETED",
-			Conclusion: "SUCCESS",
-			AppSlug:    "github-advanced-security",
-		}),
-		makeCheckRunNode(checkRunContextFields{
-			Name:       "zizmor",
-			Status:     "COMPLETED",
-			Conclusion: "SUCCESS",
-			AppSlug:    "github-advanced-security",
-		}),
-		makeCheckRunNode(checkRunContextFields{
-			Name:         "zizmor",
-			Status:       "COMPLETED",
-			Conclusion:   "SUCCESS",
-			AppSlug:      "github-actions",
-			WorkflowName: "GHA security analysis with zizmor",
-		}),
-	}
-
-	got := contextNodesToCheckRuns(nodes)
-
-	if len(got) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(got))
-	}
-
-	if got[0].WorkflowName != "Code scanning" {
-		t.Errorf("GHAS Checkov WorkflowName = %q, want %q", got[0].WorkflowName, "Code scanning")
-	}
-	if got[0].AppSlug != "github-advanced-security" {
-		t.Errorf("GHAS Checkov AppSlug = %q, want %q", got[0].AppSlug, "github-advanced-security")
-	}
-	if got[1].WorkflowName != "Code scanning" {
-		t.Errorf("GHAS zizmor WorkflowName = %q, want %q", got[1].WorkflowName, "Code scanning")
-	}
-	if got[2].WorkflowName != "GHA security analysis with zizmor" {
-		t.Errorf("Actions zizmor WorkflowName = %q, want %q", got[2].WorkflowName, "GHA security analysis with zizmor")
 	}
 }
 

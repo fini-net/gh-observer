@@ -78,7 +78,6 @@ func TestFormatCheckName(t *testing.T) {
 			name: "GHAS code scanning check",
 			check: ghclient.CheckRunInfo{
 				WorkflowName: "Code scanning",
-				AppSlug:      "github-advanced-security",
 				Name:         "Checkov",
 			},
 			want: "Code scanning / Checkov",
