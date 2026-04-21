@@ -23,6 +23,7 @@ type Annotation struct {
 type CheckRunInfo struct {
 	Name         string
 	WorkflowName string
+	AppSlug      string
 	Summary      string
 	Status       string
 	Conclusion   string
@@ -43,6 +44,9 @@ type contextNode struct {
 		StartedAt   githubv4.DateTime
 		CompletedAt githubv4.DateTime
 		DetailsURL  string `graphql:"detailsUrl"`
+		App         struct {
+			Slug string
+		}
 		Annotations struct {
 			Nodes []struct {
 				Message         string
@@ -142,10 +146,11 @@ func contextNodesToCheckRuns(nodes []contextNode) []CheckRunInfo {
 		}
 
 		checkRun := node.CheckRunContext
-		workflowName := ""
+		workflowName := checkRun.CheckSuite.WorkflowRun.Workflow.Name
+		appSlug := checkRun.App.Slug
 
-		if checkRun.CheckSuite.WorkflowRun.Workflow.Name != "" {
-			workflowName = checkRun.CheckSuite.WorkflowRun.Workflow.Name
+		if workflowName == "" && appSlug == "github-advanced-security" {
+			workflowName = "Code scanning"
 		}
 
 		var startedAt, completedAt *time.Time
@@ -172,6 +177,7 @@ func contextNodesToCheckRuns(nodes []contextNode) []CheckRunInfo {
 		checkRuns = append(checkRuns, CheckRunInfo{
 			Name:         checkRun.Name,
 			WorkflowName: workflowName,
+			AppSlug:      appSlug,
 			Summary:      checkRun.Summary,
 			Status:       strings.ToLower(checkRun.Status),
 			Conclusion:   strings.ToLower(checkRun.Conclusion),

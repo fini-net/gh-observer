@@ -74,6 +74,15 @@ func TestFormatCheckName(t *testing.T) {
 			},
 			want: "Build & Deploy / deploy-prod",
 		},
+		{
+			name: "GHAS code scanning check",
+			check: ghclient.CheckRunInfo{
+				WorkflowName: "Code scanning",
+				AppSlug:      "github-advanced-security",
+				Name:         "Checkov",
+			},
+			want: "Code scanning / Checkov",
+		},
 	}
 
 	for _, tt := range tests {
