@@ -20,14 +20,22 @@ slow?"
 
 ## Features
 
-- ⏱️ **Runtime metrics** - Shows elapsed time: `3m 52s` tells you exactly how long checks have been running
-- ⏳ **Queue latency** - Displays wait time: `15s` shows how long GitHub queued the job before starting
-- 🔄 **Real-time updates** - Auto-refreshes every 5s (configurable) without manual polling
-- ⚡ **Startup phases** - Helpful messages like "Waiting for Actions to start..." during the 30-90s GitHub delay
-- 🛡️ **Rate limits** - Backs off automatically when approaching API limits to avoid interruptions
-- 📊 **Historical averages** - Shows average runtime for each job based on recent completed runs, so you know if things are taking longer than usual
-- ⚡ **`--quick` mode** - Skip the historical averages fetch when you just want a fast snapshot
-- ✅ **CI-friendly** - Returns exit codes (0=success, 1=failure) for script automation
+- ⏱️ **Runtime metrics** - Shows elapsed time: `3m 52s` tells you exactly how
+  long checks have been running
+- ⏳ **Queue latency** - Displays wait time: `15s` shows how long GitHub queued
+  the job before starting
+- 🔄 **Real-time updates** - Auto-refreshes every 5s (configurable) without
+  manual polling
+- ⚡ **Startup phases** - Helpful messages like "Waiting for Actions to
+  start..." during the 30-90s GitHub delay
+- 🛡️ **Rate limits** - Backs off automatically when approaching API limits to
+  avoid interruptions
+- 📊 **Historical averages** - Shows average runtime for each job based on
+  recent completed runs, so you know if things are taking longer than usual
+- ⚡ **`--quick` mode** - Skip the historical averages fetch when you just want
+  a fast snapshot
+- ✅ **CI-friendly** - Returns exit codes (0=success, 1=failure) for script
+  automation
 
 ## Example Output
 
