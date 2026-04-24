@@ -15,6 +15,8 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@6c3c2f2c1c457b00c10c4848d6f5491db3b629df # v2.18.0
@@ -30,3 +32,49 @@ jobs:
         with:
           go_version_file: go.mod
           generate_attestations: true
+
+      - name: Generate subject hashes for SLSA provenance
+        id: hash
+        run: |
+          cd dist
+          hashes=$(sha256sum ./*_darwin-* ./*_linux-* ./*_windows-* | base64 -w0)
+          echo "hashes=$hashes" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Sign binaries with cosign (keyless)
+        run: |
+          cd dist
+          for binary in *_darwin-* *_linux-* *_windows-*; do
+            [[ -f "$binary" ]] || continue
+            cosign sign-blob --yes "$binary" \
+              --output-signature "${binary}.sig" \
+              --output-certificate "${binary}.pem"
+          done
+
+      - name: Upload cosign signatures and certificates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          cd dist
+          for sig in *.sig; do
+            [[ -f "$sig" ]] || continue
+            gh release upload "$TAG" "$sig" --clobber
+          done
+          for pem in *.pem; do
+            [[ -f "$pem" ]] || continue
+            gh release upload "$TAG" "$pem" --clobber
+          done
+
+  provenance:
+    needs: release
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: "${{ needs.release.outputs.hashes }}"
+      upload-assets: true
