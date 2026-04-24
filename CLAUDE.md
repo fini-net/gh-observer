@@ -190,6 +190,7 @@ All release binaries include cosign signatures and SLSA provenance:
 The OpenSSF Best Practices requirement states: "When the project has made a release, the project documentation MUST contain instructions to verify the expected identity of the person or process authoring the software release."
 
 Documentation for this is in:
+
 - **SECURITY.md** - Full "Verifying Release Author Identity" section with methods to verify both the process identity (build attestations, SLSA provenance, workflow run) and the person identity (git commit author + DCO trailer, GitHub release author)
 - **README.md** - User-facing "Verifying the Release Author" subsection under "Verifying Release Assets" with copy-paste commands
 
