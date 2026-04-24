@@ -36,6 +36,16 @@ This repo uses `just` for all development tasks:
 - `just test` or `go test ./...` - Run all unit tests
 - `go test ./internal/timing/...` - Run timing tests only
 - `go test ./internal/github/...` - Run GitHub client tests only
+- `go test ./internal/debug/...` - Run debug logger tests only
+
+### Code quality
+
+Pre-commit hooks enforce quality via `.pre-commit-config.yaml`:
+
+- `golangci-lint` - Go linting
+- `shellcheck` - Shell script linting
+- `gitleaks` - Secret scanning
+- Standard hooks (trailing whitespace, EOF fixes)
 
 Unit tests cover timing calculations, log parsing, history fetching, PR parsing, and TUI display/update logic. The TUI rendering and live GitHub API interactions are tested manually by running `just build` and pointing the binary at a real PR.
 
@@ -189,6 +199,7 @@ gh-observer follows a clean architecture with distinct layers:
 3. **TUI layer** (`internal/tui/`) - Implements Bubbletea model/view/update pattern for interactive mode
 4. **Configuration** (`internal/config/`) - Loads user config from `~/.config/gh-observer/config.yaml`
 5. **Timing utilities** (`internal/timing/`) - Calculates queue latency, runtime, and formats durations
+6. **Debug logging** (`internal/debug/`) - Structured debug logging via `slog`; writes to `/tmp/gh-observer-debug/` when enabled via `--debug` / `-d` flag
 
 ### Execution modes
 
@@ -336,7 +347,7 @@ colors:
   queued: 8    # ANSI 256-color code for queued checks
 ```
 
-The `internal/config/config.go` module uses Viper with defaults if config doesn't exist.
+The `internal/config/config.go` module uses Viper with defaults if config doesn't exist. See `.config.example.yaml` for a reference configuration.
 
 ### Exit code behavior
 
@@ -440,4 +451,5 @@ gh-observer && echo "All checks passed!"
 - The application polls every 5s by default, configurable via `refresh_interval`
 - Terminal detection uses `term.IsTerminal(os.Stdout.Fd())` to switch between TUI and snapshot modes
 - `--quick` / `-q` flag skips fetching historical average runtimes (faster startup, no ETA estimation)
+- `--debug` / `-d` flag enables structured debug logging to `/tmp/gh-observer-debug/`
 - `.repo.toml` file configures repo metadata and feature flags (used by just recipes for Claude/Copilot reviews)
