@@ -81,3 +81,8 @@ release_status:
 	gh release view "$release_tag" --json assets --jq '.assets[].name' | while read -r asset; do
 		echo "  ✓ $asset"
 	done
+
+# show openssf scorecard details
+[group('Testing/Security')]
+openssf_scorecard:
+	curl https://api.scorecard.dev/projects/github.com/fini-net/gh-observer | jq .
