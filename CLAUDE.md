@@ -10,6 +10,12 @@ gh-observer is a GitHub PR check watcher CLI tool that improves on `gh pr checks
 
 This repo uses `just` for all development tasks:
 
+### DCO Compliance
+
+Every commit **must** include a `Signed-off-by:` trailer to satisfy the
+Developer Certificate of Origin (DCO) policy. Use `git commit -s` to add it
+automatically. See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for full details.
+
 ### Common development commands
 
 - `just build` - Build the `gh-observer` binary and install locally as gh extension

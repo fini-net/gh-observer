@@ -19,12 +19,56 @@ Output samples and exact error messages will help in debugging.
 Please paste text into the bug report rather than taking a screen shot
 unless a screen shot is the only way to convey your problem.
 
+## Developer Certificate of Origin (DCO)
+
+To ensure that all contributors are legally authorized to submit their
+contributions, this project requires every commit to include a `Signed-off-by:`
+trailer.  This applies to every commit, not just PR merge commits.
+
+Use `git commit -s` to automatically append the trailer:
+
+```bash
+git commit -s -m "your commit message"
+```
+
+This asserts that you agree to the **Developer Certificate of Origin, version
+1.1**:
+
+> By making a contribution to this project, I certify that:
+>
+> 1. The contribution was created in whole or in part by me and I have the
+>    right to submit it under the open source license indicated in the file; or
+> 2. The contribution is based upon previous work that, to the best of my
+>    knowledge, is covered under an appropriate open source license and I have
+>    the right under that license to submit that work with modifications,
+>    whether created in whole or in part by me, under the same open source
+>    license (unless I am permitted to submit under a different license); or
+> 3. The contribution was provided directly to me by some other person who
+>    certified (1), (2) or (3) and I have not modified it.
+> 4. I understand and agree that this project and the contribution are public
+>    and that a record of the contribution (including all personal information
+>    I submit with it) is maintained indefinitely and may be redistributed
+>    consistent with this project or the open source license(s) involved.
+
+Pull requests missing `Signed-off-by:` on any commit will be flagged by the
+[DCO GitHub App](https://github.com/apps/dco) and cannot be merged until the
+trailers are added.
+
+To fix a missing trailer on the most recent commit:
+
+```bash
+git commit --amend -s
+```
+
+To fix multiple commits, use an interactive rebase with `git rebase -i` and
+add `-s` to each pick line, or use `git filter-branch` for broader fixes.
+
 ## Contributing code
 
 - Major changes should probably be discussed in an [issue](../../../issues) first.
 - Fork the repo on github.
 - Make a branch in your branch on your repo.
-- Add commits with good commit messages.
+- Add commits with good commit messages (use `git commit -s` to include the DCO trailer).
 - Open a pull request on github.
 - Check the github actions on your PR to see if there's anything to fix.
 
