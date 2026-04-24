@@ -64,6 +64,33 @@ To fix multiple commits, use an interactive rebase with `git rebase -i` and
 add `-s` to each pick line, or use `git filter-repo` for broader
 history fixes.
 
+## Testing
+
+Please run the tests before submitting a pull request. The `just pr` command
+runs tests automatically, but you can also run them directly:
+
+```bash
+# Run all unit tests
+just test
+# Or
+go test ./...
+
+# Run a specific package
+go test ./internal/timing/...
+go test ./internal/github/...
+go test ./internal/tui/...
+```
+
+Tests also run automatically in CI on every push and pull request via the
+[`ci.yml`](.github/workflows/ci.yml) workflow. If CI tests fail on your PR,
+please address the failures before requesting review.
+
+Unit tests cover timing calculations, GitHub API parsing, TUI logic,
+configuration, and debug logging. When adding new functionality, include
+corresponding test cases in the same package (e.g., changes to
+`internal/timing/calculator.go` should have tests in
+`internal/timing/calculator_test.go`).
+
 ## Contributing code
 
 - Major changes should probably be discussed in an [issue](../../../issues) first.

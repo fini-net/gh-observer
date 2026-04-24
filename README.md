@@ -340,6 +340,37 @@ If live job logs would help your workflow, please
 to let GitHub know this matters. The more voices, the more likely we'll get a
 real-time log streaming API.
 
+## Testing
+
+Tests run automatically in CI on every push to `main` and on every pull
+request (via the [CI workflow](.github/workflows/ci.yml)). They also run
+locally before creating a PR (via the `just pr` hook).
+
+### Running tests locally
+
+```bash
+# Run all unit tests
+just test
+# Or equivalently
+go test ./...
+
+# Run a specific package
+go test ./internal/timing/...
+go test ./internal/github/...
+go test ./internal/tui/...
+go test ./internal/config/...
+go test ./internal/debug/...
+```
+
+### What the tests cover
+
+Unit tests cover timing calculations (queue latency, runtime, duration
+formatting), GitHub API parsing (GraphQL check runs, history fetching, PR URL
+parsing), TUI logic (display formatting, state updates, exit codes),
+configuration loading, and debug logging. TUI rendering and live GitHub API
+interactions are tested manually by running `just build` and pointing
+the binary at a real PR.
+
 ## Development
 
 This project uses [just](https://github.com/casey/just) for task automation:
