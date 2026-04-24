@@ -167,7 +167,7 @@ secrets and credentials used in development, CI/CD, and release processes.
 ### Secrets in Scope
 
 | Secret | Purpose | Storage |
-|--------|---------|---------|
+| -------- | --------- | --------- |
 | `GITHUB_TOKEN` | Auto-provisioned per-workflow token for GitHub Actions | GitHub Actions runtime (automatic) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token for Claude Code Action | GitHub repository secret |
 | `SCORECARD_TOKEN` | (Optional) PAT for OpenSSF Scorecard write access | GitHub repository secret (currently unused) |
