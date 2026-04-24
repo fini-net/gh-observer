@@ -67,6 +67,63 @@ chain security mechanisms:
 See [Verifying Release Assets](../README.md#verifying-release-assets) in the
 README for complete step-by-step verification instructions.
 
+## Verifying Release Author Identity
+
+When the project has made a release, the project documentation MUST contain
+instructions to verify the expected identity of the person or process authoring
+the software release. Releases are authored through an automated process; the
+following methods verify that identity.
+
+### Verifying the Release Process Identity
+
+Releases are created by `just release`, which runs `gh release create` using
+the GitHub CLI authenticated as a repository maintainer. The release workflow
+(`.github/workflows/release.yml`) then builds and signs the binaries. You can
+verify that a release was produced by this authorized process:
+
+1. **Check the release workflow run**: Every release triggers a GitHub Actions
+   workflow run. Visit the release page on GitHub and follow the link to the
+   workflow run that produced the binaries. Confirm the workflow file path is
+   `.github/workflows/release.yml` and the triggering event is a tag push.
+
+2. **Verify build attestations**: GitHub build attestations cryptographically
+   bind each binary to the specific workflow and repository that built it:
+
+   ```bash
+   gh attestation verify darwin-arm64 --owner fini-net
+   ```
+
+   This confirms the binary was built by the `fini-net/gh-observer` release
+   workflow, not by an external or unauthorized process.
+
+3. **Verify SLSA provenance**: The `.intoto.jsonl` provenance attestation
+   provides non-forgeable proof of the build origin, including the source
+   repository, branch, and builder identity. See
+   [Option 3: SLSA Provenance](../README.md#option-3-slsa-provenance) for
+   verification commands.
+
+### Verifying the Release Author Identity
+
+Every commit in the repository includes a `Signed-off-by:` trailer per the
+DCO policy (see [Contributor Legally Authorized Assertion](#contributor-legally-authorized-assertion-dco)
+below). To verify the identity of the person who authored the release:
+
+1. **Check the release tag commit**: View the commit the release tag points to
+   and verify the author and committer identity:
+
+   ```bash
+   git log -1 --format='Author: %an <%ae>%nCommitter: %cn <%ce>%nSigned-off-by: %(trailers:key=Signed-off-by)' v1.8.0
+   ```
+
+2. **Check the GitHub release author**: On the
+   [releases page](https://github.com/fini-net/gh-observer/releases), each
+   release shows the GitHub username of the maintainer who created it. This
+   should match an authorized repository maintainer.
+
+3. **Cross-reference DCO signatures**: The `Signed-off-by:` trailer on each
+   commit in the release range affirms the contributor's legal authorization
+   under the DCO. Verify the trailer identity matches the commit author.
+
 ## Secrets and Credentials Management
 
 This project defines the following policy for storing, accessing, and rotating

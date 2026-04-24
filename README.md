@@ -301,6 +301,27 @@ release assets and compare:
 sha256sum -c checksums.txt
 ```
 
+### Verifying the Release Author
+
+To verify the identity of the person or process that authored the release:
+
+1. **Check the release tag commit** - View the author and DCO signature on the
+   commit the release tag points to:
+
+   ```bash
+   git log -1 --format='Author: %an <%ae>%nSigned-off-by: %(trailers:key=Signed-off-by)' v1.8.0
+   ```
+
+2. **Check the GitHub release author** - Each release on the
+   [releases page](https://github.com/fini-net/gh-observer/releases) shows the
+   GitHub username of the maintainer who created it.
+
+3. **Verify build attestations** - Confirms the binary was produced by the
+   authorized release workflow (see Option 1 above).
+
+See [Verifying Release Author Identity](.github/SECURITY.md#verifying-release-author-identity)
+in the security policy for full details.
+
 ## Known Limitation: Live Logs for Slow Jobs
 
 We'd love to show you live (non-error) logs while your jobs are still running —
