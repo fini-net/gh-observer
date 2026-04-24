@@ -5,10 +5,8 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: read
-  id-token: write
-  attestations: write
+# empty global permissions
+permissions: {}
 
 jobs:
   release:
