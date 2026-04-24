@@ -5,6 +5,12 @@
 See [Design Documentation](../docs/DESIGN.md) for a comprehensive description
 of all actors, actions, and data flows within the system.
 
+## Threat Model and Attack Surface Analysis
+
+See [Threat Model](../docs/THREAT_MODEL.md) for a systematic threat model
+identifying trust boundaries, critical code paths, and a STRIDE analysis of
+potential attacks with their mitigations.
+
 ## Confidential Disclosure
 
 Please email [chicks.net@gmail.com](mailto:chicks.net@gmail.com) with a subject
