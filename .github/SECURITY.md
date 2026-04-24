@@ -53,6 +53,20 @@ description of how the project selects, obtains, and tracks its dependencies.
 - Pre-commit hooks include `gitleaks` for secret scanning and `golangci-lint` for static analysis.
 - GitHub Dependabot is enabled to automatically flag and propose updates for vulnerable dependencies.
 
+## Release Integrity and Authenticity Verification
+
+When the project has made a release, the project documentation MUST include
+instructions to verify the integrity and authenticity of the release assets.
+All release binaries are signed and attested using three complementary supply
+chain security mechanisms:
+
+1. **GitHub Build Attestations** - Verifiable via `gh attestation verify`
+2. **Cosign Keyless Signatures** - Verifiable via `cosign verify-blob`
+3. **SLSA Provenance** - Verifiable via `slsa-verifier`
+
+See [Verifying Release Assets](../README.md#verifying-release-assets) in the
+README for complete step-by-step verification instructions.
+
 ## Secrets and Credentials Management
 
 This project defines the following policy for storing, accessing, and rotating
