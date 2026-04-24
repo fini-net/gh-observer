@@ -10,6 +10,12 @@ gh-observer is a GitHub PR check watcher CLI tool that improves on `gh pr checks
 
 This repo uses `just` for all development tasks:
 
+### DCO Compliance
+
+Every commit **must** include a `Signed-off-by:` trailer to satisfy the
+Developer Certificate of Origin (DCO) policy. Use `git commit -s` to add it
+automatically. See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for full details.
+
 ### Common development commands
 
 - `just build` - Build the `gh-observer` binary and install locally as gh extension
@@ -199,7 +205,7 @@ gh-observer follows a clean architecture with distinct layers:
 3. **TUI layer** (`internal/tui/`) - Implements Bubbletea model/view/update pattern for interactive mode
 4. **Configuration** (`internal/config/`) - Loads user config from `~/.config/gh-observer/config.yaml`
 5. **Timing utilities** (`internal/timing/`) - Calculates queue latency, runtime, and formats durations
-6. **Debug logging** (`internal/debug/`) - Structured debug logging via `slog`; writes to `/tmp/gh-observer-debug/` when enabled via `--debug` / `-d` flag
+6. **Debug logging** (`internal/debug/`) - Structured debug logging via `slog`; writes to `os.TempDir()/gh-observer-debug/` when enabled via `--debug` / `-d` flag
 
 ### Execution modes
 
@@ -451,5 +457,5 @@ gh-observer && echo "All checks passed!"
 - The application polls every 5s by default, configurable via `refresh_interval`
 - Terminal detection uses `term.IsTerminal(os.Stdout.Fd())` to switch between TUI and snapshot modes
 - `--quick` / `-q` flag skips fetching historical average runtimes (faster startup, no ETA estimation)
-- `--debug` / `-d` flag enables structured debug logging to `/tmp/gh-observer-debug/`
+- `--debug` / `-d` flag enables structured debug logging to `os.TempDir()/gh-observer-debug/`
 - `.repo.toml` file configures repo metadata and feature flags (used by just recipes for Claude/Copilot reviews)
