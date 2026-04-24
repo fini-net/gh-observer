@@ -62,14 +62,21 @@ This command:
 
 When a version tag (matching `v*`) is pushed, the release workflow automatically:
 
-1. **Builds cross-platform binaries** for 5 platforms:
-   - `gh-observer_<version>_darwin-amd64` - macOS Intel
-   - `gh-observer_<version>_darwin-arm64` - macOS Apple Silicon
-   - `gh-observer_<version>_linux-amd64` - Linux x86-64
-   - `gh-observer_<version>_linux-arm64` - Linux ARM64
-   - `gh-observer_<version>_windows-amd64.exe` - Windows
+1. **Builds cross-platform binaries** using the `gh-extension-precompile` naming convention (`<os>-<arch>`, no prefix or version):
+   - `darwin-amd64` - macOS Intel
+   - `darwin-arm64` - macOS Apple Silicon
+   - `linux-386` - Linux i386
+   - `linux-amd64` - Linux x86-64
+   - `linux-arm` - Linux ARM
+   - `linux-arm64` - Linux ARM64
+   - `freebsd-386` - FreeBSD i386
+   - `freebsd-amd64` - FreeBSD x86-64
+   - `freebsd-arm64` - FreeBSD ARM64
+   - `windows-386.exe` - Windows i386
+   - `windows-amd64.exe` - Windows x86-64
+   - `windows-arm64.exe` - Windows ARM64
 
-2. **Generates checksums** (`gh-observer_<version>_checksums.txt`)
+2. **Generates checksums**
 
 3. **Creates build attestations** for supply chain security (verifiable via `gh attestation verify`)
 
@@ -109,12 +116,12 @@ gh release view v0.1.0-rc.1
 gh extension install fini-net/gh-observer
 
 # Verify build attestation (macOS example)
-gh attestation verify gh-observer_v0.1.0-rc.1_darwin-arm64 --owner fini-net
+gh attestation verify darwin-arm64 --owner fini-net
 
 # Verify cosign signature (macOS example)
-cosign verify-blob gh-observer_v0.1.0-rc.1_darwin-arm64 \
-  --certificate gh-observer_v0.1.0-rc.1_darwin-arm64.pem \
-  --signature gh-observer_v0.1.0-rc.1_darwin-arm64.sig \
+cosign verify-blob darwin-arm64 \
+  --certificate darwin-arm64.pem \
+  --signature darwin-arm64.sig \
   --certificate-identity=https://github.com/fini-net/gh-observer/.github/workflows/release.yml@refs/tags/v0.1.0-rc.1 \
   --certificate-oidc-issuer=https://token.actions.githubusercontent.com
 ```
@@ -152,7 +159,7 @@ gh extension upgrade gh-observer
 All release binaries include cosign signatures and SLSA provenance:
 
 - **Cosign signatures**: Each binary is signed using keyless (certificate-based) signing via `cosign sign-blob`
-  - Produces `.sig` signature files and `.pem` certificate files per binary
+  - Produces `.sig` signature files and `.pem` certificate files per binary (e.g., `darwin-arm64.sig`, `darwin-arm64.pem`)
   - Verifiable via `cosign verify-blob <binary> --certificate <binary>.pem --signature <binary>.sig --certificate-identity=https://github.com/fini-net/gh-observer/.github/workflows/release.yml@refs/tags/<version> --certificate-oidc-issuer=https://token.actions.githubusercontent.com`
 - **SLSA provenance**: Generated using `slsa-framework/slsa-github-generator` (v2.1.0)
   - Produces `.intoto.jsonl` provenance attestation per release
@@ -168,6 +175,7 @@ All release binaries include cosign signatures and SLSA provenance:
 - **Automatic Go version detection**: Uses `go_version_file: go.mod` to stay in sync with project requirements
 - **Standard build process**: No custom build scripts needed - `go build` works perfectly for this project
 - **Complementary workflows**: The `just release` command creates releases; the GitHub Action builds binaries, signs them, and generates provenance. They work together, not as replacements.
+- **Binary naming convention**: `gh-extension-precompile` names binaries as `<os>-<arch>` (e.g., `darwin-arm64`), **not** `<repo>_<version>_<os>-<arch>`. The signing and SLSA provenance steps use globs like `darwin-*`, `linux-*`, `windows-*` that must match this naming pattern. Using the old-style pattern `*_darwin-*` will fail because no files match it.
 
 ## Architecture
 
