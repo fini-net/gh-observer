@@ -53,6 +53,68 @@ description of how the project selects, obtains, and tracks its dependencies.
 - Pre-commit hooks include `gitleaks` for secret scanning and `golangci-lint` for static analysis.
 - GitHub Dependabot is enabled to automatically flag and propose updates for vulnerable dependencies.
 
+## Secrets and Credentials Management
+
+This project defines the following policy for storing, accessing, and rotating
+secrets and credentials used in development, CI/CD, and release processes.
+
+### Secrets in Scope
+
+| Secret | Purpose | Storage |
+|--------|---------|---------|
+| `GITHUB_TOKEN` | Auto-provisioned per-workflow token for GitHub Actions | GitHub Actions runtime (automatic) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token for Claude Code Action | GitHub repository secret |
+| `SCORECARD_TOKEN` | (Optional) PAT for OpenSSF Scorecard write access | GitHub repository secret (currently unused) |
+
+### Storage
+
+- **No secrets in source code**: Secrets must never be committed to the
+  repository, including hardcoded values in code, configuration files, or
+  documentation.
+- **GitHub Secrets for CI/CD**: All secrets used in GitHub Actions workflows
+  are stored as GitHub repository secrets, which are encrypted at rest and
+  never exposed in logs.
+- **No local secret files**: Developers must not store credentials in
+  unencrypted files within the repository (e.g., `.env` files). The
+  application retrieves the GitHub token at runtime via `GITHUB_TOKEN`
+  environment variable or `gh auth token` — never from a file on disk.
+
+### Access
+
+- **Least-privilege permissions**: Every workflow declares explicit
+  `permissions:` blocks scoped to the minimum required. No workflow uses
+  `permissions: write-all` or broad `contents: write` unless necessary.
+- **No persistent credentials in checkout**: All `actions/checkout` steps use
+  `persist-credentials: false` to prevent the GITHUB_TOKEN from persisting on
+  disk after the checkout step completes.
+- **No secret sharing across workflows**: Each workflow references only the
+  secrets it needs. Secrets are not passed between jobs or workflows unless
+  required by the workflow's purpose.
+- **Environment protection**: The Claude Code workflow runs in the `claude`
+  GitHub environment, providing an additional access gate.
+
+### Rotation
+
+- **`GITHUB_TOKEN`**: Automatically rotated by GitHub Actions on every
+  workflow run. No manual rotation required.
+- **`CLAUDE_CODE_OAUTH_TOKEN`**: Must be rotated by a repository administrator
+  when the token expires, is suspected of compromise, or when the associated
+  OAuth grant is revoked. Set a calendar reminder to review quarterly.
+- **Emergency rotation**: If any secret is suspected of compromise, a
+  repository administrator must revoke and replace it immediately via
+  GitHub repository settings, then file a security issue per the
+  [Confidential Disclosure](#confidential-disclosure) process.
+
+### Detection and Prevention
+
+- **Pre-commit scanning**: `gitleaks` runs as a pre-commit hook to detect
+  accidentally committed secrets before they reach the repository.
+- **GitHub secret scanning**: GitHub's built-in secret scanning is enabled on
+  the repository to detect leaked tokens in pushed commits and PRs.
+- **Workflow hardening**: All workflows use pinned SHA references for third-party
+  actions (not tags), `step-security/harden-runner` for egress auditing, and
+  `persist-credentials: false` on checkout steps.
+
 ## Contributor Legally Authorized Assertion (DCO)
 
 The version control system requires all code contributors to assert that they
