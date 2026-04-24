@@ -37,7 +37,7 @@ jobs:
         id: hash
         run: |
           cd dist
-          hashes=$(sha256sum ./*_darwin-* ./*_linux-* ./*_windows-* | base64 -w0)
+          hashes=$(sha256sum darwin-* linux-* freebsd-* windows-* | base64 -w0)
           echo "hashes=$hashes" >> "$GITHUB_OUTPUT"
 
       - name: Install cosign
@@ -46,7 +46,7 @@ jobs:
       - name: Sign binaries with cosign (keyless)
         run: |
           cd dist
-          for binary in *_darwin-* *_linux-* *_windows-*; do
+          for binary in darwin-* linux-* freebsd-* windows-*; do
             [[ -f "$binary" ]] || continue
             cosign sign-blob --yes "$binary" \
               --output-signature "${binary}.sig" \
