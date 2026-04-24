@@ -215,6 +215,36 @@ secrets and credentials used in development, CI/CD, and release processes.
   actions (not tags), `step-security/harden-runner` for egress auditing, and
   `persist-credentials: false` on checkout steps.
 
+## Permissions and Access Policy
+
+This project requires that code collaborators be reviewed prior to
+receiving escalated permissions to sensitive resources.
+
+### Current Access Model
+
+- **No elevated permissions for external collaborators:** Write, admin,
+  and secret access are not granted to external contributors.
+- **Fork-based contributions:** All external contributions are submitted
+  via pull requests from personal forks. No direct push access to
+  protected branches is granted to anyone outside the maintainer team.
+- **Least-privilege principle:** CI workflows use scoped `permissions:`
+  blocks and `persist-credentials: false` on checkout steps (see
+  [Secrets and Credentials Management](#secrets-and-credentials-management)).
+
+### Granting Elevated Permissions
+
+If elevated permissions (write access, admin access, or access to
+repository secrets) are ever considered for a collaborator, the following
+policy applies:
+
+1. The request must be reviewed by an existing repository maintainer.
+2. Permissions are granted at the minimum scope necessary for the
+   collaborator's role.
+3. Elevated permissions are time-limited where GitHub supports it, or
+   reviewed quarterly otherwise.
+4. When a collaborator's role changes or they become inactive, their
+   elevated permissions are revoked promptly.
+
 ## Contributor Legally Authorized Assertion (DCO)
 
 The version control system requires all code contributors to assert that they
