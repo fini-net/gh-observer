@@ -279,7 +279,9 @@ Built with:
 
 See `CLAUDE.md` for detailed implementation notes.  Read the [linear walkthrough](docs/linear-walkthrough.md)
 to get a detailed walkthrough of the code and to learn why some
-of the design choices were made.
+of the design choices were made.  See [Design Documentation](docs/DESIGN.md)
+for a comprehensive description of all actors, actions, and data flows
+within the system.
 
 ## Contributing
 
