@@ -50,7 +50,8 @@ jobs:
             [[ -f "$binary" ]] || continue
             cosign sign-blob --yes "$binary" \
               --output-signature "${binary}.sig" \
-              --output-certificate "${binary}.pem"
+              --output-certificate "${binary}.pem" \
+              --bundle "${binary}.bundle"
           done
 
       - name: Upload cosign signatures and certificates
@@ -66,6 +67,10 @@ jobs:
           for pem in *.pem; do
             [[ -f "$pem" ]] || continue
             gh release upload "$TAG" "$pem" --clobber
+          done
+          for bundle in *.bundle; do
+            [[ -f "$bundle" ]] || continue
+            gh release upload "$TAG" "$bundle" --clobber
           done
 
   provenance:

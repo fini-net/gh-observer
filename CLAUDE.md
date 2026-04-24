@@ -159,8 +159,9 @@ gh extension upgrade gh-observer
 All release binaries include cosign signatures and SLSA provenance:
 
 - **Cosign signatures**: Each binary is signed using keyless (certificate-based) signing via `cosign sign-blob`
-  - Produces `.sig` signature files and `.pem` certificate files per binary (e.g., `darwin-arm64.sig`, `darwin-arm64.pem`)
+  - Produces `.sig` signature files, `.pem` certificate files, and `.bundle` bundle files per binary (e.g., `darwin-arm64.sig`, `darwin-arm64.pem`, `darwin-arm64.bundle`)
   - Verifiable via `cosign verify-blob <binary> --certificate <binary>.pem --signature <binary>.sig --certificate-identity=https://github.com/fini-net/gh-observer/.github/workflows/release.yml@refs/tags/<version> --certificate-oidc-issuer=https://token.actions.githubusercontent.com`
+  - Also verifiable via `cosign verify-blob <binary> --bundle <binary>.bundle --certificate-identity=https://github.com/fini-net/gh-observer/.github/workflows/release.yml@refs/tags/<version> --certificate-oidc-issuer=https://token.actions.githubusercontent.com`
 - **SLSA provenance**: Generated using `slsa-framework/slsa-github-generator` (v2.1.0)
   - Produces `.intoto.jsonl` provenance attestation per release
   - Provides non-forgeable proof of build origin (SLSA Build Level 3)
