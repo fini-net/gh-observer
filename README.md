@@ -382,4 +382,4 @@ within the system.
 ## Support & Security
 
 - [Getting Support](.github/SUPPORT.md)
-- [Security Policy](.github/SECURITY.md)
+- [Security Policy](.github/SECURITY.md) (including [release support scope and end-of-life policy](.github/SECURITY.md#release-support))

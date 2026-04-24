@@ -12,6 +12,35 @@ line like "$REPONAME SECURITY issue: $SUMMARY".  Details on when you experienced
 the issue, logs, and other context are appreciated to assist with effective
 triaging of your issue.
 
+## Release Support
+
+### Scope and Duration of Support
+
+gh-observer follows a rolling release model. Each new release includes the
+latest features, bug fixes, and security updates. We support the most recent
+release only — there are no long-term support (LTS) branches or parallel
+maintenance streams.
+
+The scope of support for each release includes:
+
+- Security vulnerability fixes
+- Bug fixes that affect core functionality (PR check watching, TUI rendering,
+  API interaction)
+- Compatibility updates for GitHub API changes and Go version requirements
+
+We do not backport fixes to older releases. Users should upgrade to the latest
+release to receive all fixes.
+
+### End of Security Updates
+
+A release version no longer receives security updates as soon as a newer
+release is published. There is no fixed support window — the only supported
+version is the latest release at any given time.
+
+If a security vulnerability is reported, we will fix it in the next release.
+We do not issue patches for older versions. Users must upgrade to the latest
+release to obtain security fixes.
+
 ## Security Updates
 
 End users should expect new releases to include any security updates and there
