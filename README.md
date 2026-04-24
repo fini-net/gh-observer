@@ -342,9 +342,11 @@ real-time log streaming API.
 
 ## Testing
 
-Tests run automatically in CI on every push to `main` and on every pull
-request (via the [CI workflow](.github/workflows/ci.yml)). They also run
-locally before creating a PR (via the `just pr` hook).
+All major changes (including new features, bug fixes, and behavior changes)
+must add or update tests that verify the changed functionality. Tests run
+automatically in CI on every push to `main` and on every pull request (via the
+[CI workflow](.github/workflows/ci.yml)). They also run locally before creating
+a PR (via the `just pr` hook).
 
 ### Running tests locally
 

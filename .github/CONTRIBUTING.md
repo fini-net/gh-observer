@@ -66,6 +66,11 @@ history fixes.
 
 ## Testing
 
+**Test policy:** All major changes to this project (including new features, bug
+fixes, and behavior changes) must add or update tests that verify the changed
+functionality. Pull requests for major changes without corresponding test
+updates may be asked to add tests before merging.
+
 Please run the tests before submitting a pull request. The `just pr` command
 runs tests automatically, but you can also run them directly:
 
@@ -86,10 +91,10 @@ Tests also run automatically in CI on every push and pull request via the
 please address the failures before requesting review.
 
 Unit tests cover timing calculations, GitHub API parsing, TUI logic,
-configuration, and debug logging. When adding new functionality, include
-corresponding test cases in the same package (e.g., changes to
-`internal/timing/calculator.go` should have tests in
-`internal/timing/calculator_test.go`).
+configuration, and debug logging. When adding new functionality or changing
+existing behavior, add or update the corresponding test cases in the same
+package (e.g., changes to `internal/timing/calculator.go` should have tests
+in `internal/timing/calculator_test.go`).
 
 ## Contributing code
 
