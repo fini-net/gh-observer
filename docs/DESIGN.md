@@ -27,7 +27,7 @@ system.
 | GitHub REST API | External Service | Provides PR metadata, workflow run details, and job history via REST endpoints |
 | GitHub GraphQL API | External Service | Provides check runs with workflow names, annotations, and pagination via a single GraphQL query |
 | GitHub CLI (`gh`) | External Process | Provides authentication token and PR context detection when invoked as a subprocess |
-| Debug Logger | Software | Optional structured logger (`slog`) that writes to `/tmp/gh-observer-debug/` when `--debug` is set |
+| Debug Logger | Software | Optional structured logger (`slog`) that writes to `os.TempDir()/gh-observer-debug/` when `--debug` is set |
 | Timing Calculator | Software | Computes queue latency, runtime, and final duration from GitHub timestamps |
 | Display Formatter | Software | Aligns columns, renders hyperlinks, maps check status to icons and colors |
 | History Fetcher | Software | Two-phase async component that discovers workflow IDs and fetches historical job duration averages |
@@ -43,7 +43,7 @@ Actions are the operations each actor performs within the system.
 | ------ | ------- | ------ |
 | Invoke CLI | Run `gh-observer`, `gh-observer 123`, or `gh-observer https://github.com/owner/repo/pull/123` | Starts the application |
 | Pass `--quick` / `-q` flag | CLI argument | Skips historical average runtime fetching |
-| Pass `--debug` / `-d` flag | CLI argument | Enables structured debug logging to `/tmp/gh-observer-debug/` |
+| Pass `--debug` / `-d` flag | CLI argument | Enables structured debug logging to `os.TempDir()/gh-observer-debug/` |
 | Press `q` | Keyboard input in TUI | Quits the application |
 | Press `Ctrl+C` | Keyboard input in TUI | Quits the application |
 | Provide PR number | CLI positional argument | Watches specific PR on the current repository |
@@ -96,7 +96,7 @@ Actions are the operations each actor performs within the system.
 | ------ | --------- | ------- |
 | Fetch PR metadata | `GET /repos/{owner}/{repo}/pulls/{pr_number}` | Get PR title, head SHA, created_at |
 | Fetch commit timestamp | `GET /repos/{owner}/{repo}/commits/{sha}` | Get committer date for queue latency |
-| Resolve workflow run | `GET /repos/{owner},{repo}/actions/runs/{run_id}` | Map run ID to workflow ID |
+| Resolve workflow run | `GET /repos/{owner}/{repo}/actions/runs/{run_id}` | Map run ID to workflow ID |
 | List workflow runs | `GET /repos/{owner}/{repo}/actions/workflows/{id}/runs` | Get recent completed runs for averages |
 | List workflow jobs | `GET /repos/{owner}/{repo}/actions/runs/{id}/jobs` | Get job durations for averaging |
 
@@ -120,7 +120,7 @@ Actions are the operations each actor performs within the system.
 
 | Action | Trigger | Effect |
 | ------ | ------- | ------ |
-| Enable logging | `--debug` flag set | Creates `/tmp/gh-observer-debug/debug-<timestamp>.log`, configures `slog` at Debug level |
+| Enable logging | `--debug` flag set | Creates `debug-<timestamp>.log` under the system temp directory in `gh-observer-debug/` (i.e., `filepath.Join(os.TempDir(), "gh-observer-debug")`), configures `slog` at Debug level |
 | Write log entry | `debug.Log()` called throughout codebase | Writes structured key-value pairs via `slog.Debug()` |
 | Noop | `--debug` flag not set | All `debug.Log()` calls are no-ops (guarded by `enabled` bool) |
 
@@ -387,7 +387,7 @@ startup delay:
   `api.github.com` and `github.com`. It listens on no ports.
 - **No file writes** (except debug): The application does not modify any files
   on the user's system unless `--debug` is enabled, in which case it writes
-  debug logs to `/tmp/gh-observer-debug/`.
+  debug logs under the OS temporary directory (e.g., `os.TempDir()/gh-observer-debug/`).
 - **Subprocess execution**: Only `gh` is executed as a subprocess, and only for
   authentication and PR detection. No user-supplied arguments are passed to
   shell execution.

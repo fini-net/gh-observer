@@ -61,7 +61,8 @@ git commit --amend -s
 ```
 
 To fix multiple commits, use an interactive rebase with `git rebase -i` and
-add `-s` to each pick line, or use `git filter-branch` for broader fixes.
+add `-s` to each pick line, or use `git filter-repo` for broader
+history fixes.
 
 ## Contributing code
 
