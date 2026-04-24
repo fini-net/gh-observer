@@ -1,5 +1,10 @@
 # Project Security Policy
 
+## Design Documentation
+
+See [Design Documentation](../docs/DESIGN.md) for a comprehensive description
+of all actors, actions, and data flows within the system.
+
 ## Confidential Disclosure
 
 Please email [chicks.net@gmail.com](mailto:chicks.net@gmail.com) with a subject
