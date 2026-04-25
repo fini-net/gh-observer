@@ -11,6 +11,47 @@ import (
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
+// canTrustCompletion returns true when we can trust that all checks have truly
+// finished, preventing premature exit when fast checks (e.g., DCO) complete
+// before other jobs have even appeared in the API response (issue #236).
+func canTrustCompletion(m *Model) bool {
+	if m.firstCheckSeenAt.IsZero() {
+		return false
+	}
+
+	checkCount := len(m.checkRuns)
+	elapsed := time.Since(m.firstCheckSeenAt)
+
+	if elapsed >= startupGracePeriod {
+		debug.Log("can trust completion: grace period elapsed",
+			"elapsed", elapsed, "check_count", checkCount, "peak", m.peakCheckCount,
+			"expected", m.expectedCheckCount)
+		return true
+	}
+
+	if m.peakCheckCount > checkCount {
+		debug.Log("cannot trust completion: checks disappeared",
+			"current", checkCount, "peak", m.peakCheckCount)
+		return false
+	}
+
+	if m.expectedCheckCount > 0 {
+		ratio := float64(checkCount) / float64(m.expectedCheckCount)
+		if ratio >= minCheckAppearanceRatio {
+			debug.Log("can trust completion: appearance ratio met",
+				"ratio", ratio, "check_count", checkCount, "expected", m.expectedCheckCount)
+			return true
+		}
+		debug.Log("cannot trust completion: appearance ratio not met",
+			"ratio", ratio, "check_count", checkCount, "expected", m.expectedCheckCount)
+		return false
+	}
+
+	debug.Log("cannot trust completion: no expected count, grace period not elapsed",
+		"elapsed", elapsed, "check_count", checkCount)
+	return false
+}
+
 // Init initializes the model
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -109,10 +150,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.pendingWorkflowFetch, msg.WorkflowID)
 		m.fetchedWorkflowIDs[msg.WorkflowID] = true
 
-		if msg.Err == nil && msg.Averages != nil {
-			// Merge averages into model
-			maps.Copy(m.jobAverages, msg.Averages)
-		}
+	if msg.Err == nil && msg.Averages != nil {
+		maps.Copy(m.jobAverages, msg.Averages)
+		m.expectedCheckCount = len(m.jobAverages)
+	}
 
 		// Check if all workflow fetches are done
 		if len(m.pendingWorkflowFetch) == 0 {
@@ -150,7 +191,11 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	m.lastUpdate = time.Now()
 	m.err = nil
 
-	debug.Log("checks update", "count", len(msg.CheckRuns), "rate_limit_remaining", msg.RateLimitRemaining)
+	if len(msg.CheckRuns) > m.peakCheckCount {
+		m.peakCheckCount = len(msg.CheckRuns)
+	}
+
+	debug.Log("checks update", "count", len(msg.CheckRuns), "peak", m.peakCheckCount, "expected", m.expectedCheckCount, "rate_limit_remaining", msg.RateLimitRemaining)
 
 	if m.firstCheckSeenAt.IsZero() && len(msg.CheckRuns) > 0 {
 		m.firstCheckSeenAt = time.Now()
@@ -186,10 +231,9 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if allChecksComplete(m.checkRuns) {
+	if allChecksComplete(m.checkRuns) && canTrustCompletion(m) {
 		m.exitCode = determineExitCode(m.checkRuns)
 		m.checksComplete = true
-		// Only quit if no pending/dispatched workflow fetches
 		if !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 {
 			m.quitting = true
 			cmds = append(cmds, tea.Quit)

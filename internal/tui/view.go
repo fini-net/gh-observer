@@ -80,6 +80,24 @@ func (m Model) View() tea.View {
 
 	b.WriteString("\n")
 
+	if allChecksComplete(m.checkRuns) && !canTrustCompletion(&m) {
+		b.WriteString(m.styles.Queued.Render("  ⏳ Waiting for more checks to appear...\n"))
+		if m.expectedCheckCount > 0 {
+			fmt.Fprintf(&b, m.styles.Queued.Render("  Seen %d of ~%d expected checks (%d%% threshold: %d%%)\n"),
+				len(m.checkRuns), m.expectedCheckCount,
+				int(minCheckAppearanceRatio*100),
+				int(float64(len(m.checkRuns))/float64(m.expectedCheckCount)*100))
+		} else {
+			elapsed := time.Since(m.firstCheckSeenAt)
+			remaining := startupGracePeriod - elapsed
+			if remaining > 0 {
+				fmt.Fprintf(&b, m.styles.Queued.Render("  Grace period: %s remaining\n"),
+					timing.FormatDuration(remaining))
+			}
+		}
+		b.WriteString("\n")
+	}
+
 	if m.rateLimitRemaining < minRateLimitForFetch {
 		b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
 	}

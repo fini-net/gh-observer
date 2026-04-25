@@ -10,4 +10,7 @@ const (
 	minRateLimitForFetch = 100
 
 	historyFetchDelay = 10 * time.Second
+
+	minCheckAppearanceRatio = 0.3
+	startupGracePeriod      = 2 * time.Minute
 )

@@ -60,6 +60,10 @@ type Model struct {
 
 	// Set when all checks complete; used to defer quit until avgFetchDone
 	checksComplete bool
+
+	// Premature exit prevention (issue #236)
+	expectedCheckCount int
+	peakCheckCount     int
 }
 
 // NewModel creates a new TUI model
