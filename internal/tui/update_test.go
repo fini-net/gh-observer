@@ -179,46 +179,49 @@ func TestDetermineExitCode(t *testing.T) {
 
 func TestHandleChecksUpdate(t *testing.T) {
 	tests := []struct {
-		name             string
-		msg              ChecksUpdateMsg
-		rateLimit        int
-		wantErr          bool
-		wantExitCode     int
-		wantQuitting     bool
-		wantChecksStored bool
+		name               string
+		msg                ChecksUpdateMsg
+		rateLimit          int
+		expectedCheckCount int
+		wantErr            bool
+		wantExitCode       int
+		wantQuitting       bool
+		wantChecksStored   bool
 	}{
 		{
-			name:             "error in message stores error and returns nil cmd",
-			msg:              ChecksUpdateMsg{Err: context.Canceled},
-			wantErr:          true,
-			wantExitCode:     0,
-			wantQuitting:     false,
-			wantChecksStored: false,
+			name:               "error in message stores error and returns nil cmd",
+			msg:                ChecksUpdateMsg{Err: context.Canceled},
+			wantErr:            true,
+			wantExitCode:       0,
+			wantQuitting:       false,
+			wantChecksStored:   false,
 		},
 		{
-			name:             "successful update stores check runs",
-			msg:              ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress", Conclusion: ""}}, RateLimitRemaining: 5000},
-			rateLimit:        5000,
-			wantErr:          false,
-			wantChecksStored: true,
+			name:               "successful update stores check runs",
+			msg:                ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress", Conclusion: ""}}, RateLimitRemaining: 5000},
+			rateLimit:          5000,
+			wantErr:            false,
+			wantChecksStored:   true,
 		},
 		{
-			name:             "all checks complete sets exit code 0 on success",
-			msg:              ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}, RateLimitRemaining: 5000},
-			rateLimit:        5000,
-			wantErr:          false,
-			wantExitCode:     0,
-			wantQuitting:     true,
-			wantChecksStored: true,
+			name:               "all checks complete sets exit code 0 on success",
+			msg:                ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}, RateLimitRemaining: 5000},
+			rateLimit:          5000,
+			expectedCheckCount: 1,
+			wantErr:            false,
+			wantExitCode:       0,
+			wantQuitting:       true,
+			wantChecksStored:   true,
 		},
 		{
-			name:             "all checks complete sets exit code 1 on failure",
-			msg:              ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure"}}, RateLimitRemaining: 5000},
-			rateLimit:        5000,
-			wantErr:          false,
-			wantExitCode:     1,
-			wantQuitting:     true,
-			wantChecksStored: true,
+			name:               "all checks complete sets exit code 1 on failure",
+			msg:                ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure"}}, RateLimitRemaining: 5000},
+			rateLimit:          5000,
+			expectedCheckCount: 1,
+			wantErr:            false,
+			wantExitCode:       1,
+			wantQuitting:       true,
+			wantChecksStored:   true,
 		},
 		{
 			name:             "in_progress checks do not quit",
@@ -228,12 +231,34 @@ func TestHandleChecksUpdate(t *testing.T) {
 			wantQuitting:     false,
 			wantChecksStored: true,
 		},
+		{
+			name:               "premature exit blocked when expected count not met",
+			msg:                ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}, RateLimitRemaining: 5000},
+			rateLimit:          5000,
+			expectedCheckCount: 10,
+			wantErr:            false,
+			wantExitCode:       0,
+			wantQuitting:       false,
+			wantChecksStored:   true,
+		},
+		{
+			name:               "no expected count blocks premature exit",
+			msg:                ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}, RateLimitRemaining: 5000},
+			rateLimit:          5000,
+			expectedCheckCount: 0,
+			wantErr:            false,
+			wantExitCode:       0,
+			wantQuitting:       false,
+			wantChecksStored:   true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := makeModel()
 			m.rateLimitRemaining = tt.rateLimit
+			m.expectedCheckCount = tt.expectedCheckCount
+			m.firstCheckSeenAt = time.Now().Add(-15 * time.Second)
 
 			model, _ := m.handleChecksUpdate(tt.msg)
 			result := model.(*Model)
@@ -649,6 +674,138 @@ func TestJobAveragesPartialMsg(t *testing.T) {
 
 		if !result.quitting {
 			t.Error("should quit when checks complete and fetches finish")
+		}
+	})
+
+	t.Run("updates expectedCheckCount from averages", func(t *testing.T) {
+		m := makeModel()
+		m.pendingWorkflowFetch = map[int64]bool{456: true}
+		m.fetchedWorkflowIDs = make(map[int64]bool)
+		m.jobAverages = make(map[string]time.Duration)
+		m.avgFetchStartTime = time.Now().Add(-1 * time.Second)
+
+		msg := JobAveragesPartialMsg{
+			WorkflowID: 456,
+			Averages: map[string]time.Duration{
+				"build": time.Minute,
+				"test":  2 * time.Minute,
+				"lint":  30 * time.Second,
+			},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if result.expectedCheckCount != 3 {
+			t.Errorf("expectedCheckCount = %d, want 3", result.expectedCheckCount)
+		}
+	})
+}
+
+func TestCanTrustCompletion(t *testing.T) {
+	now := time.Now()
+
+	t.Run("returns false when firstCheckSeenAt is zero", func(t *testing.T) {
+		m := makeModel()
+		m.firstCheckSeenAt = time.Time{}
+		if canTrustCompletion(m) {
+			t.Error("should not trust completion when firstCheckSeenAt is zero")
+		}
+	})
+
+	t.Run("returns true after grace period elapsed even with no expected count", func(t *testing.T) {
+		m := makeModel()
+		m.firstCheckSeenAt = now.Add(-3 * time.Minute)
+		m.checkRuns = []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}
+		m.peakCheckCount = 1
+		if !canTrustCompletion(m) {
+			t.Error("should trust completion after grace period")
+		}
+	})
+
+	t.Run("returns false when expected count not met within ratio", func(t *testing.T) {
+		m := makeModel()
+		m.firstCheckSeenAt = now.Add(-30 * time.Second)
+		m.checkRuns = []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}
+		m.peakCheckCount = 1
+		m.expectedCheckCount = 10
+		if canTrustCompletion(m) {
+			t.Error("should not trust completion when only 1/10 checks seen (10% < 30% threshold)")
+		}
+	})
+
+	t.Run("returns true when appearance ratio met", func(t *testing.T) {
+		m := makeModel()
+		m.firstCheckSeenAt = now.Add(-30 * time.Second)
+		checks := make([]ghclient.CheckRunInfo, 4)
+		for i := range checks {
+			checks[i] = ghclient.CheckRunInfo{Status: "completed", Conclusion: "success"}
+		}
+		m.checkRuns = checks
+		m.peakCheckCount = 4
+		m.expectedCheckCount = 10
+		if !canTrustCompletion(m) {
+			t.Error("should trust completion when 4/10 checks seen (40% >= 30% threshold)")
+		}
+	})
+
+	t.Run("returns true when expected count equals check count", func(t *testing.T) {
+		m := makeModel()
+		m.firstCheckSeenAt = now.Add(-30 * time.Second)
+		m.checkRuns = []ghclient.CheckRunInfo{
+			{Status: "completed", Conclusion: "success"},
+			{Status: "completed", Conclusion: "success"},
+		}
+		m.peakCheckCount = 2
+		m.expectedCheckCount = 2
+		if !canTrustCompletion(m) {
+			t.Error("should trust completion when all expected checks present")
+		}
+	})
+
+	t.Run("returns false when peak count exceeds current count", func(t *testing.T) {
+		m := makeModel()
+		m.firstCheckSeenAt = now.Add(-30 * time.Second)
+		m.checkRuns = []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}
+		m.peakCheckCount = 5
+		m.expectedCheckCount = 10
+		if canTrustCompletion(m) {
+			t.Error("should not trust completion when checks disappeared (peak 5 > current 1)")
+		}
+	})
+
+	t.Run("returns false with no expected count before grace period", func(t *testing.T) {
+		m := makeModel()
+		m.firstCheckSeenAt = now.Add(-30 * time.Second)
+		m.checkRuns = []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}
+		m.peakCheckCount = 1
+		m.expectedCheckCount = 0
+		if canTrustCompletion(m) {
+			t.Error("should not trust completion with no expected count before grace period")
+		}
+	})
+}
+
+func TestPeakCheckCountTracking(t *testing.T) {
+	t.Run("trackCheckCount updates peakCheckCount", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		m.expectedCheckCount = 3
+		m.firstCheckSeenAt = time.Now().Add(-15 * time.Second)
+
+		msg := ChecksUpdateMsg{
+			CheckRuns: []ghclient.CheckRunInfo{
+				{Status: "in_progress"},
+				{Status: "in_progress"},
+				{Status: "in_progress"},
+			},
+			RateLimitRemaining: 5000,
+		}
+
+		model, _ := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if result.peakCheckCount != 3 {
+			t.Errorf("peakCheckCount = %d, want 3", result.peakCheckCount)
 		}
 	})
 }
