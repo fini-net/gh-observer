@@ -150,10 +150,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.pendingWorkflowFetch, msg.WorkflowID)
 		m.fetchedWorkflowIDs[msg.WorkflowID] = true
 
-	if msg.Err == nil && msg.Averages != nil {
-		maps.Copy(m.jobAverages, msg.Averages)
-		m.expectedCheckCount = len(m.jobAverages)
-	}
+		if msg.Err == nil && msg.Averages != nil {
+			maps.Copy(m.jobAverages, msg.Averages)
+			m.expectedCheckCount = len(m.jobAverages)
+		}
 
 		// Check if all workflow fetches are done
 		if len(m.pendingWorkflowFetch) == 0 {
