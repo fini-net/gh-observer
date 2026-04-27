@@ -32,7 +32,7 @@ jobs:
           ./vex/generate-vex.sh -o vex/openvex.json
 
       - name: Upload VEX document
-        uses: actions/upload-artifact@634409f3c875e636440082c5c2e3e65e4e9e8d63 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: openvex-document
           path: vex/openvex.json
