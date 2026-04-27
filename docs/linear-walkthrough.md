@@ -28,13 +28,16 @@ The application uses [Cobra](https://github.com/spf13/cobra) for CLI argument pa
 - **Arguments**: Maximum of 1 argument (optional PR number or full PR URL)
 - **Flags**:
   - `--quick` / `-q`: Skip fetching historical average runtimes
+  - `--debug` / `-d`: Enable structured debug logging to `os.TempDir()/gh-observer-debug/`
 - **Execution**: Calls `run(args)` and exits with the returned exit code
 
 ```go
 var quickFlag bool
+var debugFlag bool
 
 func init() {
     rootCmd.Flags().BoolVarP(&quickFlag, "quick", "q", false, "Skip fetching historical average runtimes")
+    rootCmd.Flags().BoolVarP(&debugFlag, "debug", "d", false, "Log suppressed errors and internal state to a file")
 }
 
 var rootCmd = &cobra.Command{
@@ -56,20 +59,21 @@ Supports watching checks on external repositories by passing a full PR URL:
 
 **Design Decision**: The exit code is captured and passed to `os.Exit()` explicitly. This allows the TUI to clean up properly before exiting.
 
-### URL Support (`main.go:203-239`)
+### URL Support (`main.go:168-191`)
 
 The application accepts either a PR number or a full GitHub PR URL:
 
 ```go
 if len(args) > 0 {
     arg := args[0]
-    // Check if argument is a PR URL
-    if strings.Contains(arg, "github.com") && strings.Contains(arg, "/pull/") {
-        owner, repo, prNumber, err = ghclient.ParsePRURL(arg)
-    } else {
-        // PR number provided: use gh pr view to get correct repo (handles forks)
-        n, err := strconv.Atoi(arg)
+    if owner, repo, prNumber, err = ghclient.ParsePRURL(arg); err == nil {
+        // valid PR URL
+    } else if n, convErr := strconv.Atoi(arg); convErr == nil {
+        // numeric PR number
         prNumber, owner, repo, err = ghclient.GetPRWithRepo(n)
+    } else {
+        fmt.Fprintf(os.Stderr, "Invalid PR number or URL: %s\n", arg)
+        return 1
     }
 } else {
     // Auto-detect from current branch (correctly handles forks)
@@ -81,11 +85,26 @@ if len(args) > 0 {
 
 **Fork Handling**: The code uses `GetPRWithRepo()` and `GetCurrentPRWithRepo()` instead of `ParseOwnerRepo()` to correctly identify the repository for forked PRs. The local git remote might point to a fork, but the PR lives in the upstream repository.
 
-### Main Run Function (`main.go:185-270`)
+### Main Run Function (`main.go:137-223`)
 
 The `run()` function orchestrates all initialization and mode selection:
 
-#### Step 1: Configuration Loading (`main.go:188-193`)
+#### Step 1: Debug Logging Setup (`main.go:140-147`)
+
+```go
+if debugFlag {
+    if err := debug.Enable(); err != nil {
+        fmt.Fprintf(os.Stderr, "Failed to enable debug logging: %v\n", err)
+        return 1
+    }
+    defer debug.Close()
+    fmt.Fprintf(os.Stderr, "Debug log: %s\n", debug.LogPath())
+}
+```
+
+When `--debug` is enabled, structured debug logging via `slog` writes to `os.TempDir()/gh-observer-debug/`. Debug statements throughout the codebase log key events like check updates, rate limit backoff, and completion trust decisions.
+
+#### Step 2: Configuration Loading (`main.go:149-154`)
 
 ```go
 cfg, err := config.Load()
@@ -105,7 +124,7 @@ Calls `internal/config/config.go` which:
 4. Falls back to defaults if config file missing
 5. Unmarshals into `Config` struct
 
-#### Step 2: Style Creation (`main.go:196-201`)
+#### Step 3: Style Creation (`main.go:157-162`)
 
 ```go
 styles := tui.NewStyles(
@@ -118,17 +137,26 @@ styles := tui.NewStyles(
 
 Creates Lipgloss styles for rendering colored output. See `internal/tui/styles.go` for implementation.
 
-#### Step 3: PR Resolution (`main.go:203-238`)
+#### Step 4: PR Resolution (`main.go:164-191`)
 
 Two scenarios:
 
 **Explicit PR number**: Uses `GetPRWithRepo(n)` to get owner/repo from the PR URL (handles forks correctly).
 
-**Explicit PR URL**: Uses `ParsePRURL(url)` to extract owner/repo/number directly.
+**Explicit PR URL**: Uses `ParsePRURL(url)` to extract owner/repo/number directly — this uses the same approach as `main.go:170` where `ParsePRURL` is tried first:
+
+```go
+if owner, repo, prNumber, err = ghclient.ParsePRURL(arg); err == nil {
+    // valid PR URL
+} else if n, convErr := strconv.Atoi(arg); convErr == nil {
+    // numeric PR number
+    prNumber, owner, repo, err = ghclient.GetPRWithRepo(n)
+}
+```
 
 **Auto-detection**: Uses `GetCurrentPRWithRepo()` which calls `gh pr view --json number,url` and extracts the correct repository from the PR URL.
 
-#### Step 4: Authentication (`main.go:240-245`)
+#### Step 5: Authentication (`main.go:193-198`)
 
 ```go
 token, err := ghclient.GetToken()
@@ -140,7 +168,7 @@ Located at `internal/github/client.go`. Token acquisition strategy:
 2. **Fallback**: Run `gh auth token` command
 3. **Error**: Return message if both fail
 
-#### Step 5: Mode Selection (`main.go:197-201`)
+#### Step 6: Mode Selection (`main.go:200-204`)
 
 ```go
 if !term.IsTerminal(int(os.Stdout.Fd())) {
@@ -174,9 +202,9 @@ func NewClient(ctx context.Context) (*github.Client, error) {
 }
 ```
 
-Uses `google/go-github/v84` library with OAuth2 token authentication.
+Uses `google/go-github/v85` library with OAuth2 token authentication.
 
-### GraphQL Client Creation (`internal/github/graphql.go:94-98`)
+### GraphQL Client Creation (`internal/github/graphql.go`)
 
 Check run fetching uses GraphQL for efficiency:
 
@@ -197,7 +225,7 @@ client := githubv4.NewClient(httpClient)
 
 Snapshot mode runs when stdout is not a terminal (e.g., scripts, CI, redirected output).
 
-### Implementation (`main.go:50-183`)
+### Implementation (`main.go:50-135`)
 
 #### Step 1: Fetch PR Metadata
 
@@ -286,13 +314,13 @@ if check.Status == "completed" {
 
 TUI mode runs when stdout is a terminal, providing real-time updates.
 
-### Model Creation (`main.go:204`)
+### Model Creation (`main.go:207`)
 
 ```go
 model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag)
 ```
 
-Located at `internal/tui/model.go:74-96`. Initializes the Bubbletea model:
+The `type Model struct` definition (`internal/tui/model.go:12-67`) holds all TUI state:
 
 ```go
 type Model struct {
@@ -326,6 +354,13 @@ type Model struct {
     noAvg                   bool
     firstCheckSeenAt        time.Time
     
+    // Set when all checks complete; used to defer quit until avgFetchDone
+    checksComplete bool
+
+    // Premature exit prevention (issue #236)
+    expectedCheckCount int
+    peakCheckCount     int
+    
     // UI state
     spinner         spinner.Model
     startTime       time.Time
@@ -336,7 +371,6 @@ type Model struct {
     // Exit tracking
     exitCode int
     quitting bool
-    checksComplete bool
     
     // Error state
     err error
@@ -346,7 +380,11 @@ type Model struct {
 }
 ```
 
-### Program Initialization (`main.go:257-262`)
+The `NewModel(...)` constructor (`internal/tui/model.go:70-92`) initializes the Bubbletea model with defaults.
+
+**Premature Exit Prevention**: `expectedCheckCount` tracks how many distinct job names the history fetch has discovered (set from `len(m.jobAverages)` each time a partial result arrives). `peakCheckCount` tracks the maximum number of checks seen in any single poll. These fields power the `canTrustCompletion()` function that prevents exiting when fast checks (like DCO) complete before slower checks have even appeared in the API response.
+
+### Program Initialization (`main.go:210-211`)
 
 ```go
 p := tea.NewProgram(model)
@@ -399,13 +437,6 @@ type ChecksUpdateMsg struct {        // Check runs updated
     Err                error
 }
 
-type JobAveragesMsg struct {         // Historical averages received
-    Averages              map[string]time.Duration
-    NewRunIDToWorkflowID  map[int64]int64
-    NewFetchedWorkflowIDs []int64
-    Err                   error
-}
-
 type WorkflowsDiscoveredMsg struct {  // Workflow discovery complete
     NewRunIDToWorkflowID map[int64]int64
     WorkflowIDsToFetch   []int64
@@ -423,155 +454,99 @@ type ErrorMsg struct {               // Error occurred
 }
 ```
 
-### Update Function (`internal/tui/update.go:23-114`)
+### Update Function (`internal/tui/update.go`)
 
 The `Update()` method handles all incoming messages:
 
-#### Message: Keyboard Input (`update.go:25-30`)
+#### Premature Exit Prevention (`update.go:14-53`)
+
+The `canTrustCompletion()` function prevents premature exit when fast checks (like DCO) complete before other jobs have appeared in the API response (issue #236):
 
 ```go
-case tea.KeyMsg:
-    switch msg.String() {
-    case "q", "ctrl+c":
+func canTrustCompletion(m *Model) bool {
+    if m.firstCheckSeenAt.IsZero() {
+        return false
+    }
+
+    checkCount := len(m.checkRuns)
+    elapsed := time.Since(m.firstCheckSeenAt)
+
+    // After grace period, trust completion regardless
+    if elapsed >= startupGracePeriod {
+        return true
+    }
+
+    // If checks disappeared (current < peak), don't trust
+    if m.peakCheckCount > checkCount {
+        return false
+    }
+
+    // If we have expected count from history, check appearance ratio
+    if m.expectedCheckCount > 0 {
+        ratio := float64(checkCount) / float64(m.expectedCheckCount)
+        if ratio >= minCheckAppearanceRatio {
+            return true
+        }
+        return false
+    }
+
+    // No expected count and grace period not elapsed
+    return false
+}
+```
+
+**Three-tier trust logic**:
+
+1. **Grace period elapsed** (`startupGracePeriod` = 2 minutes): Always trust completion
+2. **Appearance ratio met** (`minCheckAppearanceRatio` = 30%): Trust if we've seen enough of the expected checks
+3. **Checks disappearing** (current count < peak): Never trust — some checks vanished from the API
+
+The `expectedCheckCount` is derived from `len(m.jobAverages)` after each `JobAveragesPartialMsg`, since each job name in the historical averages represents a check that should eventually appear.
+
+#### Message: Check Runs Updated (`update.go`)
+
+Now includes premature exit prevention logic:
+
+```go
+if len(msg.CheckRuns) > m.peakCheckCount {
+    m.peakCheckCount = len(msg.CheckRuns)
+}
+```
+
+And the completion check gates on `canTrustCompletion()`:
+
+```go
+if allChecksComplete(m.checkRuns) && canTrustCompletion(m) {
+    m.exitCode = determineExitCode(m.checkRuns)
+    m.checksComplete = true
+    // Only quit if no pending/dispatched workflow fetches
+    if !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 {
         m.quitting = true
-        return m, tea.Quit
+        cmds = append(cmds, tea.Quit)
     }
+    return m, tea.Batch(cmds...)
+}
 ```
 
-#### Message: Poll Timer (`update.go:37-48`)
+#### Message: Partial Averages Received (updated)
 
-```go
-case TickMsg:
-    if m.rateLimitRemaining < rateBackoffThreshold {
-        return m, tick(m.refreshInterval * 3)  // Back off
-    }
-    
-    return m, tea.Batch(
-        fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber),
-        tick(m.refreshInterval),
-    )
-```
-
-**Rate Limiting**: Uses constant `rateBackoffThreshold` (10) from `internal/tui/constants.go`.
-
-#### Message: PR Info Received (`update.go:50-62`)
-
-```go
-case PRInfoMsg:
-    if msg.Err != nil {
-        m.err = msg.Err
-        return m, tea.Quit
-    }
-    
-    m.prTitle = msg.Title
-    m.headSHA = msg.HeadSHA
-    m.prCreatedAt = msg.CreatedAt
-    m.headCommitTime = msg.HeadCommitTime
-    
-    return m, fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber)
-```
-
-#### Message: Check Runs Updated (`update.go:64-66`)
-
-Delegates to `handleChecksUpdate()` for clarity:
-
-```go
-case ChecksUpdateMsg:
-    return m.handleChecksUpdate(msg)
-```
-
-#### Message: Job Averages Received (`update.go:67-89`)
-
-```go
-case JobAveragesMsg:
-    m.avgFetchPending = false
-    m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
-
-    if msg.Err != nil {
-        m.avgFetchErr = msg.Err
-    } else {
-        maps.Copy(m.jobAverages, msg.Averages)
-        maps.Copy(m.runIDToWorkflowID, msg.NewRunIDToWorkflowID)
-        for _, wfID := range msg.NewFetchedWorkflowIDs {
-            m.fetchedWorkflowIDs[wfID] = true
-        }
-    }
-
-    if m.checksComplete {
-        m.quitting = true
-        return m, tea.Quit
-    }
-    return m, nil
-```
-
-**Streamed Fetching**: This message (now deprecated) was used for batch fetching. Current code uses `WorkflowsDiscoveredMsg` and `JobAveragesPartialMsg` for streaming.
-
-#### Message: Workflows Discovered (`update.go:91-127`)
-
-```go
-case WorkflowsDiscoveredMsg:
-    if msg.Err != nil {
-        m.avgFetchPending = false
-        m.avgFetchErr = msg.Err
-    } else {
-        // Add new run→workflow mappings to cache
-        maps.Copy(m.runIDToWorkflowID, msg.NewRunIDToWorkflowID)
-        // Track pending workflow fetches and dispatch them immediately
-        var workflowCmds []tea.Cmd
-        for _, wfID := range msg.WorkflowIDsToFetch {
-            if !m.dispatchedWorkflowFetch[wfID] {
-                m.pendingWorkflowFetch[wfID] = true
-                m.dispatchedWorkflowFetch[wfID] = true
-                workflowCmds = append(workflowCmds, fetchWorkflowHistory(m.ctx, m.owner, m.repo, wfID))
-            }
-        }
-        // If no new fetches, discovery phase is complete
-        if len(workflowCmds) == 0 {
-            m.avgFetchPending = false
-            if len(m.pendingWorkflowFetch) == 0 {
-                m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
-            }
-        }
-        // ...
-    }
-```
-
-**Two-Phase Approach**: Discovery phase maps run IDs to workflow IDs, then dispatches individual workflow history fetches.
-
-#### Message: Partial Averages Received (`update.go:129-152`)
+The handler now updates `expectedCheckCount` from the historical averages:
 
 ```go
 case JobAveragesPartialMsg:
-    // Remove from pending set
     delete(m.pendingWorkflowFetch, msg.WorkflowID)
     m.fetchedWorkflowIDs[msg.WorkflowID] = true
 
     if msg.Err == nil && msg.Averages != nil {
-        // Merge averages into model
         maps.Copy(m.jobAverages, msg.Averages)
+        m.expectedCheckCount = len(m.jobAverages)
     }
-
-    // Check if all workflow fetches are done
-    if len(m.pendingWorkflowFetch) == 0 {
-        // Discovery phase complete - record duration and clear error on success
-        m.avgFetchPending = false
-        m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
-        if msg.Err == nil {
-            m.avgFetchErr = nil
-        }
-        if m.checksComplete {
-            m.quitting = true
-            return m, tea.Quit
-        }
-    }
-    return m, nil
+    // ...
 ```
 
-**Incremental Merging**: Each workflow's averages are merged as they arrive.
+### handleChecksUpdate (`internal/tui/update.go`)
 
-### handleChecksUpdate (`internal/tui/update.go:163-217`)
-
-The check update logic includes streaming historical average fetching:
+The check update logic includes streaming historical average fetching and premature exit prevention:
 
 ```go
 func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
@@ -585,6 +560,11 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
     m.rateLimitRemaining = msg.RateLimitRemaining
     m.lastUpdate = time.Now()
     m.err = nil
+
+    // Track peak check count for premature exit prevention
+    if len(msg.CheckRuns) > m.peakCheckCount {
+        m.peakCheckCount = len(msg.CheckRuns)
+    }
 
     var cmds []tea.Cmd
 
@@ -603,7 +583,7 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
         cmds = append(cmds, cmd)
     }
 
-    if allChecksComplete(m.checkRuns) {
+    if allChecksComplete(m.checkRuns) && canTrustCompletion(m) {
         m.exitCode = determineExitCode(m.checkRuns)
         m.checksComplete = true
         // Only quit if no pending/dispatched workflow fetches
@@ -624,6 +604,7 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 2. **Streaming Discovery**: Uses `discoverWorkflows()` to find workflow IDs, then dispatches individual `fetchWorkflowHistory()` calls
 3. **Pending Tracking**: Tracks `pendingWorkflowFetch` and `dispatchedWorkflowFetch` maps to coordinate concurrent fetches
 4. **Exit Coordination**: Waits for all workflow fetches to complete before quitting
+5. **Premature Exit Prevention**: `canTrustCompletion()` gates the exit decision, preventing exit when checks appear complete but more are expected
 
 ### Check Sorting (`internal/tui/display.go:250-268`)
 
@@ -647,7 +628,7 @@ func SortCheckRuns(checks []ghclient.CheckRunInfo) {
 
 **Sorting Priority**: duration (shortest first) → status (in_progress first) → name (alphabetical)
 
-### Exit Code Determination (`internal/tui/update.go:359-366`)
+### Exit Code Determination (`internal/tui/update.go`)
 
 ```go
 func determineExitCode(checks []ghclient.CheckRunInfo) int {
@@ -662,11 +643,27 @@ func determineExitCode(checks []ghclient.CheckRunInfo) int {
 
 Uses `FailureConclusion()` from `internal/github/conclusion.go` to check for failure states.
 
+### Completion Gate: `canTrustCompletion()`
+
+Before exiting, the TUI verifies that all checks have truly completed using `canTrustCompletion()` (`internal/tui/update.go:14-53`):
+
+```go
+if allChecksComplete(m.checkRuns) && canTrustCompletion(m) {
+    // Safe to exit
+}
+```
+
+This prevents premature exit when fast checks (e.g., DCO) complete before slow checks have appeared in the API response. The function uses three tiers:
+
+1. **Grace period** (`startupGracePeriod` = 2 minutes): After this time, completion is always trusted
+2. **Appearance ratio** (`minCheckAppearanceRatio` = 30%): If `expectedCheckCount` is known from history, trust when `currentCount / expectedCount >= 0.3`
+3. **Peak tracking**: If `currentCount < peakCheckCount`, checks have disappeared and completion cannot be trusted
+
 ---
 
 ## 6. GitHub API Layer Deep Dive
 
-### GraphQL Query Structure (`internal/github/graphql.go:35-91`)
+### GraphQL Query Structure (`internal/github/graphql.go`)
 
 The GraphQL query mirrors the structure used by `gh pr checks`:
 
@@ -702,6 +699,10 @@ query($owner: String!, $repo: String!, $prNumber: Int!) {
                                             workflowRun {
                                                 workflow { name }
                                             }
+                                            app {
+                                                name
+                                                slug
+                                            }
                                         }
                                     }
                                     ... on StatusContext {
@@ -721,6 +722,27 @@ query($owner: String!, $repo: String!, $prNumber: Int!) {
     rateLimit { remaining }
 }
 ```
+
+**App Name Detection**: The `checkSuite.app` field was added to detect GitHub Advanced Security (GHAS) checks and third-party apps (like Checkov) that don't have a `workflowRun`. The `AppName` field in `CheckRunInfo` stores this value, and the display layer uses it as a fallback prefix when `WorkflowName` is empty — so "analyze" from GitHub Code Scanning renders as "GitHub Code Scanning / analyze" instead of just "analyze".
+
+### CheckRunInfo Structure (`internal/github/graphql.go`)
+
+```go
+type CheckRunInfo struct {
+    Name         string
+    WorkflowName string    // From checkSuite.workflowRun.workflow.name
+    AppName      string    // From checkSuite.app.name (GHAS, third-party apps)
+    Summary      string
+    Status       string
+    Conclusion   string
+    StartedAt    *time.Time
+    CompletedAt  *time.Time
+    DetailsURL   string
+    Annotations  []Annotation
+}
+```
+
+The `AppName` field captures the GitHub App name from `checkSuite.app.name`. This is used by `FormatCheckName` as a fallback when `WorkflowName` is empty, allowing non-Actions checks (like GitHub Code Scanning, Checkov) to display as "GitHub Code Scanning / analyze" instead of just "analyze".
 
 ### PR Metadata Fetching (`internal/github/pr.go:144-170`)
 
@@ -821,7 +843,7 @@ func FetchWorkflowHistory(
 6. Each `JobAveragesPartialMsg` merges results incrementally
 7. When `pendingWorkflowFetch` is empty, discovery phase completes
 
-**Incremental Caching**: The `runIDToWorkflowID`, `fetchedWorkflowIDs`, `pendingWorkflowFetch`, and `dispatchedWorkflowFetch` maps prevent redundant API calls across polling cycles.
+**Incremental Caching**: The `runIDToWorkflowID`, `fetchedWorkflowIDs`, `pendingWorkflowFetch`, and `dispatchedWorkflowFetch` maps prevent redundant API calls across polling cycles. Additionally, `expectedCheckCount` (derived from `len(m.jobAverages)`) feeds into the `canTrustCompletion()` premature exit prevention system.
 
 ### Helper Modules
 
@@ -915,6 +937,9 @@ const (
     minRateLimitForFetch = 100
 
     historyFetchDelay = 10 * time.Second
+
+    minCheckAppearanceRatio = 0.3
+    startupGracePeriod      = 2 * time.Minute
 )
 ```
 
@@ -925,52 +950,36 @@ const (
 - `rateBackoffThreshold`: Remaining API calls before tripling poll interval
 - `minRateLimitForFetch`: Minimum rate limit to fetch historical averages
 - `historyFetchDelay`: Delay before starting historical average fetch (prevents premature API calls during check startup)
+- `minCheckAppearanceRatio`: Minimum ratio of seen checks to expected checks (30%) before trusting completion (prevents premature exit when only fast checks like DCO have appeared)
+- `startupGracePeriod`: Maximum time to wait before trusting completion regardless of check counts (2 minutes)
 
-### View Function (`internal/tui/view.go:14-94`)
+### View Function (`internal/tui/view.go`)
 
-Renders the entire UI every frame, including historical averages status:
+Renders the entire UI every frame, including historical averages status and premature exit prevention messages:
 
 ```go
 func (m Model) View() tea.View {
     // ... header with PR title and averages status
     
-    var updatedLine string
-    if !m.headCommitTime.IsZero() {
-        timeSincePush := time.Since(m.headCommitTime)
-        updatedLine = fmt.Sprintf("Updated %s ago  •  Pushed %s ago",
-            timing.FormatDuration(timeSinceUpdate),
-            timing.FormatDuration(timeSincePush))
-    }
+    // ... check run rendering with error boxes
     
-    // Add historical averages status
-    if !m.noAvg {
-        isFetching := m.avgFetchPending || len(m.pendingWorkflowFetch) > 0
-        if isFetching {
-            // Fetch in progress - show elapsed time
-            elapsed := time.Since(m.avgFetchStartTime)
-            updatedLine += m.styles.Running.Render(fmt.Sprintf("  •  Fetching historical averages... (%s)", timing.FormatDuration(elapsed)))
-        } else if m.avgFetchErr != nil {
-            // Fetch failed
-            updatedLine += m.styles.Queued.Render("  •  Historical averages unavailable")
-        } else if m.avgFetchLastDuration > 0 {
-            // Fetch succeeded - show workflow count and last fetch duration
-            wfCount := len(m.fetchedWorkflowIDs)
-            updatedLine += m.styles.Info.Render(fmt.Sprintf("  •  Historical averages ready (%d workflows, %s)", wfCount, timing.FormatDuration(m.avgFetchLastDuration)))
+    // Premature exit prevention message
+    if allChecksComplete(m.checkRuns) && !canTrustCompletion(&m) {
+        b.WriteString(m.styles.Queued.Render("  ⏳ Waiting for more checks to appear...\n"))
+        if m.expectedCheckCount > 0 {
+            fmt.Fprintf(&b, m.styles.Queued.Render("  Seen %d of ~%d expected checks (%d%% threshold: %d%%)\n"),
+                len(m.checkRuns), m.expectedCheckCount,
+                int(minCheckAppearanceRatio*100),
+                int(float64(len(m.checkRuns))/float64(m.expectedCheckCount)*100))
+        } else {
+            elapsed := time.Since(m.firstCheckSeenAt)
+            remaining := startupGracePeriod - elapsed
+            if remaining > 0 {
+                fmt.Fprintf(&b, m.styles.Queued.Render("  Grace period: %s remaining\n"),
+                    timing.FormatDuration(remaining))
+            }
         }
-    }
-    
-    // Column headers now include 4th column
-    headerQueue, headerName, headerDuration, headerAvg := FormatHeaderColumns(widths)
-    b.WriteString(m.styles.Header.Render(fmt.Sprintf("%s   %s  %s  %s\n", headerQueue, headerName, headerDuration, headerAvg)))
-    
-    for _, check := range m.checkRuns {
-        checkLine := m.renderCheckRun(check, widths)
-        b.WriteString(checkLine)
-        
-        // Error context for failed checks
-        if check.Conclusion == "failure" || check.Conclusion == "timed_out" {
-            b.WriteString(m.renderErrorBox(check, widths))
-        }
+        b.WriteString("\n")
     }
     
     // Rate limit warning
@@ -980,7 +989,9 @@ func (m Model) View() tea.View {
 }
 ```
 
-### Header Format (`internal/tui/display.go:218-234`)
+**Premature Exit Display**: When all visible checks are complete but `canTrustCompletion()` returns false, the TUI shows a "Waiting for more checks to appear..." message with either the appearance ratio (if `expectedCheckCount` is available from history) or a grace period countdown. This prevents the user from seeing a brief "all passed" state followed by new checks appearing.
+
+### Header Format (`internal/tui/display.go`)
 
 ```go
 func FormatHeaderColumns(widths ColumnWidths) (string, string, string, string) {
@@ -995,9 +1006,33 @@ func FormatHeaderColumns(widths ColumnWidths) (string, string, string, string) {
 **Column Headers**:
 
 - "Start" (was "Queue") - Queue latency
-- "Workflow/Job" - Check name
+- "Workflow/Job" - Check name (may show "App / Job" for GHAS or third-party checks)
 - "ThisRun" - Current run duration
 - "HistAvg" - Historical average duration
+
+### Check Name Formatting (`internal/tui/display.go`)
+
+`FormatCheckName` now supports three tiers of name formatting:
+
+```go
+func FormatCheckName(check ghclient.CheckRunInfo) string {
+    if check.WorkflowName != "" {
+        return fmt.Sprintf("%s / %s", check.WorkflowName, check.Name)
+    }
+    if check.AppName != "" {
+        return fmt.Sprintf("%s / %s", check.AppName, check.Name)
+    }
+    return check.Name
+}
+```
+
+**Display Format** - Check names are shown with the following priority:
+
+1. **Workflow / Job**: For GitHub Actions workflow runs (e.g., "CI / test")
+2. **App / Job**: For GitHub Advanced Security or third-party app checks without a workflow (e.g., "GitHub Code Scanning / analyze", "Bridgecrew / Checkov")
+3. **Job only**: For legacy checks without workflow or app context (e.g., "Checkov")
+
+`FormatCheckNameWithTruncate` follows the same priority for truncation, preserving the prefix and truncating only the job name.
 
 ### Error Annotation Display (`internal/tui/view.go:96-130`)
 
@@ -1075,6 +1110,16 @@ if m.rateLimitRemaining < rateBackoffThreshold {
 2. **2-3 minutes**: "Still waiting" warning
 3. **>3 minutes**: "No checks found" (likely no workflows)
 
+### Premature Exit Prevention (Issue #236)
+
+When fast checks (like DCO) complete before slower checks have appeared in the API response, the TUI prevents premature exit using `canTrustCompletion()`:
+
+1. **Grace period**: After `startupGracePeriod` (2 minutes), completion is always trusted
+2. **Appearance ratio**: If `expectedCheckCount` is available from historical averages, the check count must reach `minCheckAppearanceRatio` (30%) of expected
+3. **Peak tracking**: If the current check count is less than `peakCheckCount` (meaning checks disappeared), completion is never trusted
+
+The TUI displays a visual "Waiting for more checks to appear..." message during this phase, showing either the appearance ratio or the grace period countdown.
+
 ---
 
 ## 10. Data Flow Diagrams
@@ -1130,19 +1175,20 @@ main.go:185 run()
 ### TUI Mode Flow
 
 ```text
-main.go:204 (TUI mode)
+main.go:207 (TUI mode)
     │
-    ├── tui.NewModel()                              [internal/tui/model.go:74]
+    ├── tui.NewModel()                              [internal/tui/model.go:70]
     │   └── Returns: Model{ctx, token, owner, repo, prNumber, spinner, ...}
     │       - Initializes empty maps: jobAverages, runIDToWorkflowID, 
     │         fetchedWorkflowIDs, pendingWorkflowFetch, dispatchedWorkflowFetch
+    │       - expectedCheckCount = 0, peakCheckCount = 0
     │
     ├── tea.NewProgram(model)
     │   └── Creates program with model
     │
     └── p.Run()                                     [Blocking event loop]
         │
-        └── model.Init()                            [internal/tui/update.go:14]
+        └── model.Init()                            [internal/tui/update.go:56]
             │
             ├── Returns: tea.Batch(
             │       spinner.Tick,
@@ -1167,10 +1213,18 @@ main.go:204 (TUI mode)
                 ├── [ChecksUpdateMsg received]
                 │   └── handleChecksUpdate()
                 │       ├── SortCheckRuns() by duration
+                │       ├── Track peakCheckCount (max checks seen)
                 │       ├── Track firstCheckSeenAt (when checks first appear)
                 │       ├── Check: elapsed >= historyFetchDelay OR allComplete?
                 │       │   └── YES: Dispatch discoverWorkflows()
-                │       └── Check completion → exit (if no pending fetches)
+                │       ├── Check: allChecksComplete && canTrustCompletion?
+                │       │   ├── canTrustCompletion checks:
+                │       │   │   1. Grace period elapsed? → trust
+                │       │   │   2. Checks disappeared (current < peak)? → don't trust
+                │       │   │   3. Appearance ratio >= 30%? → trust
+                │       │   │   4. No expected count & no grace period? → don't trust
+                │       │   └── If trusted: set exitCode, mark checksComplete
+                │       └── If not trusted: display "Waiting for more checks..."
                 │
                 ├── [WorkflowsDiscoveredMsg received]
                 │   ├── Store: runIDToWorkflowID mappings
@@ -1184,11 +1238,8 @@ main.go:204 (TUI mode)
                 │   ├── Remove from: pendingWorkflowFetch
                 │   ├── Mark in: fetchedWorkflowIDs
                 │   ├── Merge averages into: jobAverages
+                │   ├── Update: expectedCheckCount = len(jobAverages)
                 │   └── If pendingWorkflowFetch empty: discovery complete
-                │
-                ├── [JobAveragesMsg received]         [Legacy batch approach]
-                │   ├── Store averages in model
-                │   └── If checks complete: quit
                 │
                 ├── [spinner.TickMsg received]
                 │   └── Update spinner animation
@@ -1273,6 +1324,10 @@ func allChecksComplete(checks []ghclient.CheckRunInfo) bool {
 
 **Critical Edge Case**: Empty check list returns `false`, preventing premature exit during startup phase.
 
+### Premature Exit Prevention
+
+Even when `allChecksComplete()` returns `true`, the TUI applies an additional `canTrustCompletion()` gate (see [Completion Gate](#completion-gate-cantrustcompletion)) to prevent exiting before all expected checks have appeared. When completion can't be trusted, the TUI displays "Waiting for more checks to appear..." with either an appearance ratio or grace period countdown.
+
 ### Clean Shutdown
 
 TUI mode exits cleanly by:
@@ -1300,5 +1355,7 @@ gh-observer demonstrates several best practices:
 8. **Fork support**: Correctly identifies upstream repository for forked PRs
 9. **Delayed fetching**: Waits 10 seconds after first checks appear before fetching historical averages
 10. **Concurrent coordination**: Uses pending/dispatched tracking to coordinate multiple async fetches
+11. **Premature exit prevention**: Uses `canTrustCompletion()` with grace period, appearance ratio, and peak tracking to prevent exiting when fast checks complete before others appear
+12. **GHAS and third-party app detection**: Uses `AppName` from `checkSuite.app` to provide meaningful names for non-Actions checks like GitHub Code Scanning and Bridgecrew
 
 The codebase follows the Elm Architecture pattern through Bubbletea, making the state management predictable and testable. The linear execution flow from initialization through polling to exit is clear and well-structured.
