@@ -205,6 +205,76 @@ License compliance is verified by:
 - If no suitable alternative exists for a non-compliant dependency, the
   maintainer documents the exception and the justification in this section.
 
+## SAST Remediation Threshold Policy
+
+This policy defines the thresholds for remediating Static Application Security
+Testing (SAST) findings from code analysis and configuration scanning tools.
+
+### SAST Tools in Use
+
+| Tool | Scope | Trigger |
+| ---- | ----- | ------- |
+| [CodeQL](.github/workflows/codeql.yml) | Go source code security vulnerabilities and coding errors | Push to `main`, PRs to `main`, weekly schedule (Monday 00:00 UTC) |
+| [Checkov](.github/workflows/checkov.yml) | Infrastructure-as-code and configuration misconfigurations | Push to `main`, PRs to `main`, manual dispatch |
+| [golangci-lint](.pre-commit-config.yaml) | Go static analysis (pre-commit hook) | Every commit |
+
+### SAST Finding Remediation Thresholds
+
+SAST findings are triaged by severity using the following thresholds:
+
+| Severity | Remediation Timeline | Method |
+| -------- | -------------------- | ------ |
+| Critical | Within 48 hours | Immediate fix or disabling the affected code path; hotfix release if needed |
+| High | Within 7 days | Fix in next working session; PR must address before merge |
+| Medium | Within 30 days | Tracked via GitHub code scanning alert; addressed in next maintenance cycle |
+| Low | Within 90 days | Addressed during regular maintenance; dismissed with documented justification if not applicable |
+
+### SAST Finding Detection and Response Process
+
+1. **Automated detection**: CodeQL runs on every push to `main`, every pull
+   request, and weekly via the [CodeQL workflow](.github/workflows/codeql.yml).
+   Checkov runs on every push to `main`, every pull request, and on demand via
+   the [Checkov workflow](.github/workflows/checkov.yml). Both upload results to
+   GitHub code scanning.
+
+2. **Triage**: When a SAST finding is detected, it is assessed for accuracy and
+   applicability. False positives are dismissed with a documented justification
+   in the GitHub code scanning alert. True positives are classified by severity
+   and assigned for remediation.
+
+3. **Remediation**: The finding is fixed within the timeline above. For CodeQL
+   findings, this typically involves modifying the affected source code. For
+   Checkov findings, this typically involves updating configuration files. If a
+   finding is a true positive but cannot be fixed immediately, a mitigation is
+   documented in the alert and the finding is tracked to closure.
+
+4. **Verification**: After remediation, the next CI run confirms the finding is
+   resolved. CodeQL findings that reappear after dismissal are re-triaged
+   rather than automatically re-dismissed.
+
+### Dismissing False Positives
+
+SAST tools may produce false positives. A finding may be dismissed only with a
+documented justification in the GitHub code scanning alert. Acceptable
+justifications include:
+
+- **Not applicable**: The code path is unreachable in production or the
+  vulnerability pattern does not apply to the project's usage.
+- **False positive**: The tool incorrectly flagged code that is not vulnerable.
+- **Risk accepted**: The finding is acknowledged but the risk is accepted based
+  on project context (requires explicit maintainer approval).
+
+Dismissed findings are reviewed quarterly to ensure the justification remains
+valid.
+
+### Scope Limitations
+
+This policy covers SAST findings from CodeQL (Go source code) and Checkov
+(configuration and IaC). Dependency vulnerability findings are handled under
+the [SCA Remediation Threshold Policy](#sca-remediation-threshold-policy) above.
+Secret scanning findings are handled under
+[Secrets and Credentials Management](#secrets-and-credentials-management).
+
 ## Dependency Management
 
 When the project has made a release, the project documentation MUST include a
