@@ -9,6 +9,7 @@ import? '.just/claude.just'
 import? '.just/copilot.just'
 import? '.just/repo-toml.just'
 import? '.just/template-sync.just'
+import? '.just/vex.just'
 
 # list recipes (default works without naming it)
 [group('Utility')]

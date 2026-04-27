@@ -93,3 +93,10 @@ compliance_check:
     else
         echo "{{RED}}[gh] You do NOT have branch protection enabled.  Living dangerously, are we?{{NORMAL}}"
     fi
+
+    # Check for VEX document (OpenSSF best practice: non-exploitability accounting)
+    if [[ -f vex/openvex.json ]]; then
+        echo "{{GREEN}}You have a VEX document, accounting for non-exploitable vulnerabilities.{{NORMAL}}"
+    else
+        echo "{{RED}}You do NOT have a VEX document.  Run 'just vex_generate' to create one.{{NORMAL}}"
+    fi

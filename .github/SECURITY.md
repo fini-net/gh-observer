@@ -64,6 +64,72 @@ We are unaware of any security risks particular to this software that you
 should be aware of.  Please let us know if we missed anything or forgot to
 update this section in too long.
 
+## Vulnerability Exploitability eXchange (VEX)
+
+While the project is active, any vulnerabilities in software components that
+do not affect the project are accounted for in a VEX document, augmenting the
+vulnerability report with non-exploitability details. gh-observer uses
+[OpenVEX](https://openvex.dev/) to publish machine-readable statements about
+which vulnerabilities are not exploitable in this project.
+
+### How VEX Documents Are Generated
+
+VEX documents are generated automatically from `govulncheck` call-graph
+analysis, which determines whether vulnerable code paths in dependencies are
+actually reached by gh-observer:
+
+- **Automated generation**: The `vex/generate-vex.sh` script runs
+  `govulncheck -json` and converts findings into OpenVEX format.
+  Vulnerabilities that govulncheck determines are not called by the project
+  are marked as `not_affected` with the justification
+  `vulnerable_code_not_in_execute_path`.
+
+- **CI workflow**: The `.github/workflows/vex.yml` workflow regenerates the
+  VEX document weekly (Mondays at 10:30 UTC), on every release, and on
+  demand via `workflow_dispatch`. The resulting document is uploaded as a
+  workflow artifact with 90-day retention.
+
+- **Manual additions**: Maintainers can add manual VEX statements for
+  vulnerabilities that require human analysis beyond what govulncheck can
+  determine automatically:
+
+  ```bash
+  just vex_add CVE-2025-12345 "vulnerable_code_not_in_execute_path" \
+    "govulncheck shows this is not called"
+  ```
+
+### VEX Document Location
+
+- **Repository**: `vex/openvex.json` in the repository root
+- **CI artifacts**: Uploaded as `openvex-document` artifact by the VEX
+  workflow
+- **Format**: [OpenVEX v0.2.0](https://openvex.dev/ns/v0.2.0)
+
+### Justifications Used
+
+VEX statements in gh-observer use the following OpenVEX justifications:
+
+| Justification | When Used |
+| --- | --- |
+| `vulnerable_code_not_in_execute_path` | govulncheck determines the vulnerable code is imported but no call path from gh-observer reaches it |
+| `vulnerable_code_not_present` | The vulnerable code has been removed or patched in the dependency version used |
+| `inline_mitigations_already_exist` | gh-observer includes its own mitigations that prevent exploitation |
+| `component_not_present` | The vulnerable component is not included in gh-observer's build |
+
+### Local VEX Operations
+
+```bash
+# Generate or update the VEX document
+just vex_generate
+
+# View the current VEX document
+just vex_show
+
+# Add a manual not_affected statement
+just vex_add CVE-2025-12345 "vulnerable_code_not_in_execute_path" \
+  "govulncheck shows this is not called"
+```
+
 ## Dependency Management
 
 When the project has made a release, the project documentation MUST include a
