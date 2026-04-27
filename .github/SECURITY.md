@@ -221,6 +221,73 @@ secrets and credentials used in development, CI/CD, and release processes.
   actions (not tags), `step-security/harden-runner` for egress auditing, and
   `persist-credentials: false` on checkout steps.
 
+## CI/CD Input Sanitization and Validation
+
+When the project has made a release, CI/CD pipelines which accept trusted
+collaborator input MUST sanitize and validate that input prior to use in the
+pipeline.
+
+### Trusted Collaborator Inputs in CI/CD Pipelines
+
+The following table identifies all inputs accepted by CI/CD pipelines from
+trusted collaborators (repository members, PR authors, commenters) and
+describes the validation applied:
+
+| Input | Source | Workflow | Validation |
+| ----- | ------ | -------- | ---------- |
+| `github.repository` | GitHub (workflow context) | `claude-code-review.yml` | Regex validated against `^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$` in explicit validation step before use |
+| `github.event.pull_request.number` | GitHub (PR event) | `claude-code-review.yml` | Validated as positive integer (`^[1-9][0-9]*$`) in explicit validation step before use |
+| `github.event.comment.body` | Commenters | `claude.yml` | Not interpolated into shell or action inputs; only used in `contains()` expression for trigger filtering. Author association checked to restrict to `owner`, `member`, or `collaborator` |
+| `github.event.review.body` | Reviewers | `claude.yml` | Same as comment body — `contains()` filter only, author association checked |
+| `github.event.issue.body`, `github.event.issue.title` | Issue authors | `claude.yml` | Same as comment body — `contains()` filter only, author association checked |
+| `github.event.pull_request.number` | GitHub (PR event) | `claude.yml` | Not used in workflow (action detects PR context internally) |
+| PR code changes | Fork contributors | All PR-triggered workflows | All PR workflows use `pull_request` trigger (not `pull_request_target`), running in fork context without secret access |
+
+### Sanitization and Validation Controls
+
+1. **No `pull_request_target` usage**: All workflows that trigger on PRs use the
+   `pull_request` event, which checks out the fork's code and runs without
+   access to repository secrets. This prevents untrusted PR code from
+   exfiltrating secrets.
+
+2. **Author association gating**: The `claude.yml` workflow restricts execution
+   to users with `owner`, `member`, or `collaborator` author association. This
+   prevents arbitrary commenters on public repositories from triggering the
+   Claude Code action with secret access.
+
+3. **Explicit validation steps**: Before event-sourced values like
+   `github.repository` or PR numbers are interpolated into action inputs, they
+   pass through a dedicated `Validate PR inputs` step that checks them against
+   expected patterns. Only validated outputs (`steps.validate.outputs.*`) are
+   used in subsequent steps.
+
+4. **No `${{ }}` interpolation of untrusted strings in `run:` steps**: No
+   workflow uses `${{ }}` expressions to interpolate untrusted event data (PR
+   titles, bodies, comment text, etc.) directly into shell commands. All
+   `run:` steps use static commands or trusted environment variables.
+
+5. **Pinned action SHAs**: All third-party actions are referenced by commit SHA
+   (not mutable tags), preventing tag-mutation supply chain attacks.
+
+6. **Environment protection**: Comment-triggered workflows (`claude.yml`,
+   `claude-code-review.yml`) run in the `claude` GitHub environment, which
+   provides an additional approval gate before secrets are available.
+
+7. **Harden-runner egress auditing**: Most workflows use
+   `step-security/harden-runner` with `egress-policy: audit` to detect
+   unexpected outbound network calls that could indicate data exfiltration.
+
+### Summary of Protection by Threat Scenario
+
+| Threat | Mitigation |
+| ------ | ---------- |
+| Script injection via PR title/body in `run:` step | No `run:` step interpolates PR-sourced data |
+| Secret exfiltration via fork PR code | `pull_request` trigger runs in fork context; no `pull_request_target` |
+| Arbitrary user triggering Claude Code action | `author_association` check restricts to repo collaborators |
+| Malicious action version via tag mutation | All actions pinned to SHA hashes |
+| Credential persistence after checkout | All `actions/checkout` steps use `persist-credentials: false` |
+| Malicious input via `github.repository` or PR number | Explicit validation step with regex/integer checks |
+
 ## Permissions and Access Policy
 
 This project requires that code collaborators be reviewed prior to
