@@ -1,0 +1,39 @@
+name: VEX Generation
+on:
+  schedule:
+    - cron: '30 10 * * 1' # Weekly on Monday at 10:30 UTC
+  workflow_dispatch:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  generate-vex:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install vexctl
+        run: go install github.com/openvex/vexctl@latest
+
+      - name: Generate VEX document
+        run: |
+          chmod +x vex/generate-vex.sh
+          ./vex/generate-vex.sh -o vex/openvex.json
+
+      - name: Upload VEX document
+        uses: actions/upload-artifact@634409f3c875e636440082c5c2e3e65e4e9e8d63 # v4
+        with:
+          name: openvex-document
+          path: vex/openvex.json
+          retention-days: 90

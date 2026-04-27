@@ -35,6 +35,23 @@ jobs:
         with:
           egress-policy: audit
 
+      - name: Validate PR inputs
+        id: validate
+        run: |
+          # Validate github.repository matches expected pattern (owner/repo)
+          if ! echo "${{ github.repository }}" | grep -qE '^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$'; then
+            echo "::error::Invalid repository format: ${{ github.repository }}"
+            exit 1
+          fi
+          # Validate PR number is a positive integer
+          pr_num="${{ github.event.pull_request.number }}"
+          if ! echo "$pr_num" | grep -qE '^[1-9][0-9]*$'; then
+            echo "::error::Invalid PR number: $pr_num"
+            exit 1
+          fi
+          echo "repository=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$pr_num" >> "$GITHUB_OUTPUT"
+
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -48,7 +65,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          prompt: '/code-review:code-review ${{ steps.validate.outputs.repository }}/pull/${{ steps.validate.outputs.pr_number }}'
           use_sticky_comment: true
           # allowed_tools is not a valid input for this action; tool access is controlled via claude_args
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md

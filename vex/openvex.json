@@ -1,0 +1,13 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/public/vex-gh-observer-scan-2026-04-27T18:40:26Z",
+  "author": "gh-observer VEX automation",
+  "role": "automated",
+  "version": 1,
+  "statements": [],
+  "timestamp": "2026-04-27T18:40:26Z",
+  "metadata": {
+    "scan_tool": "govulncheck",
+    "scan_result": "no_vulnerabilities_found"
+  }
+}
