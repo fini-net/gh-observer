@@ -130,6 +130,81 @@ just vex_add CVE-2025-12345 "vulnerable_code_not_in_execute_path" \
   "govulncheck shows this is not called"
 ```
 
+## SCA Remediation Threshold Policy
+
+This policy defines the thresholds for remediating Software Composition
+Analysis (SCA) findings related to vulnerabilities and licenses in our
+dependencies.
+
+### Vulnerability Remediation Thresholds
+
+Dependencies with known vulnerabilities are triaged by severity and
+exploitability using the following thresholds:
+
+| Severity | Remediation Timeline | Method |
+| -------- | -------------------- | ------ |
+| Critical (CVSS 9.0+) | Within 48 hours | Immediate dependency update or VEX justification |
+| High (CVSS 7.0–8.9) | Within 7 days | Dependency update in next working session; VEX statement if not exploitable |
+| Medium (CVSS 4.0–6.9) | Within 30 days | Tracked via Dependabot alert; addressed in next dependency update cycle |
+| Low (CVSS 0.1–3.9) | Within 90 days | Addressed during regular maintenance; VEX statement if not exploitable |
+
+For all vulnerability levels, if `govulncheck` call-graph analysis
+determines the vulnerable code path is not reached by gh-observer, the
+finding is documented as `not_affected` in the VEX document (see
+[VEX section above](#vulnerability-exploitability-exchange-vex)) per the
+justifications defined in that section. VEX statements satisfy the
+remediation requirement — no further action is needed once a finding is
+justified and documented.
+
+### Vulnerability Detection and Response Process
+
+1. **Automated detection**: `govulncheck` runs on every push to `main`,
+   every pull request, and daily via the
+   [govulncheck workflow](.github/workflows/govulncheck.yaml).
+   GitHub Dependabot provides continuous monitoring for new vulnerability
+   advisories.
+
+2. **Triage**: When a vulnerability is detected, it is assessed using
+   `govulncheck` call-graph analysis to determine if the vulnerable code
+   is actually called. If not called, a VEX `not_affected` statement is
+   generated.
+
+3. **Remediation**: If the vulnerable code is called, the dependency is
+   updated within the timeline above. If no patched version exists, a
+   mitigation is implemented or the dependency is replaced.
+
+4. **Verification**: The VEX document is regenerated weekly and on every
+   release to ensure all statements remain current. `just vex_generate`
+   can be run manually at any time.
+
+### License Compliance Thresholds
+
+All direct and indirect dependencies must meet the following license
+requirements:
+
+| License Category | Allowed | Action if Non-Compliant |
+| --------------- | ------- | ----------------------- |
+| Permissive (Apache-2.0, MIT, BSD-2/3-Clause, ISC, MPL-2.0, etc.) | Yes | No action needed — these are compatible with the project's GPLv2 license |
+| Weak copyleft (LGPL-2.0+, LGPL-2.1, MPL-2.0) | Yes, with review | Review usage pattern to ensure compliance (dynamic linking, etc.) |
+| Strong copyleft (GPLv3, AGPL) | Review required | Evaluate compatibility with GPLv2; replace dependency if incompatible |
+| Proprietary / no license | No | Remove dependency; find a permissively-licensed alternative |
+
+License compliance is verified by:
+
+- `go mod` ensures all dependencies declare a `go` directive and are
+  fetchable from public proxies.
+- The [dependency-review workflow](.github/workflows/dependency-review.yml)
+  flags incompatible or unknown licenses on every pull request.
+- Manual review during dependency adoption (see
+  [How We Select Dependencies](#how-we-select-dependencies)).
+
+### Exceptions
+
+- Dev-only dependencies (linters, test tools) that are not included in the
+  release binary may use any permissive or weak-copyleft license.
+- If no suitable alternative exists for a non-compliant dependency, the
+  maintainer documents the exception and the justification in this section.
+
 ## Dependency Management
 
 When the project has made a release, the project documentation MUST include a
