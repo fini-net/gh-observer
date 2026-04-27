@@ -66,13 +66,14 @@ The application accepts either a PR number or a full GitHub PR URL:
 ```go
 if len(args) > 0 {
     arg := args[0]
-    // Check if argument is a PR URL
-    if strings.Contains(arg, "github.com") && strings.Contains(arg, "/pull/") {
-        owner, repo, prNumber, err = ghclient.ParsePRURL(arg)
-    } else {
-        // PR number provided: use gh pr view to get correct repo (handles forks)
-        n, err := strconv.Atoi(arg)
+    if owner, repo, prNumber, err = ghclient.ParsePRURL(arg); err == nil {
+        // valid PR URL
+    } else if n, convErr := strconv.Atoi(arg); convErr == nil {
+        // numeric PR number
         prNumber, owner, repo, err = ghclient.GetPRWithRepo(n)
+    } else {
+        fmt.Fprintf(os.Stderr, "Invalid PR number or URL: %s\n", arg)
+        return 1
     }
 } else {
     // Auto-detect from current branch (correctly handles forks)
@@ -319,7 +320,7 @@ TUI mode runs when stdout is a terminal, providing real-time updates.
 model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag)
 ```
 
-Located at `internal/tui/model.go:70-92`. Initializes the Bubbletea model:
+The `type Model struct` definition (`internal/tui/model.go:12-67`) holds all TUI state:
 
 ```go
 type Model struct {
@@ -379,61 +380,9 @@ type Model struct {
 }
 ```
 
+The `NewModel(...)` constructor (`internal/tui/model.go:70-92`) initializes the Bubbletea model with defaults.
+
 **Premature Exit Prevention**: `expectedCheckCount` tracks how many distinct job names the history fetch has discovered (set from `len(m.jobAverages)` each time a partial result arrives). `peakCheckCount` tracks the maximum number of checks seen in any single poll. These fields power the `canTrustCompletion()` function that prevents exiting when fast checks (like DCO) complete before slower checks have even appeared in the API response.
-
-Located at `internal/tui/model.go:74-96`. Initializes the Bubbletea model:
-
-```go
-type Model struct {
-    // Context and GitHub data
-    ctx      context.Context
-    token    string
-    owner    string
-    repo     string
-    prNumber int
-    
-    // PR metadata (populated later)
-    prTitle        string
-    headSHA        string
-    prCreatedAt    time.Time
-    headCommitTime time.Time
-    
-    // Check run data (updated every poll)
-    checkRuns []ghclient.CheckRunInfo
-    rateLimitRemaining int
-    
-    // Historical job averages (incrementally updated)
-    jobAverages             map[string]time.Duration
-    runIDToWorkflowID       map[int64]int64
-    fetchedWorkflowIDs      map[int64]bool
-    pendingWorkflowFetch    map[int64]bool
-    dispatchedWorkflowFetch map[int64]bool
-    avgFetchPending         bool
-    avgFetchStartTime       time.Time
-    avgFetchLastDuration    time.Duration
-    avgFetchErr             error
-    noAvg                   bool
-    firstCheckSeenAt        time.Time
-    
-    // UI state
-    spinner         spinner.Model
-    startTime       time.Time
-    lastUpdate      time.Time
-    refreshInterval time.Duration
-    styles          Styles
-    
-    // Exit tracking
-    exitCode int
-    quitting bool
-    checksComplete bool
-    
-    // Error state
-    err error
-    
-    // Feature flags
-    enableLinks bool
-}
-```
 
 ### Program Initialization (`main.go:210-211`)
 
