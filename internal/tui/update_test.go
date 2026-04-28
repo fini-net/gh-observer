@@ -17,11 +17,12 @@ func makeModel() *Model {
 		rateLimitRemaining:      5000,
 		jobAverages:             make(map[string]time.Duration),
 		workflowAverages:        make(map[int64]map[string]time.Duration),
-		advSecMatchWorkflow:     make(map[string]int64),
+		advSecMatchWorkflow:    make(map[string]int64),
 		runIDToWorkflowID:       make(map[int64]int64),
 		fetchedWorkflowIDs:      make(map[int64]bool),
 		pendingWorkflowFetch:    make(map[int64]bool),
 		dispatchedWorkflowFetch: make(map[int64]bool),
+		seenCheckKeys:          make(map[string]bool),
 	}
 }
 
@@ -834,6 +835,146 @@ func TestPeakCheckCountTracking(t *testing.T) {
 
 		if result.peakCheckCount != 3 {
 			t.Errorf("peakCheckCount = %d, want 3", result.peakCheckCount)
+		}
+	})
+}
+
+func TestRediscoveryOnNewJobs(t *testing.T) {
+	t.Run("new check runs trigger re-discovery after initial discovery completed", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		m.firstCheckSeenAt = time.Now().Add(-15 * time.Second)
+		m.runIDToWorkflowID = map[int64]int64{100: 200}
+		m.fetchedWorkflowIDs = map[int64]bool{200: true}
+		m.dispatchedWorkflowFetch = map[int64]bool{200: true}
+		m.jobAverages = map[string]time.Duration{"build": time.Minute}
+
+		initialCheck := ghclient.CheckRunInfo{
+			Name:           "build",
+			Status:         "completed",
+			Conclusion:     "success",
+			WorkflowRunID:  100,
+			WorkflowID:     200,
+			DetailsURL:     "https://github.com/test/test/actions/runs/100/job/1",
+		}
+		key := checkKey(initialCheck)
+		m.seenCheckKeys[key] = true
+
+		m.avgFetchPending = false
+		m.pendingWorkflowFetch = map[int64]bool{}
+
+		newCheck := ghclient.CheckRunInfo{
+			Name:           "test",
+			Status:         "in_progress",
+			WorkflowRunID:  300,
+			DetailsURL:     "https://github.com/test/test/actions/runs/300/job/2",
+		}
+
+		msg := ChecksUpdateMsg{
+			CheckRuns:          []ghclient.CheckRunInfo{initialCheck, newCheck},
+			RateLimitRemaining: 5000,
+		}
+
+		model, _ := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if !result.avgFetchPending {
+			t.Error("avgFetchPending should be true when new checks appear after discovery completed")
+		}
+	})
+
+	t.Run("no re-discovery for already-seen check runs", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		m.firstCheckSeenAt = time.Now().Add(-15 * time.Second)
+		m.runIDToWorkflowID = map[int64]int64{100: 200}
+		m.fetchedWorkflowIDs = map[int64]bool{200: true}
+		m.dispatchedWorkflowFetch = map[int64]bool{200: true}
+		m.avgFetchPending = false
+		m.pendingWorkflowFetch = map[int64]bool{}
+
+		existingCheck := ghclient.CheckRunInfo{
+			Name:           "build",
+			Status:         "completed",
+			Conclusion:     "success",
+			WorkflowRunID:  100,
+			WorkflowID:     200,
+			DetailsURL:     "https://github.com/test/test/actions/runs/100/job/1",
+		}
+		key := checkKey(existingCheck)
+		m.seenCheckKeys[key] = true
+
+		msg := ChecksUpdateMsg{
+			CheckRuns:          []ghclient.CheckRunInfo{existingCheck},
+			RateLimitRemaining: 5000,
+		}
+
+		model, _ := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if result.avgFetchPending {
+			t.Error("avgFetchPending should remain false when no new checks appear")
+		}
+	})
+}
+
+func TestCheckKey(t *testing.T) {
+	t.Run("uses WorkflowRunID when available", func(t *testing.T) {
+		cr := ghclient.CheckRunInfo{Name: "build", WorkflowRunID: 100}
+		key := checkKey(cr)
+		if key != "run:100:build" {
+			t.Errorf("checkKey = %q, want run:100:build", key)
+		}
+	})
+
+	t.Run("falls back to DetailsURL", func(t *testing.T) {
+		cr := ghclient.CheckRunInfo{
+			Name:       "test",
+			DetailsURL: "https://github.com/o/r/actions/runs/42/job/7",
+		}
+		key := checkKey(cr)
+		expected := "url:https://github.com/o/r/actions/runs/42/job/7:test"
+		if key != expected {
+			t.Errorf("checkKey = %q, want %q", key, expected)
+		}
+	})
+
+	t.Run("falls back to name only", func(t *testing.T) {
+		cr := ghclient.CheckRunInfo{Name: "lint"}
+		key := checkKey(cr)
+		if key != "name:lint" {
+			t.Errorf("checkKey = %q, want name:lint", key)
+		}
+	})
+}
+
+func TestHasNewChecks(t *testing.T) {
+	t.Run("returns true when new check appears", func(t *testing.T) {
+		seen := map[string]bool{"run:100:build": true}
+		checks := []ghclient.CheckRunInfo{
+			{Name: "build", WorkflowRunID: 100},
+			{Name: "test", WorkflowRunID: 200},
+		}
+		if !hasNewChecks(checks, seen) {
+			t.Error("should detect new check")
+		}
+	})
+
+	t.Run("returns false when all checks seen", func(t *testing.T) {
+		seen := map[string]bool{"run:100:build": true, "run:200:test": true}
+		checks := []ghclient.CheckRunInfo{
+			{Name: "build", WorkflowRunID: 100},
+			{Name: "test", WorkflowRunID: 200},
+		}
+		if hasNewChecks(checks, seen) {
+			t.Error("should not detect new checks when all are seen")
+		}
+	})
+
+	t.Run("returns false for empty checks", func(t *testing.T) {
+		seen := map[string]bool{}
+		if hasNewChecks([]ghclient.CheckRunInfo{}, seen) {
+			t.Error("empty checks should not report new")
 		}
 	})
 }

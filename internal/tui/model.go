@@ -66,6 +66,14 @@ type Model struct {
 	// Premature exit prevention (issue #236)
 	expectedCheckCount int
 	peakCheckCount     int
+
+	// Tracks which check runs we've already triggered discovery for,
+	// so we can re-trigger when new jobs appear.
+	seenCheckKeys map[string]bool
+
+	// historyFetchCompleted is true after at least one discovery cycle
+	// has finished (all pending workflow fetches resolved).
+	historyFetchCompleted bool
 }
 
 // NewModel creates a new TUI model
@@ -92,6 +100,7 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 		fetchedWorkflowIDs:      make(map[int64]bool),
 		pendingWorkflowFetch:    make(map[int64]bool),
 		dispatchedWorkflowFetch: make(map[int64]bool),
+		seenCheckKeys:          make(map[string]bool),
 	}
 }
 

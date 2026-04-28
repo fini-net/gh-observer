@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"time"
 
@@ -138,6 +139,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// If no new fetches, discovery phase is complete
 			if len(workflowCmds) == 0 {
 				m.avgFetchPending = false
+				m.historyFetchCompleted = true
 				if len(m.pendingWorkflowFetch) == 0 {
 					m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
 				}
@@ -186,6 +188,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.pendingWorkflowFetch) == 0 {
 			// Discovery phase complete - record duration and clear error on success
 			m.avgFetchPending = false
+			m.historyFetchCompleted = true
 			m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
 			if msg.Err == nil {
 				m.avgFetchErr = nil
@@ -203,6 +206,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// checkKey returns a unique key for a check run, used to detect new jobs.
+func checkKey(cr ghclient.CheckRunInfo) string {
+	if cr.WorkflowRunID > 0 {
+		return fmt.Sprintf("run:%d:%s", cr.WorkflowRunID, cr.Name)
+	}
+	if cr.DetailsURL != "" {
+		return fmt.Sprintf("url:%s:%s", cr.DetailsURL, cr.Name)
+	}
+	return fmt.Sprintf("name:%s", cr.Name)
+}
+
+// hasNewChecks returns true if any check runs in the update are new
+// (not previously seen by this model).
+func hasNewChecks(checkRuns []ghclient.CheckRunInfo, seen map[string]bool) bool {
+	for _, cr := range checkRuns {
+		key := checkKey(cr)
+		if !seen[key] {
+			return true
+		}
+	}
+	return false
+}
+
+// markChecksSeen records all check run keys as seen.
+func markChecksSeen(checkRuns []ghclient.CheckRunInfo, seen map[string]bool) {
+	for _, cr := range checkRuns {
+		seen[checkKey(cr)] = true
+	}
 }
 
 // handleChecksUpdate processes check run updates and returns the updated model.
@@ -228,11 +261,22 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 		m.firstCheckSeenAt = time.Now()
 	}
 
+	newChecks := hasNewChecks(msg.CheckRuns, m.seenCheckKeys)
+	markChecksSeen(msg.CheckRuns, m.seenCheckKeys)
+
 	var cmds []tea.Cmd
 
 	allComplete := allChecksComplete(msg.CheckRuns)
 	elapsed := time.Since(m.firstCheckSeenAt)
 	readyForHistory := !m.noAvg && !m.firstCheckSeenAt.IsZero() && (allComplete || elapsed >= historyFetchDelay)
+
+	reDiscover := newChecks && m.historyFetchCompleted && !m.avgFetchPending && m.rateLimitRemaining >= minRateLimitForFetch
+	if reDiscover {
+		m.avgFetchPending = true
+		m.avgFetchStartTime = time.Now()
+		cmds = append(cmds, discoverWorkflows(m.ctx, m.owner, m.repo, msg.CheckRuns, m.runIDToWorkflowID, m.fetchedWorkflowIDs))
+	}
+
 	if readyForHistory && !m.avgFetchPending && m.rateLimitRemaining >= minRateLimitForFetch {
 		needsDiscovery := false
 		for _, cr := range msg.CheckRuns {
