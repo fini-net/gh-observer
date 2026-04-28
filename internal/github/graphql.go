@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -9,6 +10,25 @@ import (
 	"github.com/shurcooL/githubv4"
 	"golang.org/x/oauth2"
 )
+
+type BigInt int64
+
+func (b *BigInt) UnmarshalJSON(data []byte) error {
+	var v json.Number
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	n, err := v.Int64()
+	if err != nil {
+		return err
+	}
+	*b = BigInt(n)
+	return nil
+}
+
+func (b BigInt) MarshalJSON() ([]byte, error) {
+	return json.Marshal(int64(b))
+}
 
 // Annotation represents a check run annotation (error/warning)
 type Annotation struct {
@@ -61,9 +81,9 @@ type contextNode struct {
 		} `graphql:"annotations(first: 5)"`
 	CheckSuite struct {
 		WorkflowRun struct {
-			DatabaseID githubv4.Int `graphql:"databaseId"`
+			DatabaseID BigInt `graphql:"databaseId"`
 			Workflow   struct {
-				DatabaseID githubv4.Int `graphql:"databaseId"`
+				DatabaseID BigInt `graphql:"databaseId"`
 				Name       string
 			}
 		}
