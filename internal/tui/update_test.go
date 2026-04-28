@@ -16,10 +16,13 @@ func makeModel() *Model {
 		repo:                    "test-repo",
 		rateLimitRemaining:      5000,
 		jobAverages:             make(map[string]time.Duration),
+		workflowAverages:        make(map[int64]map[string]time.Duration),
+		advSecMatchWorkflow:    make(map[string]int64),
 		runIDToWorkflowID:       make(map[int64]int64),
 		fetchedWorkflowIDs:      make(map[int64]bool),
 		pendingWorkflowFetch:    make(map[int64]bool),
 		dispatchedWorkflowFetch: make(map[int64]bool),
+		seenCheckKeys:          make(map[string]bool),
 	}
 }
 
@@ -699,6 +702,32 @@ func TestJobAveragesPartialMsg(t *testing.T) {
 			t.Errorf("expectedCheckCount = %d, want 3", result.expectedCheckCount)
 		}
 	})
+
+	t.Run("AdvSec matched workflow adds alias to jobAverages", func(t *testing.T) {
+		m := makeModel()
+		m.pendingWorkflowFetch = map[int64]bool{789: true}
+		m.fetchedWorkflowIDs = make(map[int64]bool)
+		m.jobAverages = make(map[string]time.Duration)
+		m.workflowAverages = make(map[int64]map[string]time.Duration)
+		m.advSecMatchWorkflow = map[string]int64{"CodeQL": 789}
+		m.avgFetchStartTime = time.Now().Add(-1 * time.Second)
+
+		msg := JobAveragesPartialMsg{
+			WorkflowID: 789,
+			Averages: map[string]time.Duration{
+				"Analyze (go)": 2 * time.Minute,
+			},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if result.jobAverages["CodeQL"] != 2*time.Minute {
+			t.Errorf("jobAverages[CodeQL] = %v, want %v", result.jobAverages["CodeQL"], 2*time.Minute)
+		}
+		if result.workflowAverages[789]["Analyze (go)"] != 2*time.Minute {
+			t.Errorf("workflowAverages[789][Analyze (go)] = %v, want %v", result.workflowAverages[789]["Analyze (go)"], 2*time.Minute)
+		}
+	})
 }
 
 func TestCanTrustCompletion(t *testing.T) {
@@ -806,6 +835,259 @@ func TestPeakCheckCountTracking(t *testing.T) {
 
 		if result.peakCheckCount != 3 {
 			t.Errorf("peakCheckCount = %d, want 3", result.peakCheckCount)
+		}
+	})
+}
+
+func TestRediscoveryOnNewJobs(t *testing.T) {
+	t.Run("new check runs trigger re-discovery after initial discovery completed", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		m.firstCheckSeenAt = time.Now().Add(-15 * time.Second)
+		m.runIDToWorkflowID = map[int64]int64{100: 200}
+		m.fetchedWorkflowIDs = map[int64]bool{200: true}
+		m.dispatchedWorkflowFetch = map[int64]bool{200: true}
+		m.jobAverages = map[string]time.Duration{"build": time.Minute}
+
+		initialCheck := ghclient.CheckRunInfo{
+			Name:           "build",
+			Status:         "completed",
+			Conclusion:     "success",
+			WorkflowRunID:  100,
+			WorkflowID:     200,
+			DetailsURL:     "https://github.com/test/test/actions/runs/100/job/1",
+		}
+		key := checkKey(initialCheck)
+		m.seenCheckKeys[key] = true
+
+		m.avgFetchPending = false
+		m.pendingWorkflowFetch = map[int64]bool{}
+
+		newCheck := ghclient.CheckRunInfo{
+			Name:           "test",
+			Status:         "in_progress",
+			WorkflowRunID:  300,
+			DetailsURL:     "https://github.com/test/test/actions/runs/300/job/2",
+		}
+
+		msg := ChecksUpdateMsg{
+			CheckRuns:          []ghclient.CheckRunInfo{initialCheck, newCheck},
+			RateLimitRemaining: 5000,
+		}
+
+		model, _ := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if !result.avgFetchPending {
+			t.Error("avgFetchPending should be true when new checks appear after discovery completed")
+		}
+	})
+
+	t.Run("no re-discovery for already-seen check runs", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		m.firstCheckSeenAt = time.Now().Add(-15 * time.Second)
+		m.runIDToWorkflowID = map[int64]int64{100: 200}
+		m.fetchedWorkflowIDs = map[int64]bool{200: true}
+		m.dispatchedWorkflowFetch = map[int64]bool{200: true}
+		m.avgFetchPending = false
+		m.pendingWorkflowFetch = map[int64]bool{}
+
+		existingCheck := ghclient.CheckRunInfo{
+			Name:           "build",
+			Status:         "completed",
+			Conclusion:     "success",
+			WorkflowRunID:  100,
+			WorkflowID:     200,
+			DetailsURL:     "https://github.com/test/test/actions/runs/100/job/1",
+		}
+		key := checkKey(existingCheck)
+		m.seenCheckKeys[key] = true
+
+		msg := ChecksUpdateMsg{
+			CheckRuns:          []ghclient.CheckRunInfo{existingCheck},
+			RateLimitRemaining: 5000,
+		}
+
+		model, _ := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if result.avgFetchPending {
+			t.Error("avgFetchPending should remain false when no new checks appear")
+		}
+	})
+}
+
+func TestCheckKey(t *testing.T) {
+	t.Run("uses WorkflowRunID when available", func(t *testing.T) {
+		cr := ghclient.CheckRunInfo{Name: "build", WorkflowRunID: 100}
+		key := checkKey(cr)
+		if key != "run:100:build" {
+			t.Errorf("checkKey = %q, want run:100:build", key)
+		}
+	})
+
+	t.Run("falls back to DetailsURL", func(t *testing.T) {
+		cr := ghclient.CheckRunInfo{
+			Name:       "test",
+			DetailsURL: "https://github.com/o/r/actions/runs/42/job/7",
+		}
+		key := checkKey(cr)
+		expected := "url:https://github.com/o/r/actions/runs/42/job/7:test"
+		if key != expected {
+			t.Errorf("checkKey = %q, want %q", key, expected)
+		}
+	})
+
+	t.Run("falls back to name only", func(t *testing.T) {
+		cr := ghclient.CheckRunInfo{Name: "lint"}
+		key := checkKey(cr)
+		if key != "name:lint" {
+			t.Errorf("checkKey = %q, want name:lint", key)
+		}
+	})
+}
+
+func TestHasNewChecks(t *testing.T) {
+	t.Run("returns true when new check appears", func(t *testing.T) {
+		seen := map[string]bool{"run:100:build": true}
+		checks := []ghclient.CheckRunInfo{
+			{Name: "build", WorkflowRunID: 100},
+			{Name: "test", WorkflowRunID: 200},
+		}
+		if !hasNewChecks(checks, seen) {
+			t.Error("should detect new check")
+		}
+	})
+
+	t.Run("returns false when all checks seen", func(t *testing.T) {
+		seen := map[string]bool{"run:100:build": true, "run:200:test": true}
+		checks := []ghclient.CheckRunInfo{
+			{Name: "build", WorkflowRunID: 100},
+			{Name: "test", WorkflowRunID: 200},
+		}
+		if hasNewChecks(checks, seen) {
+			t.Error("should not detect new checks when all are seen")
+		}
+	})
+
+	t.Run("returns false for empty checks", func(t *testing.T) {
+		seen := map[string]bool{}
+		if hasNewChecks([]ghclient.CheckRunInfo{}, seen) {
+			t.Error("empty checks should not report new")
+		}
+	})
+}
+
+func TestAdvSecAliasOnRediscovery(t *testing.T) {
+	t.Run("AdvSec alias created from cached workflowAverages when re-discovery delivers WorkflowsDiscoveredMsg", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		m.firstCheckSeenAt = time.Now().Add(-15 * time.Second)
+		m.avgFetchPending = true
+		m.historyFetchCompleted = true
+		m.pendingWorkflowFetch = map[int64]bool{}
+		m.dispatchedWorkflowFetch = map[int64]bool{}
+		m.fetchedWorkflowIDs = map[int64]bool{789: true}
+		m.workflowAverages = map[int64]map[string]time.Duration{
+			789: {"Analyze (go)": 2 * time.Minute},
+		}
+		m.jobAverages = map[string]time.Duration{"Analyze (go)": 2 * time.Minute}
+		m.runIDToWorkflowID = map[int64]int64{100: 789}
+
+		ciCheck := ghclient.CheckRunInfo{
+			Name:          "Analyze (go)",
+			Status:        "in_progress",
+			WorkflowRunID: 100,
+			WorkflowID:    789,
+			WorkflowName:  "CodeQL",
+			DetailsURL:    "https://github.com/test/test/actions/runs/100/job/1",
+		}
+		advSecCheck := ghclient.CheckRunInfo{
+			Name:       "CodeQL",
+			Status:     "in_progress",
+			AppName:    "GitHub",
+			DetailsURL: "https://github.com/test/test/runs/73263098935",
+		}
+		m.checkRuns = []ghclient.CheckRunInfo{ciCheck, advSecCheck}
+
+		msg := WorkflowsDiscoveredMsg{
+			NewRunIDToWorkflowID: map[int64]int64{},
+			WorkflowIDsToFetch:   []int64{},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if _, ok := result.jobAverages["CodeQL"]; !ok {
+			t.Error("jobAverages should have CodeQL alias from workflowAverages cache")
+		}
+		if result.jobAverages["CodeQL"] != 2*time.Minute {
+			t.Errorf("jobAverages[CodeQL] = %v, want %v", result.jobAverages["CodeQL"], 2*time.Minute)
+		}
+		if result.advSecMatchWorkflow["CodeQL"] != 789 {
+			t.Errorf("advSecMatchWorkflow[CodeQL] = %d, want 789", result.advSecMatchWorkflow["CodeQL"])
+		}
+	})
+
+	t.Run("AdvSec alias created from workflowAverages in WorkflowsDiscoveredMsg handler", func(t *testing.T) {
+		m := makeModel()
+		m.avgFetchPending = true
+		m.avgFetchStartTime = time.Now().Add(-1 * time.Second)
+		m.pendingWorkflowFetch = map[int64]bool{}
+		m.dispatchedWorkflowFetch = map[int64]bool{}
+		m.fetchedWorkflowIDs = map[int64]bool{789: true}
+		m.workflowAverages = map[int64]map[string]time.Duration{
+			789: {"Analyze (go)": 2 * time.Minute},
+		}
+		m.jobAverages = map[string]time.Duration{"Analyze (go)": 2 * time.Minute}
+		m.checkRuns = []ghclient.CheckRunInfo{
+			{Name: "Analyze (go)", WorkflowRunID: 100, WorkflowID: 789, WorkflowName: "CodeQL", DetailsURL: "https://github.com/test/test/actions/runs/100/job/1"},
+			{Name: "CodeQL", AppName: "GitHub", DetailsURL: "https://github.com/test/test/runs/73263098935"},
+		}
+
+		msg := WorkflowsDiscoveredMsg{
+			NewRunIDToWorkflowID: map[int64]int64{100: 789},
+			WorkflowIDsToFetch:   []int64{},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if result.jobAverages["CodeQL"] != 2*time.Minute {
+			t.Errorf("jobAverages[CodeQL] = %v, want %v", result.jobAverages["CodeQL"], 2*time.Minute)
+		}
+		if result.advSecMatchWorkflow["CodeQL"] != 789 {
+			t.Errorf("advSecMatchWorkflow[CodeQL] = %d, want 789", result.advSecMatchWorkflow["CodeQL"])
+		}
+	})
+
+	t.Run("AdvSec alias not overwritten if already in jobAverages", func(t *testing.T) {
+		m := makeModel()
+		m.avgFetchPending = true
+		m.avgFetchStartTime = time.Now().Add(-1 * time.Second)
+		m.pendingWorkflowFetch = map[int64]bool{}
+		m.dispatchedWorkflowFetch = map[int64]bool{}
+		m.fetchedWorkflowIDs = map[int64]bool{789: true}
+		m.workflowAverages = map[int64]map[string]time.Duration{
+			789: {"Analyze (go)": 2 * time.Minute},
+		}
+		m.jobAverages = map[string]time.Duration{
+			"Analyze (go)": 2 * time.Minute,
+			"CodeQL":        3 * time.Minute,
+		}
+		m.checkRuns = []ghclient.CheckRunInfo{
+			{Name: "Analyze (go)", WorkflowRunID: 100, WorkflowID: 789, WorkflowName: "CodeQL", DetailsURL: "https://github.com/test/test/actions/runs/100/job/1"},
+			{Name: "CodeQL", AppName: "GitHub", DetailsURL: "https://github.com/test/test/runs/73263098935"},
+		}
+
+		msg := WorkflowsDiscoveredMsg{
+			NewRunIDToWorkflowID: map[int64]int64{},
+			WorkflowIDsToFetch:   []int64{},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if result.jobAverages["CodeQL"] != 3*time.Minute {
+			t.Errorf("jobAverages[CodeQL] = %v, want %v (should not overwrite existing)", result.jobAverages["CodeQL"], 3*time.Minute)
 		}
 	})
 }

@@ -32,6 +32,16 @@ func TestParseRunIDFromURL(t *testing.T) {
 			url:     "",
 			wantErr: true,
 		},
+		{
+			name:    "AdvSec /runs/ URL is not matched",
+			url:     "https://github.com/owner/repo/runs/73263098935",
+			wantErr: true,
+		},
+		{
+			name:    "external app URL is not matched",
+			url:     "https://probot.github.io/apps/dco/",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -223,6 +233,55 @@ func TestDiscoverWorkflows(t *testing.T) {
 			wantRunIDs:      map[int64]int64{123: 789},
 			wantWorkflowIDs: nil,
 		},
+		{
+			name: "GraphQL WorkflowID skips API call",
+			checkRuns: []CheckRunInfo{
+				{Name: "test", Status: "completed", WorkflowRunID: 123, WorkflowID: 789},
+			},
+			knownRunIDToWorkflowID:  map[int64]int64{},
+			knownFetchedWorkflowIDs: map[int64]bool{},
+			mockHandler:             nil,
+			wantRunIDs:              map[int64]int64{123: 789},
+			wantWorkflowIDs:         []int64{789},
+		},
+		{
+			name: "GraphQL WorkflowRunID resolves via API",
+			checkRuns: []CheckRunInfo{
+				{Name: "test", Status: "completed", WorkflowRunID: 123},
+			},
+			knownRunIDToWorkflowID:  map[int64]int64{},
+			knownFetchedWorkflowIDs: map[int64]bool{},
+			mockHandler: func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/repos/owner/repo/actions/runs/123" {
+					w.Header().Set("Content-Type", "application/json")
+					w.Write([]byte(`{"id":123,"workflow_id":789}`))
+				}
+			},
+			wantRunIDs:      map[int64]int64{123: 789},
+			wantWorkflowIDs: []int64{789},
+		},
+		{
+			name: "AdvSec /runs/ URL skipped gracefully",
+			checkRuns: []CheckRunInfo{
+				{Name: "CodeQL", Status: "completed", AppName: "GitHub Advanced Security", DetailsURL: "https://github.com/owner/repo/runs/73263098935"},
+			},
+			knownRunIDToWorkflowID:  map[int64]int64{},
+			knownFetchedWorkflowIDs: map[int64]bool{},
+			mockHandler:             nil,
+			wantRunIDs:              nil,
+			wantWorkflowIDs:         nil,
+		},
+		{
+			name: "DCO external URL skipped gracefully",
+			checkRuns: []CheckRunInfo{
+				{Name: "DCO", Status: "completed", AppName: "DCO", DetailsURL: "https://probot.github.io/apps/dco/"},
+			},
+			knownRunIDToWorkflowID:  map[int64]int64{},
+			knownFetchedWorkflowIDs: map[int64]bool{},
+			mockHandler:             nil,
+			wantRunIDs:              nil,
+			wantWorkflowIDs:         nil,
+		},
 	}
 
 	for _, tt := range tests {
@@ -253,10 +312,13 @@ func TestDiscoverWorkflows(t *testing.T) {
 			}
 
 			if tt.wantRunIDs == nil {
-				if runIDs != nil {
-					t.Errorf("DiscoverWorkflows() runIDs = %v, want nil", runIDs)
+				if len(runIDs) > 0 {
+					t.Errorf("DiscoverWorkflows() runIDs = %v, want empty", runIDs)
 				}
 			} else {
+				if len(tt.wantRunIDs) == 0 && len(runIDs) > 0 {
+					t.Errorf("DiscoverWorkflows() runIDs = %v, want empty", runIDs)
+				}
 				for k, v := range tt.wantRunIDs {
 					if runIDs[k] != v {
 						t.Errorf("DiscoverWorkflows() runIDs[%d] = %v, want %v", k, runIDs[k], v)
@@ -271,6 +333,123 @@ func TestDiscoverWorkflows(t *testing.T) {
 			} else {
 				if len(workflowIDs) != len(tt.wantWorkflowIDs) {
 					t.Errorf("DiscoverWorkflows() len(workflowIDs) = %d, want %d", len(workflowIDs), len(tt.wantWorkflowIDs))
+				}
+			}
+		})
+	}
+}
+
+func TestDiscoverAdvSecWorkflows(t *testing.T) {
+	tests := []struct {
+		name                    string
+		checkRuns               []CheckRunInfo
+		knownFetchedWorkflowIDs map[int64]bool
+		wantMatches             map[string]int64
+		wantWorkflowIDs         []int64
+	}{
+		{
+			name:                    "empty check runs returns empty",
+			checkRuns:               []CheckRunInfo{},
+			knownFetchedWorkflowIDs: map[int64]bool{},
+			wantMatches:             map[string]int64{},
+			wantWorkflowIDs:         nil,
+		},
+		{
+			name: "AdvSec CodeQL matched to github-actions CodeQL workflow",
+			checkRuns: []CheckRunInfo{
+				{Name: "Analyze (go)", WorkflowName: "CodeQL", WorkflowID: 789, AppName: "GitHub Actions"},
+				{Name: "CodeQL", AppName: "GitHub Advanced Security", DetailsURL: "https://github.com/owner/repo/runs/73263098935"},
+			},
+			knownFetchedWorkflowIDs: map[int64]bool{},
+			wantMatches:             map[string]int64{"CodeQL": 789},
+			wantWorkflowIDs:         []int64{789},
+		},
+		{
+			name: "AdvSec Checkov matched to github-actions Checkov workflow",
+			checkRuns: []CheckRunInfo{
+				{Name: "scan", WorkflowName: "Checkov", WorkflowID: 456, AppName: "GitHub Actions"},
+				{Name: "Checkov", AppName: "GitHub Advanced Security", DetailsURL: "https://github.com/owner/repo/runs/12345"},
+			},
+			knownFetchedWorkflowIDs: map[int64]bool{},
+			wantMatches:             map[string]int64{"Checkov": 456},
+			wantWorkflowIDs:         []int64{456},
+		},
+		{
+			name: "AdvSec skipped when no matching workflow name",
+			checkRuns: []CheckRunInfo{
+				{Name: "scan", WorkflowName: "CI", WorkflowID: 111, AppName: "GitHub Actions"},
+				{Name: "CodeQL", AppName: "GitHub Advanced Security", DetailsURL: "https://github.com/owner/repo/runs/73263098935"},
+			},
+			knownFetchedWorkflowIDs: map[int64]bool{},
+			wantMatches:             map[string]int64{},
+			wantWorkflowIDs:         nil,
+		},
+		{
+			name: "AdvSec skipped when workflow already fetched",
+			checkRuns: []CheckRunInfo{
+				{Name: "Analyze (go)", WorkflowName: "CodeQL", WorkflowID: 789, AppName: "GitHub Actions"},
+				{Name: "CodeQL", AppName: "GitHub Advanced Security", DetailsURL: "https://github.com/owner/repo/runs/73263098935"},
+			},
+			knownFetchedWorkflowIDs: map[int64]bool{789: true},
+			wantMatches:             map[string]int64{"CodeQL": 789},
+			wantWorkflowIDs:         nil,
+		},
+		{
+			name: "DCO external app skipped",
+			checkRuns: []CheckRunInfo{
+				{Name: "DCO", AppName: "DCO", DetailsURL: "https://probot.github.io/apps/dco/"},
+			},
+			knownFetchedWorkflowIDs: map[int64]bool{},
+			wantMatches:             map[string]int64{},
+			wantWorkflowIDs:         nil,
+		},
+		{
+			name: "AdvSec check with WorkflowID already set is skipped",
+			checkRuns: []CheckRunInfo{
+				{Name: "Analyze (go)", WorkflowName: "CodeQL", WorkflowID: 789, AppName: "GitHub Actions"},
+				{Name: "CodeQL", AppName: "GitHub Advanced Security", WorkflowID: 789, DetailsURL: "https://github.com/owner/repo/actions/runs/123/job/456"},
+			},
+			knownFetchedWorkflowIDs: map[int64]bool{},
+			wantMatches:             map[string]int64{},
+			wantWorkflowIDs:         nil,
+		},
+		{
+			name: "multiple AdvSec checks matched",
+			checkRuns: []CheckRunInfo{
+				{Name: "Analyze (go)", WorkflowName: "CodeQL", WorkflowID: 789, AppName: "GitHub Actions"},
+				{Name: "scan", WorkflowName: "Checkov", WorkflowID: 456, AppName: "GitHub Actions"},
+				{Name: "CodeQL", AppName: "GitHub Advanced Security", DetailsURL: "https://github.com/owner/repo/runs/73263098935"},
+				{Name: "Checkov", AppName: "GitHub Advanced Security", DetailsURL: "https://github.com/owner/repo/runs/12345"},
+			},
+			knownFetchedWorkflowIDs: map[int64]bool{},
+			wantMatches:             map[string]int64{"CodeQL": 789, "Checkov": 456},
+			wantWorkflowIDs:         []int64{789, 456},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matches, workflowIDs := DiscoverAdvSecWorkflows(tt.checkRuns, tt.knownFetchedWorkflowIDs)
+
+			if len(tt.wantMatches) == 0 {
+				if len(matches) > 0 {
+					t.Errorf("DiscoverAdvSecWorkflows() matches = %v, want empty", matches)
+				}
+			} else {
+				for k, v := range tt.wantMatches {
+					if matches[k] != v {
+						t.Errorf("DiscoverAdvSecWorkflows() matches[%q] = %d, want %d", k, matches[k], v)
+					}
+				}
+			}
+
+			if tt.wantWorkflowIDs == nil {
+				if workflowIDs != nil {
+					t.Errorf("DiscoverAdvSecWorkflows() workflowIDs = %v, want nil", workflowIDs)
+				}
+			} else {
+				if len(workflowIDs) != len(tt.wantWorkflowIDs) {
+					t.Errorf("DiscoverAdvSecWorkflows() len(workflowIDs) = %d, want %d", len(workflowIDs), len(tt.wantWorkflowIDs))
 				}
 			}
 		})

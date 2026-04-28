@@ -47,6 +47,8 @@ type Model struct {
 
 	// Historical job averages (incrementally updated as new workflows appear)
 	jobAverages             map[string]time.Duration
+	workflowAverages        map[int64]map[string]time.Duration
+	advSecMatchWorkflow    map[string]int64
 	runIDToWorkflowID       map[int64]int64
 	fetchedWorkflowIDs      map[int64]bool
 	pendingWorkflowFetch    map[int64]bool
@@ -64,6 +66,14 @@ type Model struct {
 	// Premature exit prevention (issue #236)
 	expectedCheckCount int
 	peakCheckCount     int
+
+	// Tracks which check runs we've already triggered discovery for,
+	// so we can re-trigger when new jobs appear.
+	seenCheckKeys map[string]bool
+
+	// historyFetchCompleted is true after at least one discovery cycle
+	// has finished (all pending workflow fetches resolved).
+	historyFetchCompleted bool
 }
 
 // NewModel creates a new TUI model
@@ -84,10 +94,13 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 		enableLinks:             enableLinks,
 		noAvg:                   noAvg,
 		jobAverages:             make(map[string]time.Duration),
+		workflowAverages:        make(map[int64]map[string]time.Duration),
+		advSecMatchWorkflow:    make(map[string]int64),
 		runIDToWorkflowID:       make(map[int64]int64),
 		fetchedWorkflowIDs:      make(map[int64]bool),
 		pendingWorkflowFetch:    make(map[int64]bool),
 		dispatchedWorkflowFetch: make(map[int64]bool),
+		seenCheckKeys:          make(map[string]bool),
 	}
 }
 

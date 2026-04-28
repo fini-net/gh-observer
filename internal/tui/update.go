@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"time"
 
@@ -123,9 +124,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					workflowCmds = append(workflowCmds, fetchWorkflowHistory(m.ctx, m.owner, m.repo, wfID))
 				}
 			}
+			// Also discover AdvSec workflows by name matching
+			advSecMatches, advSecWFIDs := ghclient.DiscoverAdvSecWorkflows(m.checkRuns, m.fetchedWorkflowIDs)
+			for name, wfID := range advSecMatches {
+				m.advSecMatchWorkflow[name] = wfID
+				if averages, ok := m.workflowAverages[wfID]; ok {
+					if _, exists := m.jobAverages[name]; !exists {
+						for _, dur := range averages {
+							m.jobAverages[name] = dur
+							break
+						}
+					}
+				}
+			}
+			for _, wfID := range advSecWFIDs {
+				if !m.dispatchedWorkflowFetch[wfID] {
+					m.pendingWorkflowFetch[wfID] = true
+					m.dispatchedWorkflowFetch[wfID] = true
+					workflowCmds = append(workflowCmds, fetchWorkflowHistory(m.ctx, m.owner, m.repo, wfID))
+				}
+			}
 			// If no new fetches, discovery phase is complete
 			if len(workflowCmds) == 0 {
 				m.avgFetchPending = false
+				m.historyFetchCompleted = true
 				if len(m.pendingWorkflowFetch) == 0 {
 					m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
 				}
@@ -152,6 +174,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if msg.Err == nil && msg.Averages != nil {
 			maps.Copy(m.jobAverages, msg.Averages)
+			m.workflowAverages[msg.WorkflowID] = msg.Averages
+
+			// For AdvSec-matched workflows, add an alias in jobAverages
+			// keyed by the AdvSec check name, using the first (or only) job's average
+			for advSecName, wfID := range m.advSecMatchWorkflow {
+				if wfID == msg.WorkflowID {
+					if _, exists := m.jobAverages[advSecName]; !exists {
+						for _, dur := range msg.Averages {
+							m.jobAverages[advSecName] = dur
+							break
+						}
+					}
+				}
+			}
+
 			m.expectedCheckCount = len(m.jobAverages)
 		}
 
@@ -159,6 +196,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.pendingWorkflowFetch) == 0 {
 			// Discovery phase complete - record duration and clear error on success
 			m.avgFetchPending = false
+			m.historyFetchCompleted = true
 			m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
 			if msg.Err == nil {
 				m.avgFetchErr = nil
@@ -176,6 +214,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// checkKey returns a unique key for a check run, used to detect new jobs.
+func checkKey(cr ghclient.CheckRunInfo) string {
+	if cr.WorkflowRunID > 0 {
+		return fmt.Sprintf("run:%d:%s", cr.WorkflowRunID, cr.Name)
+	}
+	if cr.DetailsURL != "" {
+		return fmt.Sprintf("url:%s:%s", cr.DetailsURL, cr.Name)
+	}
+	return fmt.Sprintf("name:%s", cr.Name)
+}
+
+// hasNewChecks returns true if any check runs in the update are new
+// (not previously seen by this model).
+func hasNewChecks(checkRuns []ghclient.CheckRunInfo, seen map[string]bool) bool {
+	for _, cr := range checkRuns {
+		key := checkKey(cr)
+		if !seen[key] {
+			return true
+		}
+	}
+	return false
+}
+
+// markChecksSeen records all check run keys as seen.
+func markChecksSeen(checkRuns []ghclient.CheckRunInfo, seen map[string]bool) {
+	for _, cr := range checkRuns {
+		seen[checkKey(cr)] = true
+	}
 }
 
 // handleChecksUpdate processes check run updates and returns the updated model.
@@ -201,30 +269,74 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 		m.firstCheckSeenAt = time.Now()
 	}
 
+	newChecks := hasNewChecks(msg.CheckRuns, m.seenCheckKeys)
+	markChecksSeen(msg.CheckRuns, m.seenCheckKeys)
+
 	var cmds []tea.Cmd
 
 	allComplete := allChecksComplete(msg.CheckRuns)
 	elapsed := time.Since(m.firstCheckSeenAt)
 	readyForHistory := !m.noAvg && !m.firstCheckSeenAt.IsZero() && (allComplete || elapsed >= historyFetchDelay)
+
+	reDiscover := newChecks && m.historyFetchCompleted && !m.avgFetchPending && m.rateLimitRemaining >= minRateLimitForFetch
+	if reDiscover {
+		m.avgFetchPending = true
+		m.avgFetchStartTime = time.Now()
+		cmds = append(cmds, discoverWorkflows(m.ctx, m.owner, m.repo, msg.CheckRuns, m.runIDToWorkflowID, m.fetchedWorkflowIDs))
+	}
+
 	if readyForHistory && !m.avgFetchPending && m.rateLimitRemaining >= minRateLimitForFetch {
-		var newRunIDs []int64
+		needsDiscovery := false
 		for _, cr := range msg.CheckRuns {
-			if cr.DetailsURL == "" {
+			if cr.WorkflowID > 0 {
+				if !m.fetchedWorkflowIDs[cr.WorkflowID] && !m.dispatchedWorkflowFetch[cr.WorkflowID] {
+					needsDiscovery = true
+				}
 				continue
 			}
-			runID, err := ghclient.ParseRunIDFromURL(cr.DetailsURL)
-			if err != nil {
-				debug.Log("run ID parse error", "url", cr.DetailsURL, "err", err)
+			if cr.WorkflowRunID > 0 {
+				if _, known := m.runIDToWorkflowID[cr.WorkflowRunID]; !known {
+					needsDiscovery = true
+				}
 				continue
 			}
-			if _, known := m.runIDToWorkflowID[runID]; known {
-				debug.Log("workflow cache hit", "run_id", runID)
-			} else {
-				debug.Log("workflow cache miss", "run_id", runID)
-				newRunIDs = append(newRunIDs, runID)
+			if cr.DetailsURL != "" {
+				runID, err := ghclient.ParseRunIDFromURL(cr.DetailsURL)
+				if err != nil {
+					continue
+				}
+				if _, known := m.runIDToWorkflowID[runID]; !known {
+					needsDiscovery = true
+				}
 			}
 		}
-		if len(newRunIDs) > 0 {
+
+		if !needsDiscovery {
+			advSecMatches, advSecWFIDs := ghclient.DiscoverAdvSecWorkflows(msg.CheckRuns, m.fetchedWorkflowIDs)
+			for name, wfID := range advSecMatches {
+				m.advSecMatchWorkflow[name] = wfID
+				if averages, ok := m.workflowAverages[wfID]; ok {
+					if _, exists := m.jobAverages[name]; !exists {
+						for _, dur := range averages {
+							m.jobAverages[name] = dur
+							break
+						}
+					}
+				}
+			}
+			for _, wfID := range advSecWFIDs {
+				if !m.dispatchedWorkflowFetch[wfID] {
+					m.pendingWorkflowFetch[wfID] = true
+					m.dispatchedWorkflowFetch[wfID] = true
+					cmds = append(cmds, fetchWorkflowHistory(m.ctx, m.owner, m.repo, wfID))
+				}
+			}
+			if len(advSecWFIDs) == 0 && len(m.pendingWorkflowFetch) == 0 && !m.avgFetchPending {
+				m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
+			}
+		}
+
+		if needsDiscovery {
 			m.avgFetchPending = true
 			m.avgFetchStartTime = time.Now()
 			cmds = append(cmds, discoverWorkflows(m.ctx, m.owner, m.repo, msg.CheckRuns, m.runIDToWorkflowID, m.fetchedWorkflowIDs))

@@ -10,22 +10,24 @@ import (
 )
 
 type checkRunContextFields struct {
-	Name        string
-	Summary     string
-	Status      string
-	Conclusion  string
-	StartedAt   githubv4.DateTime
-	CompletedAt githubv4.DateTime
-	DetailsURL  string
-	Annotations []struct {
+	Name          string
+	Summary       string
+	Status        string
+	Conclusion    string
+	StartedAt     githubv4.DateTime
+	CompletedAt   githubv4.DateTime
+	DetailsURL    string
+	Annotations   []struct {
 		Message         string
 		Path            string
 		Title           string
 		AnnotationLevel string
 		StartLine       int
 	}
-	WorkflowName string
-	AppName      string
+	WorkflowName   string
+	AppName        string
+	WorkflowRunID  int64
+	WorkflowID     int64
 }
 
 func makeCheckRunNode(f checkRunContextFields) contextNode {
@@ -91,8 +93,10 @@ func makeCheckRunNode(f checkRunContextFields) contextNode {
 			} `graphql:"annotations(first: 5)"`
 			CheckSuite struct {
 				WorkflowRun struct {
-					Workflow struct {
-						Name string
+					DatabaseID BigInt `graphql:"databaseId"`
+					Workflow   struct {
+						DatabaseID BigInt `graphql:"databaseId"`
+						Name       string
 					}
 				}
 				App struct {
@@ -125,8 +129,10 @@ func makeCheckRunNode(f checkRunContextFields) contextNode {
 			},
 			CheckSuite: struct {
 				WorkflowRun struct {
-					Workflow struct {
-						Name string
+					DatabaseID BigInt `graphql:"databaseId"`
+					Workflow   struct {
+						DatabaseID BigInt `graphql:"databaseId"`
+						Name       string
 					}
 				}
 				App struct {
@@ -135,11 +141,17 @@ func makeCheckRunNode(f checkRunContextFields) contextNode {
 				}
 			}{
 				WorkflowRun: struct {
-					Workflow struct {
-						Name string
+					DatabaseID BigInt `graphql:"databaseId"`
+					Workflow   struct {
+						DatabaseID BigInt `graphql:"databaseId"`
+						Name       string
 					}
 				}{
-					Workflow: struct{ Name string }{Name: f.WorkflowName},
+					DatabaseID: BigInt(f.WorkflowRunID),
+					Workflow: struct {
+						DatabaseID BigInt `graphql:"databaseId"`
+						Name       string
+					}{DatabaseID: BigInt(f.WorkflowID), Name: f.WorkflowName},
 				},
 				App: struct {
 					Name string
@@ -161,12 +173,14 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 	completedAt.Time = time.Date(2024, 1, 15, 10, 35, 0, 0, time.UTC)
 
 	tests := []struct {
-		name             string
-		nodes            []contextNode
-		wantLen          int
-		wantName         []string
-		wantWorkflowName []string
-		wantAppName      []string
+		name              string
+		nodes             []contextNode
+		wantLen           int
+		wantName          []string
+		wantWorkflowName  []string
+		wantAppName       []string
+		wantWorkflowRunID []int64
+		wantWorkflowID    []int64
 	}{
 		{
 			name:     "empty nodes returns nil",
@@ -306,6 +320,42 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 			wantAppName:      []string{"GitHub Code Scanning"},
 		},
 		{
+			name: "CheckRun with workflow IDs",
+			nodes: []contextNode{
+				makeCheckRunNode(checkRunContextFields{
+					Name:          "test",
+					Status:        "COMPLETED",
+					Conclusion:    "SUCCESS",
+					WorkflowName:  "CI",
+					WorkflowRunID: 123,
+					WorkflowID:    456,
+				}),
+			},
+			wantLen:            1,
+			wantName:           []string{"test"},
+			wantWorkflowName:   []string{"CI"},
+			wantWorkflowRunID:  []int64{123},
+			wantWorkflowID:     []int64{456},
+		},
+		{
+			name: "CheckRun with large workflow IDs exceeding int32",
+			nodes: []contextNode{
+				makeCheckRunNode(checkRunContextFields{
+					Name:          "test",
+					Status:        "COMPLETED",
+					Conclusion:    "SUCCESS",
+					WorkflowName:  "CI",
+					WorkflowRunID: 25027630970,
+					WorkflowID:    9876543210,
+				}),
+			},
+			wantLen:            1,
+			wantName:           []string{"test"},
+			wantWorkflowName:   []string{"CI"},
+			wantWorkflowRunID:  []int64{25027630970},
+			wantWorkflowID:     []int64{9876543210},
+		},
+		{
 			name: "WorkflowName takes priority over AppName",
 			nodes: []contextNode{
 				makeCheckRunNode(checkRunContextFields{
@@ -374,6 +424,26 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 					}
 					if got[i].AppName != an {
 						t.Errorf("contextNodesToCheckRuns()[%d].AppName = %q, want %q", i, got[i].AppName, an)
+					}
+				}
+			}
+			if tt.wantWorkflowRunID != nil {
+				for i, id := range tt.wantWorkflowRunID {
+					if i >= len(got) {
+						break
+					}
+					if got[i].WorkflowRunID != id {
+						t.Errorf("contextNodesToCheckRuns()[%d].WorkflowRunID = %d, want %d", i, got[i].WorkflowRunID, id)
+					}
+				}
+			}
+			if tt.wantWorkflowID != nil {
+				for i, id := range tt.wantWorkflowID {
+					if i >= len(got) {
+						break
+					}
+					if got[i].WorkflowID != id {
+						t.Errorf("contextNodesToCheckRuns()[%d].WorkflowID = %d, want %d", i, got[i].WorkflowID, id)
 					}
 				}
 			}
@@ -486,14 +556,16 @@ func TestContextNodesToCheckRuns_CheckRunFields(t *testing.T) {
 
 	nodes := []contextNode{
 		makeCheckRunNode(checkRunContextFields{
-			Name:         "build / compile",
-			Summary:      "Build passed",
-			Status:       "completed",
-			Conclusion:   "success",
-			StartedAt:    startedAt,
-			CompletedAt:  completedAt,
-			DetailsURL:   "https://github.com/owner/repo/actions/runs/42/job/99",
-			WorkflowName: "CI Pipeline",
+			Name:          "build / compile",
+			Summary:       "Build passed",
+			Status:        "completed",
+			Conclusion:    "success",
+			StartedAt:     startedAt,
+			CompletedAt:   completedAt,
+			DetailsURL:    "https://github.com/owner/repo/actions/runs/42/job/99",
+			WorkflowName:  "CI Pipeline",
+			WorkflowRunID: 42,
+			WorkflowID:    7,
 		}),
 	}
 
@@ -527,6 +599,12 @@ func TestContextNodesToCheckRuns_CheckRunFields(t *testing.T) {
 	}
 	if cr.DetailsURL != "https://github.com/owner/repo/actions/runs/42/job/99" {
 		t.Errorf("DetailsURL = %q, want %q", cr.DetailsURL, "https://github.com/owner/repo/actions/runs/42/job/99")
+	}
+	if cr.WorkflowRunID != 42 {
+		t.Errorf("WorkflowRunID = %d, want %d", cr.WorkflowRunID, 42)
+	}
+	if cr.WorkflowID != 7 {
+		t.Errorf("WorkflowID = %d, want %d", cr.WorkflowID, 7)
 	}
 }
 
@@ -707,5 +785,42 @@ func TestFetchCheckRunsGraphQL_QueryError(t *testing.T) {
 	}
 	if rateLimit != 5000 {
 		t.Errorf("expected default rate limit 5000 on error, got %d", rateLimit)
+	}
+}
+
+func TestBigInt_UnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    int64
+		wantErr bool
+	}{
+		{"small int", `42`, 42, false},
+		{"zero", `0`, 0, false},
+		{"negative", `-1`, -1, false},
+		{"max int32", `2147483647`, 2147483647, false},
+		{"exceeds int32", `25027630970`, 25027630970, false},
+		{"large negative", `-9223372036854775808`, -9223372036854775808, false},
+		{"overflow", `9223372036854775808`, 0, true},
+		{"string value", `"hello"`, 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var b BigInt
+			err := b.UnmarshalJSON([]byte(tt.input))
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if int64(b) != tt.want {
+				t.Errorf("got %d, want %d", int64(b), tt.want)
+			}
+		})
 	}
 }
