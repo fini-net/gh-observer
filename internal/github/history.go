@@ -42,9 +42,23 @@ func FetchJobAverages(
 	newFetchedWorkflowIDs []int64,
 	err error,
 ) {
-	// Step 1: collect unique run IDs from check run URLs
+	// Step 1: collect unique workflow run IDs and directly-known workflow IDs
+	newRunIDToWorkflowID = make(map[int64]int64)
 	runIDSet := map[int64]bool{}
+	directWorkflowIDSet := map[int64]bool{}
 	for _, cr := range checkRuns {
+		if cr.WorkflowID > 0 {
+			directWorkflowIDSet[cr.WorkflowID] = true
+			if cr.WorkflowRunID > 0 {
+				runIDSet[cr.WorkflowRunID] = true
+				newRunIDToWorkflowID[cr.WorkflowRunID] = cr.WorkflowID
+			}
+			continue
+		}
+		if cr.WorkflowRunID > 0 {
+			runIDSet[cr.WorkflowRunID] = true
+			continue
+		}
 		if cr.DetailsURL == "" {
 			continue
 		}
@@ -55,15 +69,21 @@ func FetchJobAverages(
 		runIDSet[runID] = true
 	}
 
-	if len(runIDSet) == 0 {
+	if len(runIDSet) == 0 && len(directWorkflowIDSet) == 0 {
 		return nil, nil, nil, nil
 	}
 
 	// Step 2: per unique run_id, get workflow_id (using cache where available)
-	newRunIDToWorkflowID = make(map[int64]int64)
 	workflowIDSet := map[int64]bool{}
+	for wfID := range directWorkflowIDSet {
+		workflowIDSet[wfID] = true
+	}
 
 	for runID := range runIDSet {
+		if wfID, alreadyKnown := newRunIDToWorkflowID[runID]; alreadyKnown {
+			workflowIDSet[wfID] = true
+			continue
+		}
 		// Check cache first
 		if wfID, ok := knownRunIDToWorkflowID[runID]; ok {
 			debug.Log("workflow cache hit (fetch)", "run_id", runID, "workflow_id", wfID)
@@ -172,6 +192,8 @@ func averageJobDurations(
 }
 
 // DiscoverWorkflows resolves run IDs to workflow IDs.
+// Uses WorkflowRunID/WorkflowID from GraphQL when available, falling back to
+// ParseRunIDFromURL for backward compatibility.
 // Returns new run ID → workflow ID mappings and the list of workflow IDs that need fetching.
 func DiscoverWorkflows(
 	ctx context.Context,
@@ -185,26 +207,45 @@ func DiscoverWorkflows(
 	workflowIDsToFetch []int64,
 	err error,
 ) {
-	runIDSet := map[int64]bool{}
+	newRunIDToWorkflowID = make(map[int64]int64)
+	workflowIDSet := map[int64]bool{}
+
 	for _, cr := range checkRuns {
+		if cr.WorkflowID > 0 {
+			workflowIDSet[cr.WorkflowID] = true
+			if cr.WorkflowRunID > 0 {
+				newRunIDToWorkflowID[cr.WorkflowRunID] = cr.WorkflowID
+			}
+			debug.Log("discover workflow ID from GraphQL", "workflow_id", cr.WorkflowID, "workflow_name", cr.WorkflowName)
+			continue
+		}
+
+		if cr.WorkflowRunID > 0 {
+			if wfID, ok := knownRunIDToWorkflowID[cr.WorkflowRunID]; ok {
+				debug.Log("discover cache hit (GraphQL run ID)", "run_id", cr.WorkflowRunID, "workflow_id", wfID)
+				workflowIDSet[wfID] = true
+				continue
+			}
+			run, _, apiErr := client.Actions.GetWorkflowRunByID(ctx, owner, repo, cr.WorkflowRunID)
+			if apiErr != nil {
+				debug.Log("discover workflow run fetch failed", "run_id", cr.WorkflowRunID, "err", apiErr)
+				continue
+			}
+			if run.WorkflowID != nil {
+				workflowIDSet[*run.WorkflowID] = true
+				newRunIDToWorkflowID[cr.WorkflowRunID] = *run.WorkflowID
+			}
+			continue
+		}
+
 		if cr.DetailsURL == "" {
 			continue
 		}
 		runID, parseErr := ParseRunIDFromURL(cr.DetailsURL)
 		if parseErr != nil {
+			debug.Log("discover run ID parse skipped", "url", cr.DetailsURL, "err", parseErr)
 			continue
 		}
-		runIDSet[runID] = true
-	}
-
-	if len(runIDSet) == 0 {
-		return nil, nil, nil
-	}
-
-	newRunIDToWorkflowID = make(map[int64]int64)
-	workflowIDSet := map[int64]bool{}
-
-	for runID := range runIDSet {
 		if wfID, ok := knownRunIDToWorkflowID[runID]; ok {
 			debug.Log("discover cache hit", "run_id", runID, "workflow_id", wfID)
 			workflowIDSet[wfID] = true
@@ -220,6 +261,10 @@ func DiscoverWorkflows(
 			workflowIDSet[*run.WorkflowID] = true
 			newRunIDToWorkflowID[runID] = *run.WorkflowID
 		}
+	}
+
+	if len(workflowIDSet) == 0 {
+		return nil, nil, nil
 	}
 
 	for wfID := range workflowIDSet {
@@ -264,4 +309,50 @@ func FetchWorkflowHistory(
 	averages := averageJobDurations(ctx, client, owner, repo, historicalRunIDs)
 
 	return averages, nil
+}
+
+// DiscoverAdvSecWorkflows matches GitHub Advanced Security checks to their
+// corresponding github-actions workflows by name. Returns a map of AdvSec
+// check Name → matched WorkflowID and the list of additional workflow IDs
+// that need history fetching.
+//
+// GitHub Advanced Security checks (CodeQL, Checkov, etc.) have workflowRun=null
+// in GraphQL, but their Name typically matches the WorkflowName of a
+// github-actions check run in the same PR. For example:
+//   - AdvSec check Name="CodeQL" matches github-actions WorkflowName="CodeQL"
+//   - AdvSec check Name="Checkov" matches github-actions WorkflowName="Checkov"
+func DiscoverAdvSecWorkflows(
+	checkRuns []CheckRunInfo,
+	knownFetchedWorkflowIDs map[int64]bool,
+) (
+	advSecMatchWorkflow map[string]int64,
+	workflowIDsToFetch []int64,
+) {
+	advSecMatchWorkflow = make(map[string]int64)
+	workflowNameToID := map[string]int64{}
+
+	for _, cr := range checkRuns {
+		if cr.WorkflowName != "" && cr.WorkflowID > 0 {
+			workflowNameToID[cr.WorkflowName] = cr.WorkflowID
+		}
+	}
+
+	for _, cr := range checkRuns {
+		if cr.WorkflowID > 0 || cr.WorkflowRunID > 0 {
+			continue
+		}
+		if cr.AppName == "" || cr.DetailsURL == "" {
+			continue
+		}
+
+		if matchedWFID, ok := workflowNameToID[cr.Name]; ok {
+			advSecMatchWorkflow[cr.Name] = matchedWFID
+			if !knownFetchedWorkflowIDs[matchedWFID] {
+				workflowIDsToFetch = append(workflowIDsToFetch, matchedWFID)
+			}
+			debug.Log("advsec name match", "check_name", cr.Name, "workflow_id", matchedWFID)
+		}
+	}
+
+	return advSecMatchWorkflow, workflowIDsToFetch
 }

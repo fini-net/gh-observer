@@ -293,6 +293,15 @@ func TestFormatAvg(t *testing.T) {
 			t.Errorf("FormatAvg() = %q, want %q", got, "2m 30s")
 		}
 	})
+
+	t.Run("AdvSec check with aliased average", func(t *testing.T) {
+		advSecCheck := ghclient.CheckRunInfo{Name: "CodeQL", AppName: "GitHub Advanced Security"}
+		averages := map[string]time.Duration{"CodeQL": 2 * time.Minute}
+		got := FormatAvg(advSecCheck, averages)
+		if got != "2m" {
+			t.Errorf("FormatAvg() = %q, want %q", got, "2m")
+		}
+	})
 }
 
 func TestBuildNameColumnCJK(t *testing.T) {

@@ -16,6 +16,8 @@ func makeModel() *Model {
 		repo:                    "test-repo",
 		rateLimitRemaining:      5000,
 		jobAverages:             make(map[string]time.Duration),
+		workflowAverages:        make(map[int64]map[string]time.Duration),
+		advSecMatchWorkflow:     make(map[string]int64),
 		runIDToWorkflowID:       make(map[int64]int64),
 		fetchedWorkflowIDs:      make(map[int64]bool),
 		pendingWorkflowFetch:    make(map[int64]bool),
@@ -697,6 +699,32 @@ func TestJobAveragesPartialMsg(t *testing.T) {
 
 		if result.expectedCheckCount != 3 {
 			t.Errorf("expectedCheckCount = %d, want 3", result.expectedCheckCount)
+		}
+	})
+
+	t.Run("AdvSec matched workflow adds alias to jobAverages", func(t *testing.T) {
+		m := makeModel()
+		m.pendingWorkflowFetch = map[int64]bool{789: true}
+		m.fetchedWorkflowIDs = make(map[int64]bool)
+		m.jobAverages = make(map[string]time.Duration)
+		m.workflowAverages = make(map[int64]map[string]time.Duration)
+		m.advSecMatchWorkflow = map[string]int64{"CodeQL": 789}
+		m.avgFetchStartTime = time.Now().Add(-1 * time.Second)
+
+		msg := JobAveragesPartialMsg{
+			WorkflowID: 789,
+			Averages: map[string]time.Duration{
+				"Analyze (go)": 2 * time.Minute,
+			},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if result.jobAverages["CodeQL"] != 2*time.Minute {
+			t.Errorf("jobAverages[CodeQL] = %v, want %v", result.jobAverages["CodeQL"], 2*time.Minute)
+		}
+		if result.workflowAverages[789]["Analyze (go)"] != 2*time.Minute {
+			t.Errorf("workflowAverages[789][Analyze (go)] = %v, want %v", result.workflowAverages[789]["Analyze (go)"], 2*time.Minute)
 		}
 	})
 }

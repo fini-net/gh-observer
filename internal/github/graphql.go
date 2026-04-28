@@ -31,6 +31,8 @@ type CheckRunInfo struct {
 	CompletedAt  *time.Time
 	DetailsURL   string
 	Annotations  []Annotation
+	WorkflowRunID int64
+	WorkflowID    int64
 }
 
 // contextNode represents a union type in the StatusCheckRollup
@@ -59,8 +61,10 @@ type contextNode struct {
 		} `graphql:"annotations(first: 5)"`
 	CheckSuite struct {
 		WorkflowRun struct {
-			Workflow struct {
-				Name string
+			DatabaseID githubv4.Int `graphql:"databaseId"`
+			Workflow   struct {
+				DatabaseID githubv4.Int `graphql:"databaseId"`
+				Name       string
 			}
 		}
 		App struct {
@@ -149,6 +153,8 @@ func contextNodesToCheckRuns(nodes []contextNode) []CheckRunInfo {
 		checkRun := node.CheckRunContext
 		workflowName := checkRun.CheckSuite.WorkflowRun.Workflow.Name
 		appName := checkRun.CheckSuite.App.Name
+		workflowRunID := int64(checkRun.CheckSuite.WorkflowRun.DatabaseID)
+		workflowID := int64(checkRun.CheckSuite.WorkflowRun.Workflow.DatabaseID)
 
 		var startedAt, completedAt *time.Time
 		if !checkRun.StartedAt.IsZero() {
@@ -172,16 +178,18 @@ func contextNodesToCheckRuns(nodes []contextNode) []CheckRunInfo {
 		}
 
 		checkRuns = append(checkRuns, CheckRunInfo{
-			Name:         checkRun.Name,
-			WorkflowName: workflowName,
-			AppName:      appName,
-			Summary:      checkRun.Summary,
-			Status:       strings.ToLower(checkRun.Status),
-			Conclusion:   strings.ToLower(checkRun.Conclusion),
-			StartedAt:    startedAt,
-			CompletedAt:  completedAt,
-			DetailsURL:   checkRun.DetailsURL,
-			Annotations:  annotations,
+			Name:          checkRun.Name,
+			WorkflowName:  workflowName,
+			AppName:       appName,
+			Summary:       checkRun.Summary,
+			Status:        strings.ToLower(checkRun.Status),
+			Conclusion:    strings.ToLower(checkRun.Conclusion),
+			StartedAt:     startedAt,
+			CompletedAt:   completedAt,
+			DetailsURL:    checkRun.DetailsURL,
+			Annotations:   annotations,
+			WorkflowRunID: workflowRunID,
+			WorkflowID:    workflowID,
 		})
 	}
 
