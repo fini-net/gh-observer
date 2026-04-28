@@ -128,6 +128,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			advSecMatches, advSecWFIDs := ghclient.DiscoverAdvSecWorkflows(m.checkRuns, m.fetchedWorkflowIDs)
 			for name, wfID := range advSecMatches {
 				m.advSecMatchWorkflow[name] = wfID
+				if averages, ok := m.workflowAverages[wfID]; ok {
+					if _, exists := m.jobAverages[name]; !exists {
+						for _, dur := range averages {
+							m.jobAverages[name] = dur
+							break
+						}
+					}
+				}
 			}
 			for _, wfID := range advSecWFIDs {
 				if !m.dispatchedWorkflowFetch[wfID] {
@@ -307,6 +315,14 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 			advSecMatches, advSecWFIDs := ghclient.DiscoverAdvSecWorkflows(msg.CheckRuns, m.fetchedWorkflowIDs)
 			for name, wfID := range advSecMatches {
 				m.advSecMatchWorkflow[name] = wfID
+				if averages, ok := m.workflowAverages[wfID]; ok {
+					if _, exists := m.jobAverages[name]; !exists {
+						for _, dur := range averages {
+							m.jobAverages[name] = dur
+							break
+						}
+					}
+				}
 			}
 			for _, wfID := range advSecWFIDs {
 				if !m.dispatchedWorkflowFetch[wfID] {
