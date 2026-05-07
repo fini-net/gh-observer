@@ -19,6 +19,11 @@
       "matchUpdateTypes": ["minor"],
       "groupName": "minor updates",
       "automerge": true
+    },
+    {
+      "matchDepNames": ["bridgecrewio/checkov-action"],
+      "overrideDatasource": "git-refs",
+      "overridePackageName": "https://github.com/bridgecrewio/checkov-action"
     }
   ]
 }
