@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/fini-net/gh-observer/internal/debug"
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v86/github"
 	"golang.org/x/oauth2"
 )
 
