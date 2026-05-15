@@ -139,11 +139,13 @@ file.
 **Files:** `internal/github/client.go`, `internal/github/pr.go`
 
 The application executes `gh` as a subprocess for token retrieval and PR
-detection. The commands are:
+detection. When running inside a jj (Jujutsu) repository, it also executes
+`jj git root` to locate the internal git directory. The commands are:
 
 - `gh auth token` — no user-supplied arguments
 - `gh pr view --json number,url` — no user-supplied arguments
-- `git remote get-url origin` — no user-supplied arguments
+- `jj git root` — no user-supplied arguments (only executed when a `.jj/`
+  directory is detected)
 
 No CLI arguments (PR number, URL, flags) are passed to any subprocess. All
 subprocess invocations use fixed argument lists.

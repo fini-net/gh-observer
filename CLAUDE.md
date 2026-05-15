@@ -327,19 +327,30 @@ The `internal/timing/calculator.go` module provides three core metrics:
 
 The `internal/github/` package provides API interaction with both REST and GraphQL:
 
+### Jujutsu (jj) VCS compatibility
+
+The application supports running inside jj (Jujutsu) repositories, both colocated and non-colocated:
+
+- **Detection** (`IsJujutsu()`) - Walks up from cwd looking for a `.jj/` directory
+- **GIT_DIR handling** (`SetGITDirForJJ()`) - When jj is detected, runs `jj git root` to find the internal git directory and sets `GIT_DIR` on `gh pr view` commands. This is necessary because `gh pr view` relies on git to determine the current branch, and in non-colocated jj repos the git directory is inside `.jj/repo/store/git/`
+- **Error messaging** - When auto-detection fails in a jj repo, the error message suggests explicit PR number/URL arguments or using `jj git colocation enable`
+- **Lazy detection** - jj detection and `jj git root` are computed once and cached via `sync.Once`
+
+This follows the approach recommended in jj's own documentation: `GIT_DIR=$(jj git root) gh pr view ...`
+
 - `GetToken()` - Retrieves GitHub token using:
   1. `GITHUB_TOKEN` environment variable (first priority)
   2. `gh auth token` output (fallback)
 
 - `NewClient()` - Creates authenticated REST API client for PR metadata
 
-- `GetCurrentPR()` - Auto-detects PR number from current branch via `gh pr view`
+- `GetCurrentPRWithRepo()` - Auto-detects PR number and owner/repo from current branch (correctly handles forked repos by deriving owner/repo from the PR URL; sets GIT_DIR for jj compatibility)
 
-- `GetCurrentPRWithRepo()` - Auto-detects PR number and owner/repo from current branch (correctly handles forked repos by deriving owner/repo from the PR URL)
+- `GetPRWithRepo(prNumber)` - Fetches PR number and owner/repo for an explicit PR number (correctly handles forks; sets GIT_DIR for jj compatibility)
 
-- `GetPRWithRepo(prNumber)` - Fetches PR number and owner/repo for an explicit PR number (correctly handles forks)
+- `IsJujutsu()` - Detects whether the current working directory is inside a jj (Jujutsu) repository by searching for a `.jj/` directory
 
-- `ParseOwnerRepo()` - Extracts owner/repo from git remote origin (supports SSH and HTTPS formats)
+- `SetGITDirForJJ(cmd)` - Sets the GIT_DIR environment variable on an exec.Cmd when running inside a jj repo, enabling `gh pr view` to work in non-colocated jj workspaces
 
 - `ParsePRURL(prURL)` - Extracts owner, repo, and PR number from a GitHub PR URL (supports `https://github.com/owner/repo/pull/NNN` format)
 

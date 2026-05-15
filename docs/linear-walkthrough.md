@@ -83,7 +83,7 @@ if len(args) > 0 {
 
 **Why use PR URL?** External repositories can be watched without cloning them locally. The URL contains all the information needed (owner, repo, PR number).
 
-**Fork Handling**: The code uses `GetPRWithRepo()` and `GetCurrentPRWithRepo()` instead of `ParseOwnerRepo()` to correctly identify the repository for forked PRs. The local git remote might point to a fork, but the PR lives in the upstream repository.
+**Fork Handling**: The code uses `GetPRWithRepo()` and `GetCurrentPRWithRepo()` to correctly identify the repository for forked PRs. The local git remote might point to a fork, but the PR lives in the upstream repository. Owner/repo is derived from the PR URL returned by `gh pr view`, not from git remotes.
 
 ### Main Run Function (`main.go:137-223`)
 
@@ -765,15 +765,16 @@ func FetchPRInfo(ctx context.Context, client *github.Client, owner, repo string,
 
 Uses `TimestampFormat` from `internal/github/timestamp.go`.
 
-### Forked Repository Handling (`internal/github/pr.go`)
+### Forked Repository and jj Handling (`internal/github/pr.go`)
 
-**Problem**: When working on a forked repo, `git remote get-url origin` returns the fork's URL, not the upstream repository where the PR lives.
+**Problem**: When working on a forked repo, `git remote get-url origin` returns the fork's URL, not the upstream repository where the PR lives. Additionally, in jj (Jujutsu) non-colocated repos, `gh pr view` cannot find the git repository.
 
-**Solution**: Use `gh pr view --json number,url` to get the PR URL, then extract owner/repo from that URL:
+**Solution**: Use `gh pr view --json number,url` to get the PR URL, then extract owner/repo from that URL. In jj repos, set `GIT_DIR` from `jj git root` so `gh pr view` can locate the git directory:
 
 ```go
 func GetCurrentPRWithRepo() (int, string, string, error) {
     cmd := exec.Command("gh", "pr", "view", "--json", "number,url")
+    SetGITDirForJJ(cmd) // Sets GIT_DIR for jj compatibility
     output, err := cmd.Output()
     return parsePRViewWithRepo(output)
 }
@@ -784,6 +785,16 @@ func parsePRViewWithRepo(jsonOutput []byte) (int, string, string, error) {
     return result.Number, owner, repo, nil
 }
 ```
+
+### Jujutsu (jj) VCS Compatibility (`internal/github/detect.go`)
+
+The application detects jj repos and adapts its behavior:
+
+- **`IsJujutsu()`** - Searches upward from cwd for a `.jj/` directory, caching the result
+- **`SetGITDirForJJ(cmd)`** - When a jj repo is detected, runs `jj git root` to find the internal git directory path, then sets `GIT_DIR` on the `exec.Cmd` so `gh pr view` works in non-colocated jj workspaces
+- **Error messaging** - When auto-detection fails in a jj repo, suggests explicit PR arguments or `jj git colocation enable`
+
+This follows the approach recommended in jj's documentation: `GIT_DIR=$(jj git root) gh pr view ...`
 
 ### Historical Job Averages (`internal/github/history.go`)
 

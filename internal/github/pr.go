@@ -7,14 +7,11 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/google/go-github/v86/github"
 )
 
 var (
-	sshPattern           = regexp.MustCompile(`git@github\.com:([^/]+)/(.+?)(?:\.git)?/?$`)
-	httpsPattern          = regexp.MustCompile(`https://github\.com/([^/]+)/(.+?)(?:\.git)?/?$`)
 	prURLPattern          = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)$`)
 	actionsRunURLPattern = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/actions/runs/(\d+)$`)
 )
@@ -26,22 +23,6 @@ type PRInfo struct {
 	HeadSHA        string
 	CreatedAt      string
 	HeadCommitDate string
-}
-
-// GetCurrentPR auto-detects the PR number from the current branch using gh CLI
-func GetCurrentPR() (int, error) {
-	cmd := exec.Command("gh", "pr", "view", "--json", "number", "--jq", ".number")
-	output, err := cmd.Output()
-	if err != nil {
-		return 0, fmt.Errorf("not on a PR branch or gh CLI not available")
-	}
-
-	prNumber, err := strconv.Atoi(strings.TrimSpace(string(output)))
-	if err != nil {
-		return 0, fmt.Errorf("invalid PR number: %w", err)
-	}
-
-	return prNumber, nil
 }
 
 // parsePRViewWithRepo parses JSON output from 'gh pr view --json number,url'
@@ -79,9 +60,11 @@ func parsePRViewWithRepo(jsonOutput []byte) (int, string, string, error) {
 
 // GetCurrentPRWithRepo auto-detects PR number and repository from current branch.
 // This correctly handles forked repos by getting owner/repo from the PR URL
-// rather than from the local git remote.
+// rather than from the local git remote. In jj (Jujutsu) repos, sets GIT_DIR
+// so that gh pr view can locate the git repository.
 func GetCurrentPRWithRepo() (int, string, string, error) {
 	cmd := exec.Command("gh", "pr", "view", "--json", "number,url")
+	SetGITDirForJJ(cmd)
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, "", "", fmt.Errorf("not on a PR branch or gh CLI not available")
@@ -92,29 +75,16 @@ func GetCurrentPRWithRepo() (int, string, string, error) {
 
 // GetPRWithRepo fetches PR number and repository for an explicit PR number.
 // This correctly handles forked repos by getting owner/repo from the PR URL.
+// In jj (Jujutsu) repos, sets GIT_DIR so that gh pr view can locate the git repository.
 func GetPRWithRepo(prNumber int) (int, string, string, error) {
 	cmd := exec.Command("gh", "pr", "view", strconv.Itoa(prNumber), "--json", "number,url")
+	SetGITDirForJJ(cmd)
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, "", "", fmt.Errorf("failed to view PR #%d: %w", prNumber, err)
 	}
 
 	return parsePRViewWithRepo(output)
-}
-
-// parseOwnerRepoFromURL extracts owner and repo from a remote URL string
-func parseOwnerRepoFromURL(url string) (string, string, error) {
-	// Parse SSH format: git@github.com:owner/repo.git
-	if matches := sshPattern.FindStringSubmatch(url); len(matches) == 3 {
-		return matches[1], strings.TrimSuffix(matches[2], "/"), nil
-	}
-
-	// Parse HTTPS format: https://github.com/owner/repo or https://github.com/owner/repo.git
-	if matches := httpsPattern.FindStringSubmatch(url); len(matches) == 3 {
-		return matches[1], strings.TrimSuffix(matches[2], "/"), nil
-	}
-
-	return "", "", fmt.Errorf("unable to parse owner/repo from remote URL: %s", url)
 }
 
 // ParseActionsRunURL extracts owner, repo, and run ID from a GitHub Actions run URL.
