@@ -190,7 +190,7 @@ averages, just like PR mode but without the queue latency column:
 fini-net/gh-observer: CI  15:04:05 UTC
 Updated 5s ago  •  Pushed 2m ago
 
-  Workflow/Job                                Duration   Avg
+    Workflow/Job                                ThisRun   HistAvg
 
 ✓ CI / test                                      1m 30s    1m 25s
 ◐ CI / lint                                        45s        --

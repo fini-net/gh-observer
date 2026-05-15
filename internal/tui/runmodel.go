@@ -6,12 +6,14 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
+	"github.com/google/go-github/v86/github"
 )
 
 // RunModel holds the application state for watching a workflow run.
 type RunModel struct {
 	ctx   context.Context
 	token string
+	client *github.Client
 	owner string
 	repo  string
 	runID int64
@@ -72,6 +74,7 @@ func NewRunModel(ctx context.Context, token, owner, repo string, runID int64, re
 	return RunModel{
 		ctx:                     ctx,
 		token:                   token,
+		client:                  ghclient.NewClientFromToken(ctx, token),
 		owner:                   owner,
 		repo:                    repo,
 		runID:                   runID,

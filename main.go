@@ -125,7 +125,7 @@ func parseArgs(args []string) (runArgs, error) {
 		// Auto-detect PR from current branch
 		prNumber, owner, repo, err := ghclient.GetCurrentPRWithRepo()
 		if err != nil {
-			return runArgs{}, fmt.Errorf("Failed to detect PR: %v\nMake sure you're on a PR branch or provide a PR number or URL", err)
+			return runArgs{}, fmt.Errorf("failed to detect PR: %v\nMake sure you're on a PR branch or provide a PR number or URL", err)
 		}
 		return runArgs{mode: modePR, owner: owner, repo: repo, prNumber: prNumber}, nil
 	}
@@ -146,12 +146,12 @@ func parseArgs(args []string) (runArgs, error) {
 	if n, convErr := strconv.Atoi(arg); convErr == nil {
 		prNumber, owner, repo, err := ghclient.GetPRWithRepo(n)
 		if err != nil {
-			return runArgs{}, fmt.Errorf("Failed to get PR #%d: %v", n, err)
+			return runArgs{}, fmt.Errorf("failed to get PR #%d: %v", n, err)
 		}
 		return runArgs{mode: modePR, owner: owner, repo: repo, prNumber: prNumber}, nil
 	}
 
-	return runArgs{}, fmt.Errorf("Invalid PR number or URL: %s", arg)
+	return runArgs{}, fmt.Errorf("invalid PR number, PR URL, or Actions run URL: %s", arg)
 }
 
 // runPRMode handles watching a PR's checks.
@@ -283,21 +283,22 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 
 // runRunSnapshot prints a one-time snapshot of Actions run status (non-interactive mode)
 func runRunSnapshot(ctx context.Context, owner, repo string, runID int64, enableLinks bool, quick bool) int {
-	client, err := ghclient.NewClient(ctx)
+	token, err := ghclient.GetToken()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create GitHub client: %v\n", err)
+		fmt.Fprintf(os.Stderr, "failed to get GitHub token: %v\n", err)
 		return 1
 	}
+	client := ghclient.NewClientFromToken(ctx, token)
 
 	runInfo, err := ghclient.FetchRunInfo(ctx, client, owner, repo, runID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to fetch run info: %v\n", err)
+		fmt.Fprintf(os.Stderr, "failed to fetch run info: %v\n", err)
 		return 1
 	}
 
 	jobs, _, err := ghclient.FetchRunJobs(ctx, client, owner, repo, runID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to fetch jobs: %v\n", err)
+		fmt.Fprintf(os.Stderr, "failed to fetch jobs: %v\n", err)
 		return 1
 	}
 
@@ -321,20 +322,17 @@ func runRunSnapshot(ctx context.Context, owner, repo string, runID int64, enable
 
 	var jobAverages map[string]time.Duration
 	if !quick {
-		historyClient, err := ghclient.NewClient(ctx)
+		checkRuns := ghclient.WorkflowJobInfoToCheckRuns(jobs)
+		avgs, _, _, err := ghclient.FetchJobAverages(ctx, client, owner, repo, checkRuns, nil, nil)
 		if err == nil {
-			checkRuns := ghclient.WorkflowJobInfoToCheckRuns(jobs)
-			avgs, _, _, err := ghclient.FetchJobAverages(ctx, historyClient, owner, repo, checkRuns, nil, nil)
-			if err == nil {
-				jobAverages = avgs
-			}
+			jobAverages = avgs
 		}
 	}
 
 	widths := tui.CalculateRunColumnWidths(jobs, jobAverages)
 
 	headerName, headerDuration, headerAvg := tui.FormatRunHeaderColumns(widths)
-	fmt.Printf("%s  %s  %s\n\n", headerName, headerDuration, headerAvg)
+	fmt.Printf("  %s  %s  %s\n\n", headerName, headerDuration, headerAvg)
 
 	exitCode := 0
 	for _, job := range jobs {

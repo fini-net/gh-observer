@@ -66,7 +66,7 @@ func (m RunModel) View() tea.View {
 	widths := CalculateRunColumnWidths(m.jobs, m.jobAverages)
 
 	headerName, headerDuration, headerAvg := FormatRunHeaderColumns(widths)
-	b.WriteString(m.styles.Header.Render(fmt.Sprintf("%s  %s  %s\n", headerName, headerDuration, headerAvg)))
+	b.WriteString(m.styles.Header.Render(fmt.Sprintf("  %s  %s  %s\n", headerName, headerDuration, headerAvg)))
 	b.WriteString("\n")
 
 	for _, job := range m.jobs {

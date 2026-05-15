@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/fini-net/gh-observer/internal/debug"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
+	"github.com/google/go-github/v86/github"
 )
 
 // RunTickMsg is sent on each poll interval for run-watching mode.
@@ -49,9 +50,9 @@ type RunErrorMsg struct {
 
 // Init initializes the run model.
 func (m RunModel) Init() tea.Cmd {
-	return tea.Batch(
+		return tea.Batch(
 		m.spinner.Tick,
-		fetchRunInfo(m.ctx, m.owner, m.repo, m.runID),
+		fetchRunInfo(m.ctx, m.client, m.owner, m.repo, m.runID),
 		runTick(m.refreshInterval),
 	)
 }
@@ -77,7 +78,7 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, runTick(m.refreshInterval*3)
 		}
 		return m, tea.Batch(
-			fetchRunJobs(m.ctx, m.owner, m.repo, m.runID),
+			fetchRunJobs(m.ctx, m.client, m.owner, m.repo, m.runID),
 			runTick(m.refreshInterval),
 		)
 
@@ -88,7 +89,7 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.runInfo = msg.RunInfo
 		m.runInfoLoaded = true
-		return m, fetchRunJobs(m.ctx, m.owner, m.repo, m.runID)
+		return m, fetchRunJobs(m.ctx, m.client, m.owner, m.repo, m.runID)
 
 	case RunJobsUpdateMsg:
 		return m.handleRunJobsUpdate(msg)
@@ -135,7 +136,7 @@ func (m *RunModel) handleRunJobsUpdate(msg RunJobsUpdateMsg) (tea.Model, tea.Cmd
 		if len(checkRuns) > 0 {
 			m.avgFetchPending = true
 			m.avgFetchStartTime = time.Now()
-			cmds = append(cmds, discoverRunWorkflows(m.ctx, m.owner, m.repo, checkRuns, m.runIDToWorkflowID, m.fetchedWorkflowIDs))
+			cmds = append(cmds, discoverRunWorkflows(m.ctx, m.client, m.owner, m.repo, checkRuns, m.runIDToWorkflowID, m.fetchedWorkflowIDs))
 		}
 	}
 
@@ -170,7 +171,7 @@ func (m *RunModel) handleRunWorkflowsDiscovered(msg RunWorkflowsDiscoveredMsg) (
 		if !m.dispatchedWorkflowFetch[wfID] {
 			m.pendingWorkflowFetch[wfID] = true
 			m.dispatchedWorkflowFetch[wfID] = true
-			workflowCmds = append(workflowCmds, fetchRunWorkflowHistory(m.ctx, m.owner, m.repo, wfID))
+			workflowCmds = append(workflowCmds, fetchRunWorkflowHistory(m.ctx, m.client, m.owner, m.repo, wfID))
 		}
 	}
 
@@ -224,13 +225,8 @@ func runTick(d time.Duration) tea.Cmd {
 }
 
 // fetchRunInfo fetches workflow run metadata.
-func fetchRunInfo(ctx context.Context, owner, repo string, runID int64) tea.Cmd {
+func fetchRunInfo(ctx context.Context, client *github.Client, owner, repo string, runID int64) tea.Cmd {
 	return func() tea.Msg {
-		client, err := ghclient.NewClient(ctx)
-		if err != nil {
-			return RunInfoMsg{Err: err}
-		}
-
 		runInfo, err := ghclient.FetchRunInfo(ctx, client, owner, repo, runID)
 		if err != nil {
 			return RunInfoMsg{Err: err}
@@ -241,13 +237,8 @@ func fetchRunInfo(ctx context.Context, owner, repo string, runID int64) tea.Cmd 
 }
 
 // fetchRunJobs fetches the jobs for a workflow run.
-func fetchRunJobs(ctx context.Context, owner, repo string, runID int64) tea.Cmd {
+func fetchRunJobs(ctx context.Context, client *github.Client, owner, repo string, runID int64) tea.Cmd {
 	return func() tea.Msg {
-		client, err := ghclient.NewClient(ctx)
-		if err != nil {
-			return RunJobsUpdateMsg{Err: err}
-		}
-
 		jobs, rateLimit, err := ghclient.FetchRunJobs(ctx, client, owner, repo, runID)
 		if err != nil {
 			return RunJobsUpdateMsg{Err: err}
@@ -261,12 +252,8 @@ func fetchRunJobs(ctx context.Context, owner, repo string, runID int64) tea.Cmd 
 }
 
 // discoverRunWorkflows resolves workflow IDs from job data for history fetching.
-func discoverRunWorkflows(ctx context.Context, owner, repo string, checkRuns []ghclient.CheckRunInfo, knownRunIDToWorkflowID map[int64]int64, knownFetchedWorkflowIDs map[int64]bool) tea.Cmd {
+func discoverRunWorkflows(ctx context.Context, client *github.Client, owner, repo string, checkRuns []ghclient.CheckRunInfo, knownRunIDToWorkflowID map[int64]int64, knownFetchedWorkflowIDs map[int64]bool) tea.Cmd {
 	return func() tea.Msg {
-		client, err := ghclient.NewClient(ctx)
-		if err != nil {
-			return RunWorkflowsDiscoveredMsg{Err: err}
-		}
 		newRunIDToWorkflowID, workflowIDsToFetch, err := ghclient.DiscoverWorkflows(ctx, client, owner, repo, checkRuns, knownRunIDToWorkflowID, knownFetchedWorkflowIDs)
 		if err != nil {
 			return RunWorkflowsDiscoveredMsg{Err: err}
@@ -279,12 +266,8 @@ func discoverRunWorkflows(ctx context.Context, owner, repo string, checkRuns []g
 }
 
 // fetchRunWorkflowHistory fetches historical job durations for a single workflow.
-func fetchRunWorkflowHistory(ctx context.Context, owner, repo string, workflowID int64) tea.Cmd {
+func fetchRunWorkflowHistory(ctx context.Context, client *github.Client, owner, repo string, workflowID int64) tea.Cmd {
 	return func() tea.Msg {
-		client, err := ghclient.NewClient(ctx)
-		if err != nil {
-			return RunJobAveragesPartialMsg{WorkflowID: workflowID, Err: err}
-		}
 		averages, err := ghclient.FetchWorkflowHistory(ctx, client, owner, repo, workflowID)
 		if err != nil {
 			return RunJobAveragesPartialMsg{WorkflowID: workflowID, Err: err}

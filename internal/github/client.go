@@ -41,8 +41,12 @@ func NewClient(ctx context.Context) (*github.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	return NewClientFromToken(ctx, token), nil
+}
 
+// NewClientFromToken creates a GitHub API client using an already-obtained token.
+func NewClientFromToken(ctx context.Context, token string) *github.Client {
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	tc := oauth2.NewClient(ctx, ts)
-	return github.NewClient(tc), nil
+	return github.NewClient(tc)
 }

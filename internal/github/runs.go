@@ -116,7 +116,7 @@ func FetchRunJobs(ctx context.Context, client *github.Client, owner, repo string
 		if resp == nil || resp.NextPage == 0 {
 			break
 		}
-		opts.ListOptions.Page = resp.NextPage
+		opts.Page = resp.NextPage
 	}
 
 	debug.Log("fetch run jobs", "run_id", runID, "count", len(allJobs), "rate_limit_remaining", rateLimitRemaining)
