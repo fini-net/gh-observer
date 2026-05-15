@@ -812,6 +812,53 @@ func TestCanTrustCompletion(t *testing.T) {
 			t.Error("should not trust completion with no expected count before grace period")
 		}
 	})
+
+	t.Run("quick mode returns true when peak matches current count", func(t *testing.T) {
+		m := makeModel()
+		m.noAvg = true
+		m.firstCheckSeenAt = now.Add(-5 * time.Second)
+		m.checkRuns = []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}
+		m.peakCheckCount = 1
+		m.expectedCheckCount = 0
+		if !canTrustCompletion(m) {
+			t.Error("should trust completion in quick mode when peak matches current count")
+		}
+	})
+
+	t.Run("quick mode returns false when peak exceeds current count", func(t *testing.T) {
+		m := makeModel()
+		m.noAvg = true
+		m.firstCheckSeenAt = now.Add(-5 * time.Second)
+		m.checkRuns = []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}
+		m.peakCheckCount = 3
+		if canTrustCompletion(m) {
+			t.Error("should not trust completion in quick mode when checks disappeared")
+		}
+	})
+
+	t.Run("quick mode returns false when firstCheckSeenAt is zero", func(t *testing.T) {
+		m := makeModel()
+		m.noAvg = true
+		m.firstCheckSeenAt = time.Time{}
+		if canTrustCompletion(m) {
+			t.Error("should not trust completion in quick mode when firstCheckSeenAt is zero")
+		}
+	})
+
+	t.Run("quick mode ignores expectedCheckCount and grace period", func(t *testing.T) {
+		m := makeModel()
+		m.noAvg = true
+		m.firstCheckSeenAt = now.Add(-5 * time.Second)
+		m.checkRuns = []ghclient.CheckRunInfo{
+			{Status: "completed", Conclusion: "success"},
+			{Status: "completed", Conclusion: "success"},
+		}
+		m.peakCheckCount = 2
+		m.expectedCheckCount = 10
+		if !canTrustCompletion(m) {
+			t.Error("should trust completion in quick mode regardless of expected count")
+		}
+	})
 }
 
 func TestPeakCheckCountTracking(t *testing.T) {
