@@ -88,7 +88,7 @@ func (m Model) View() tea.View {
 				int(minCheckAppearanceRatio*100),
 				int(float64(len(m.checkRuns))/float64(m.expectedCheckCount)*100))
 		} else if m.noAvg {
-			b.WriteString(m.styles.Queued.Render("  Waiting for check count to stabilize...\n"))
+			b.WriteString(m.styles.Queued.Render("  Waiting for all seen checks to finish...\n"))
 		} else {
 			elapsed := time.Since(m.firstCheckSeenAt)
 			remaining := startupGracePeriod - elapsed
