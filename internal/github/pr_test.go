@@ -260,6 +260,130 @@ func TestParsePRViewWithRepo(t *testing.T) {
 	}
 }
 
+func TestParseActionsRunURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		url       string
+		wantOwner string
+		wantRepo  string
+		wantRunID int64
+		wantErr   bool
+	}{
+		{
+			name:      "valid HTTPS URL",
+			url:       "https://github.com/fini-net/gh-observer/actions/runs/25856656092",
+			wantOwner: "fini-net",
+			wantRepo:  "gh-observer",
+			wantRunID: 25856656092,
+			wantErr:   false,
+		},
+		{
+			name:      "valid HTTP URL",
+			url:       "http://github.com/owner/repo/actions/runs/123",
+			wantOwner: "owner",
+			wantRepo:  "repo",
+			wantRunID: 123,
+			wantErr:   false,
+		},
+		{
+			name:      "owner with hyphens and numbers",
+			url:       "https://github.com/org-123/repo-name/actions/runs/456",
+			wantOwner: "org-123",
+			wantRepo:  "repo-name",
+			wantRunID: 456,
+			wantErr:   false,
+		},
+		{
+			name:      "repo with dots",
+			url:       "https://github.com/owner/repo.name/actions/runs/789",
+			wantOwner: "owner",
+			wantRepo:  "repo.name",
+			wantRunID: 789,
+			wantErr:   false,
+		},
+		{
+			name:    "missing protocol",
+			url:     "github.com/owner/repo/actions/runs/123",
+			wantErr: true,
+		},
+		{
+			name:    "wrong host",
+			url:     "https://gitlab.com/owner/repo/actions/runs/123",
+			wantErr: true,
+		},
+		{
+			name:    "wrong path format - pull instead of actions",
+			url:     "https://github.com/owner/repo/pull/123",
+			wantErr: true,
+		},
+		{
+			name:    "missing run ID",
+			url:     "https://github.com/owner/repo/actions/runs/",
+			wantErr: true,
+		},
+		{
+			name:    "non-numeric run ID",
+			url:     "https://github.com/owner/repo/actions/runs/abc",
+			wantErr: true,
+		},
+		{
+			name:    "trailing slash",
+			url:     "https://github.com/owner/repo/actions/runs/123/",
+			wantErr: true,
+		},
+		{
+			name:    "empty string",
+			url:     "",
+			wantErr: true,
+		},
+		{
+			name:    "just github.com",
+			url:     "https://github.com",
+			wantErr: true,
+		},
+		{
+			name:    "URL with query params",
+			url:     "https://github.com/owner/repo/actions/runs/123?w=1",
+			wantErr: true,
+		},
+		{
+			name:    "URL with hash fragment",
+			url:     "https://github.com/owner/repo/actions/runs/123#summary",
+			wantErr: true,
+		},
+		{
+			name:    "URL with job path (should not match)",
+			url:     "https://github.com/owner/repo/actions/runs/123/job/456",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotOwner, gotRepo, gotRunID, err := ParseActionsRunURL(tt.url)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ParseActionsRunURL(%q) expected error, got nil", tt.url)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("ParseActionsRunURL(%q) unexpected error: %v", tt.url, err)
+				return
+			}
+			if gotOwner != tt.wantOwner {
+				t.Errorf("ParseActionsRunURL(%q) owner = %q, want %q", tt.url, gotOwner, tt.wantOwner)
+			}
+			if gotRepo != tt.wantRepo {
+				t.Errorf("ParseActionsRunURL(%q) repo = %q, want %q", tt.url, gotRepo, tt.wantRepo)
+			}
+			if gotRunID != tt.wantRunID {
+				t.Errorf("ParseActionsRunURL(%q) runID = %d, want %d", tt.url, gotRunID, tt.wantRunID)
+			}
+		})
+	}
+}
+
 func TestParseOwnerRepoFromURL(t *testing.T) {
 	tests := []struct {
 		name      string
