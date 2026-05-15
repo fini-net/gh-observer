@@ -7,8 +7,8 @@
 ![GitHub License](https://img.shields.io/github/license/fini-net/gh-observer)
 ![GitHub watchers](https://img.shields.io/github/watchers/fini-net/gh-observer)
 
-A GitHub PR check watcher that improves on `gh pr checks --watch` by showing
-runtime metrics, queue latency, and better handling of startup delays.
+A GitHub PR check and Actions run watcher that improves on `gh pr checks --watch`
+by showing runtime metrics, queue latency, and better handling of startup delays.
 
 ![project banner: abstract representation of code flowing through a pull request, using interconnected nodes and lines.](docs/gh-observer-banner.jpeg)
 
@@ -29,6 +29,8 @@ slow?"
   manual polling
 - ⚡ **Startup phases** - Helpful messages like "Waiting for Actions to
   start..." during the 30-90s GitHub delay
+- 🔧 **Actions run watching** - Monitor any GitHub Actions workflow run by
+  URL, not just PR checks
 - 🛡️ **Rate limits** - Backs off automatically when approaching API limits to
   avoid interruptions
 - 📊 **Historical averages** - Shows average runtime for each job based on
@@ -171,6 +173,37 @@ This works for any GitHub PR URL and is useful for:
 - Monitoring upstream dependencies before merging
 - Following CI status on projects you don't have cloned locally
 
+### Watch an Actions workflow run
+
+You can also watch any GitHub Actions workflow run by passing its URL. This is
+useful for monitoring CI triggered by a merge to main, a scheduled workflow,
+or a `workflow_dispatch` event - things that aren't tied to a PR:
+
+```bash
+gh observer https://github.com/fini-net/gh-observer/actions/runs/25856656092
+```
+
+The display shows each job in the run with runtime metrics and historical
+averages, just like PR mode but without the queue latency column:
+
+```ShellOutput
+fini-net/gh-observer: CI  15:04:05 UTC
+Updated 5s ago  •  Pushed 2m ago
+
+  Workflow/Job                                Duration   Avg
+
+✓ CI / test                                      1m 30s    1m 25s
+◐ CI / lint                                        45s        --
+✗ CI / deploy                                    2m 10s    1m 50s
+
+Press q to quit
+```
+
+The header shows the repo name, the run's display title, and how long ago
+the head commit was pushed (or when the run was created if commit info is
+unavailable). Exit code follows the same convention: 0 if all jobs succeed,
+1 if any job fails.
+
 ### Skip historical averages for a faster snapshot
 
 If you just want a quick look without waiting for the historical averages
@@ -191,8 +224,11 @@ Our primary focus is on improving the interactive experience, but we also
 set the `exit` code for the process in a potentially useful way.
 
 ```bash
-# Wait for checks to complete and exit with their status
+# Wait for PR checks to complete and exit with their status
 gh observer && echo "All checks passed!"
+
+# Wait for an Actions run to complete and exit with job status
+gh observer https://github.com/owner/repo/actions/runs/123456789 && echo "All jobs passed!"
 ```
 
 ## Configuration
@@ -367,11 +403,12 @@ go test ./internal/debug/...
 ### What the tests cover
 
 Unit tests cover timing calculations (queue latency, runtime, duration
-formatting), GitHub API parsing (GraphQL check runs, history fetching, PR URL
-parsing), TUI logic (display formatting, state updates, exit codes),
+formatting), GitHub API parsing (GraphQL check runs, REST workflow runs,
+history fetching, PR URL and Actions run URL parsing), TUI logic (display
+formatting, state updates, exit codes for both PR and run modes),
 configuration loading, and debug logging. TUI rendering and live GitHub API
 interactions are tested manually by running `just build` and pointing
-the binary at a real PR.
+the binary at a real PR or Actions run URL.
 
 ## Development
 

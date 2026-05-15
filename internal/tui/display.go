@@ -78,7 +78,7 @@ func GetCheckIcon(status, conclusion string) string {
 		}
 	case "in_progress":
 		return "◐"
-	case "queued":
+	case "queued", "waiting":
 		return "⏸"
 	default:
 		return "?"
@@ -279,7 +279,7 @@ func statusPriority(status string) int {
 		return 0
 	case "completed":
 		return 1
-	case "queued":
+	case "queued", "waiting":
 		return 2
 	default:
 		return 3

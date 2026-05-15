@@ -282,3 +282,89 @@ func TestFormatDuration(t *testing.T) {
 func ptrTime(t time.Time) *time.Time {
 	return new(t)
 }
+
+func TestRunJobRuntime(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name     string
+		startedAt *time.Time
+		wantZero bool
+	}{
+		{
+			name:     "nil StartedAt returns zero",
+			startedAt: nil,
+			wantZero:  true,
+		},
+		{
+			name:     "valid StartedAt returns positive duration",
+			startedAt: &now,
+			wantZero:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RunJobRuntime(tt.startedAt)
+			if tt.wantZero && got != 0 {
+				t.Errorf("RunJobRuntime() = %v, want 0", got)
+			}
+			if !tt.wantZero && got <= 0 {
+				t.Errorf("RunJobRuntime() = %v, want positive", got)
+			}
+		})
+	}
+}
+
+func TestRunJobDuration(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name        string
+		startedAt   *time.Time
+		completedAt *time.Time
+		wantSeconds int
+		wantZero    bool
+	}{
+		{
+			name:        "nil StartedAt returns zero",
+			startedAt:   nil,
+			completedAt: &now,
+			wantZero:    true,
+		},
+		{
+			name:        "nil CompletedAt returns zero",
+			startedAt:   &now,
+			completedAt: nil,
+			wantZero:    true,
+		},
+		{
+			name:        "both nil returns zero",
+			startedAt:   nil,
+			completedAt: nil,
+			wantZero:    true,
+		},
+		{
+			name:        "normal duration",
+			startedAt:   &now,
+			completedAt: ptrTime(now.Add(2 * time.Minute)),
+			wantSeconds: 120,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RunJobDuration(tt.startedAt, tt.completedAt)
+			if tt.wantZero {
+				if got != 0 {
+					t.Errorf("RunJobDuration() = %v, want 0", got)
+				}
+				return
+			}
+			gotSeconds := int(got.Seconds())
+			if gotSeconds != tt.wantSeconds {
+				t.Errorf("RunJobDuration() = %v seconds, want %v seconds", gotSeconds, tt.wantSeconds)
+			}
+		})
+	}
+}

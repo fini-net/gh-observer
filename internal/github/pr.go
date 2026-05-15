@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	sshPattern   = regexp.MustCompile(`git@github\.com:([^/]+)/(.+?)(?:\.git)?/?$`)
-	httpsPattern = regexp.MustCompile(`https://github\.com/([^/]+)/(.+?)(?:\.git)?/?$`)
-	prURLPattern = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)$`)
+	sshPattern           = regexp.MustCompile(`git@github\.com:([^/]+)/(.+?)(?:\.git)?/?$`)
+	httpsPattern          = regexp.MustCompile(`https://github\.com/([^/]+)/(.+?)(?:\.git)?/?$`)
+	prURLPattern          = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)$`)
+	actionsRunURLPattern = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/actions/runs/(\d+)$`)
 )
 
 // PRInfo contains metadata about a pull request
@@ -114,6 +115,20 @@ func parseOwnerRepoFromURL(url string) (string, string, error) {
 	}
 
 	return "", "", fmt.Errorf("unable to parse owner/repo from remote URL: %s", url)
+}
+
+// ParseActionsRunURL extracts owner, repo, and run ID from a GitHub Actions run URL.
+// Expected format: https://github.com/owner/repo/actions/runs/NNN
+func ParseActionsRunURL(url string) (owner, repo string, runID int64, err error) {
+	matches := actionsRunURLPattern.FindStringSubmatch(url)
+	if len(matches) != 4 {
+		return "", "", 0, fmt.Errorf("invalid Actions run URL: %s (expected https://github.com/owner/repo/actions/runs/NNN)", url)
+	}
+	id, err := strconv.ParseInt(matches[3], 10, 64)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("invalid run ID: %w", err)
+	}
+	return matches[1], matches[2], id, nil
 }
 
 // ParsePRURL extracts owner, repo, and PR number from a GitHub PR URL

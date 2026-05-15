@@ -31,6 +31,22 @@ func FinalDuration(check ghclient.CheckRunInfo) time.Duration {
 	return check.CompletedAt.Sub(*check.StartedAt)
 }
 
+// RunJobRuntime calculates elapsed time for an in-progress job.
+func RunJobRuntime(startedAt *time.Time) time.Duration {
+	if startedAt == nil {
+		return 0
+	}
+	return time.Since(*startedAt)
+}
+
+// RunJobDuration calculates the total duration for a completed job.
+func RunJobDuration(startedAt, completedAt *time.Time) time.Duration {
+	if startedAt == nil || completedAt == nil {
+		return 0
+	}
+	return completedAt.Sub(*startedAt)
+}
+
 // FormatDuration formats a duration in human-readable form
 func FormatDuration(d time.Duration) string {
 	// Round to seconds
