@@ -21,6 +21,13 @@ func canTrustCompletion(m *Model) bool {
 	}
 
 	checkCount := len(m.checkRuns)
+
+	if m.noAvg {
+		debug.Log("can trust completion: quick mode",
+			"check_count", checkCount, "peak", m.peakCheckCount)
+		return m.peakCheckCount <= checkCount
+	}
+
 	elapsed := time.Since(m.firstCheckSeenAt)
 
 	if elapsed >= startupGracePeriod {
