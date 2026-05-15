@@ -143,12 +143,18 @@ detection. When running inside a jj (Jujutsu) repository, it also executes
 `jj git root` to locate the internal git directory. The commands are:
 
 - `gh auth token` — no user-supplied arguments
-- `gh pr view --json number,url` — no user-supplied arguments
+- `gh pr view --json number,url` — no user-supplied arguments (auto-detect mode)
+- `gh pr view <PR_NUMBER> --json number,url` — user-supplied PR number
+  (validated as an integer via `strconv.Atoi` before being passed to the
+  subprocess; not shell-expanded; negative or zero values would be rejected by
+  the `gh` CLI)
 - `jj git root` — no user-supplied arguments (only executed when a `.jj/`
   directory is detected)
 
-No CLI arguments (PR number, URL, flags) are passed to any subprocess. All
-subprocess invocations use fixed argument lists.
+The only user-supplied argument passed to a subprocess is the PR number in
+explicit PR mode (`gh-observer 123`). The PR number is validated as an integer
+before being passed to `gh pr view`, preventing injection of arbitrary flags
+or shell metacharacters.
 
 **Risk:** A compromised `gh` binary on the PATH could execute arbitrary code
 with the user's privileges. This is a standard PATH-based attack vector common
@@ -156,7 +162,7 @@ to all tools that invoke `gh`.
 
 **Mitigations:**
 
-- No user-supplied arguments flow to subprocess commands
+- The only user-supplied subprocess argument is the PR number, validated as an integer via `strconv.Atoi` before being passed to `gh pr view`
 - The application validates all subprocess output (JSON parsing, regex
   validation, cross-field consistency checks)
 - `ParsePRURL` re-validates the URL returned by `gh pr view` against an

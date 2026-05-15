@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -60,12 +61,30 @@ func TestSetGITDirForJJNoJJ(t *testing.T) {
 
 	found := false
 	for _, env := range cmd.Env {
-		if env == "GIT_DIR=" || len(env) > 8 && env[:8] == "GIT_DIR=" {
+		if strings.HasPrefix(env, "GIT_DIR=") {
 			found = true
 		}
 	}
 	if found {
 		t.Error("SetGITDirForJJ should not set GIT_DIR when jj not detected")
+	}
+}
+
+func TestSetGITDirForJJReplacesExistingGITDir(t *testing.T) {
+	resetJJDetection()
+
+	cmd := exec.Command("echo", "test")
+	cmd.Env = append(os.Environ(), "GIT_DIR=/old/path")
+	SetGITDirForJJ(cmd)
+
+	count := 0
+	for _, env := range cmd.Env {
+		if strings.HasPrefix(env, "GIT_DIR=") {
+			count++
+		}
+	}
+	if count > 1 {
+		t.Errorf("SetGITDirForJJ should replace existing GIT_DIR, found %d entries", count)
 	}
 }
 

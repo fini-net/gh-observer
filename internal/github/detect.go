@@ -19,44 +19,48 @@ var (
 
 func detectJJ() (bool, string) {
 	jjOnce.Do(func() {
-		gitRoot, err := findJJGitRoot()
+		gitRoot, found, err := findJJGitRoot()
 		if err != nil {
 			debug.Log("jj detection failed", "err", err)
 			jjDetected = false
 			jjGitRootVal = ""
 			return
 		}
-		jjDetected = true
-		jjGitRootVal = gitRoot
-		debug.Log("jj detected", "gitRoot", gitRoot)
+		jjDetected = found
+		if found {
+			jjGitRootVal = gitRoot
+			debug.Log("jj detected", "gitRoot", gitRoot)
+		} else {
+			debug.Log("no jj repository detected")
+		}
 	})
 	return jjDetected, jjGitRootVal
 }
 
-func findJJGitRoot() (string, error) {
+func findJJGitRoot() (gitRoot string, found bool, err error) {
 	wd, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("get working directory: %w", err)
+		return "", false, fmt.Errorf("get working directory: %w", err)
 	}
 
- jjDir, found := findDotJJ(wd)
+	jjDir, found := findDotJJ(wd)
 	if !found {
-		return "", nil
+		return "", false, nil
 	}
 
 	debug.Log("found .jj directory", "path", jjDir)
 
 	root, err := exec.Command("jj", "git", "root").Output()
 	if err != nil {
-		return "", fmt.Errorf("jj git root failed (is jj on PATH?): %w", err)
+		return "", false, fmt.Errorf("jj git root failed (is jj on PATH?): %w", err)
 	}
 
-	gitRoot := strings.TrimSpace(string(root))
+	gitRoot = strings.TrimSpace(string(root))
 	if gitRoot == "" {
-		return "", fmt.Errorf("jj git root returned empty path")
+		return "", false, fmt.Errorf("jj git root returned empty path")
 	}
 
-	return gitRoot, nil
+	return gitRoot, true, nil
 }
 
 func findDotJJ(dir string) (string, bool) {
@@ -84,7 +88,14 @@ func SetGITDirForJJ(cmd *exec.Cmd) {
 	if cmd.Env == nil {
 		cmd.Env = os.Environ()
 	}
-	cmd.Env = append(cmd.Env, fmt.Sprintf("GIT_DIR=%s", gitRoot))
+	filtered := make([]string, 0, len(cmd.Env))
+	for _, e := range cmd.Env {
+		if !strings.HasPrefix(e, "GIT_DIR=") {
+			filtered = append(filtered, e)
+		}
+	}
+	filtered = append(filtered, fmt.Sprintf("GIT_DIR=%s", gitRoot))
+	cmd.Env = filtered
 	debug.Log("set GIT_DIR for jj compatibility", "GIT_DIR", gitRoot)
 }
 
