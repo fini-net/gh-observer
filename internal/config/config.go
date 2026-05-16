@@ -18,9 +18,10 @@ type ColorConfig struct {
 }
 
 type Config struct {
-	RefreshInterval time.Duration `mapstructure:"refresh_interval"`
-	Colors          ColorConfig   `mapstructure:"colors"`
-	EnableLinks     bool          `mapstructure:"enable_links"`
+	RefreshInterval        time.Duration `mapstructure:"refresh_interval"`
+	PersistRefreshInterval time.Duration `mapstructure:"persist_refresh_interval"`
+	Colors                 ColorConfig   `mapstructure:"colors"`
+	EnableLinks            bool          `mapstructure:"enable_links"`
 }
 
 func Load() (*Config, error) {
@@ -28,6 +29,7 @@ func Load() (*Config, error) {
 
 	// Set defaults
 	v.SetDefault("refresh_interval", "5s")
+	v.SetDefault("persist_refresh_interval", "30s")
 	v.SetDefault("colors.success", 10) // Green
 	v.SetDefault("colors.failure", 9)  // Red
 	v.SetDefault("colors.running", 11) // Yellow

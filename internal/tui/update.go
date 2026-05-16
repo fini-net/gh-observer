@@ -85,18 +85,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case TickMsg:
-		// Check rate limit before polling
 		if m.rateLimitRemaining < rateBackoffThreshold {
 			debug.Log("rate limit backoff", "remaining", m.rateLimitRemaining, "threshold", rateBackoffThreshold)
-			// Back off if rate limited
 			return m, tick(m.refreshInterval * 3)
 		}
 
-		// Only poll if we have the PR number
-		return m, tea.Batch(
-			fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber),
-			tick(m.refreshInterval),
-		)
+		interval := m.refreshInterval
+		if m.persist && m.checksComplete {
+			interval = m.persistRefreshInterval
+		}
+
+		var cmds []tea.Cmd
+		cmds = append(cmds, fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber))
+		if m.persist {
+			cmds = append(cmds, fetchPRInfo(m.ctx, m.token, m.owner, m.repo, m.prNumber))
+		}
+		cmds = append(cmds, tick(interval))
+		return m, tea.Batch(cmds...)
 
 	case PRInfoMsg:
 		if msg.Err != nil {
@@ -104,12 +109,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		if m.persist && m.headSHA != "" && msg.HeadSHA != m.headSHA {
+			debug.Log("new commit detected via PR info refresh", "old_sha", m.headSHA, "new_sha", msg.HeadSHA)
+			m.resetForNewCommit()
+			m.headSHA = msg.HeadSHA
+			m.prTitle = msg.Title
+			m.prCreatedAt = msg.CreatedAt
+			m.headCommitTime = msg.HeadCommitTime
+			return m, tea.Batch(
+				fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber),
+				tick(m.refreshInterval),
+			)
+		}
+
 		m.prTitle = msg.Title
 		m.headSHA = msg.HeadSHA
 		m.prCreatedAt = msg.CreatedAt
 		m.headCommitTime = msg.HeadCommitTime
 
-		// Start polling checks now that we have the PR info
 		return m, fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber)
 
 	case ChecksUpdateMsg:
@@ -160,7 +177,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			// If checks already finished while we were fetching, and no pending fetches, quit now
-			if m.checksComplete && len(m.pendingWorkflowFetch) == 0 {
+			if m.checksComplete && len(m.pendingWorkflowFetch) == 0 && !m.persist {
 				m.quitting = true
 				return m, tea.Quit
 			}
@@ -168,7 +185,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Error case: check if we should quit
-		if m.checksComplete && len(m.pendingWorkflowFetch) == 0 {
+		if m.checksComplete && len(m.pendingWorkflowFetch) == 0 && !m.persist {
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -208,7 +225,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err == nil {
 				m.avgFetchErr = nil
 			}
-			if m.checksComplete {
+			if m.checksComplete && !m.persist {
 				m.quitting = true
 				return m, tea.Quit
 			}
@@ -353,7 +370,7 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	if allChecksComplete(m.checkRuns) && canTrustCompletion(m) {
 		m.exitCode = determineExitCode(m.checkRuns)
 		m.checksComplete = true
-		if !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 {
+		if !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 && !m.persist {
 			m.quitting = true
 			cmds = append(cmds, tea.Quit)
 		}
@@ -477,4 +494,27 @@ func determineExitCode(checks []ghclient.CheckRunInfo) int {
 		}
 	}
 	return 0
+}
+
+// resetForNewCommit clears model state to start watching checks for a new commit.
+func (m *Model) resetForNewCommit() {
+	m.checksComplete = false
+	m.peakCheckCount = 0
+	m.firstCheckSeenAt = time.Time{}
+	m.seenCheckKeys = make(map[string]bool)
+	m.checkRuns = nil
+
+	m.jobAverages = make(map[string]time.Duration)
+	m.workflowAverages = make(map[int64]map[string]time.Duration)
+	m.advSecMatchWorkflow = make(map[string]int64)
+	m.runIDToWorkflowID = make(map[int64]int64)
+	m.fetchedWorkflowIDs = make(map[int64]bool)
+	m.pendingWorkflowFetch = make(map[int64]bool)
+	m.dispatchedWorkflowFetch = make(map[int64]bool)
+	m.avgFetchPending = false
+	m.avgFetchStartTime = time.Time{}
+	m.avgFetchLastDuration = 0
+	m.avgFetchErr = nil
+	m.historyFetchCompleted = false
+	m.expectedCheckCount = 0
 }

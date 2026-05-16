@@ -76,6 +76,15 @@ func (m RunModel) View() tea.View {
 
 	b.WriteString("\n")
 
+	if m.jobsComplete && m.persist {
+		exitLabel := "all jobs passed"
+		if m.exitCode != 0 {
+			exitLabel = "jobs failed"
+		}
+		b.WriteString(m.styles.Info.Render(fmt.Sprintf("  ✔ Watching (%s) — persist mode\n", exitLabel)))
+		b.WriteString("\n")
+	}
+
 	if m.rateLimitRemaining < minRateLimitForFetch {
 		b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
 	}
@@ -83,7 +92,11 @@ func (m RunModel) View() tea.View {
 	b.WriteString("\n")
 
 	if !m.quitting {
-		b.WriteString("\nPress q to quit\n")
+		if m.persist {
+			b.WriteString("\nPress q to quit (persist mode)\n")
+		} else {
+			b.WriteString("\nPress q to quit\n")
+		}
 	}
 
 	return tea.NewView(b.String())

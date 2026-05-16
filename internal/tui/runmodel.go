@@ -45,6 +45,9 @@ type RunModel struct {
 
 	// Feature flags
 	enableLinks bool
+	persist     bool
+
+	persistRefreshInterval time.Duration
 
 	// Historical job averages (incrementally updated)
 	jobAverages             map[string]time.Duration
@@ -68,7 +71,7 @@ type RunModel struct {
 }
 
 // NewRunModel creates a new TUI model for watching a workflow run.
-func NewRunModel(ctx context.Context, token, owner, repo string, runID int64, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool) RunModel {
+func NewRunModel(ctx context.Context, token, owner, repo string, runID int64, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool, persist bool, persistRefreshInterval time.Duration) RunModel {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	return RunModel{
@@ -84,6 +87,8 @@ func NewRunModel(ctx context.Context, token, owner, repo string, runID int64, re
 		refreshInterval:         refreshInterval,
 		styles:                  styles,
 		enableLinks:             enableLinks,
+		persist:                 persist,
+		persistRefreshInterval:  persistRefreshInterval,
 		noAvg:                   noAvg,
 		jobAverages:             make(map[string]time.Duration),
 		workflowAverages:        make(map[int64]map[string]time.Duration),

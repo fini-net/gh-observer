@@ -77,9 +77,13 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			debug.Log("rate limit backoff (run)", "remaining", m.rateLimitRemaining, "threshold", rateBackoffThreshold)
 			return m, runTick(m.refreshInterval*3)
 		}
+		interval := m.refreshInterval
+		if m.persist && m.jobsComplete {
+			interval = m.persistRefreshInterval
+		}
 		return m, tea.Batch(
 			fetchRunJobs(m.ctx, m.client, m.owner, m.repo, m.runID),
-			runTick(m.refreshInterval),
+			runTick(interval),
 		)
 
 	case RunInfoMsg:
@@ -143,7 +147,7 @@ func (m *RunModel) handleRunJobsUpdate(msg RunJobsUpdateMsg) (tea.Model, tea.Cmd
 	if allComplete {
 		m.exitCode = ghclient.DetermineRunExitCode(m.jobs)
 		m.jobsComplete = true
-		if !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 {
+		if !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 && !m.persist {
 			m.quitting = true
 			cmds = append(cmds, tea.Quit)
 		}
@@ -157,7 +161,7 @@ func (m *RunModel) handleRunWorkflowsDiscovered(msg RunWorkflowsDiscoveredMsg) (
 	if msg.Err != nil {
 		m.avgFetchPending = false
 		m.avgFetchErr = msg.Err
-		if m.jobsComplete && len(m.pendingWorkflowFetch) == 0 {
+		if m.jobsComplete && len(m.pendingWorkflowFetch) == 0 && !m.persist {
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -183,7 +187,7 @@ func (m *RunModel) handleRunWorkflowsDiscovered(msg RunWorkflowsDiscoveredMsg) (
 		}
 	}
 
-	if m.jobsComplete && len(m.pendingWorkflowFetch) == 0 {
+	if m.jobsComplete && len(m.pendingWorkflowFetch) == 0 && !m.persist {
 		m.quitting = true
 		return m, tea.Quit
 	}
@@ -208,7 +212,7 @@ func (m *RunModel) handleRunJobAveragesPartial(msg RunJobAveragesPartialMsg) (te
 		if msg.Err == nil {
 			m.avgFetchErr = nil
 		}
-		if m.jobsComplete {
+		if m.jobsComplete && !m.persist {
 			m.quitting = true
 			return m, tea.Quit
 		}

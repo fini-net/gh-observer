@@ -44,6 +44,9 @@ type Model struct {
 
 	// Feature flags
 	enableLinks bool
+	persist     bool
+
+	persistRefreshInterval time.Duration
 
 	// Historical job averages (incrementally updated as new workflows appear)
 	jobAverages             map[string]time.Duration
@@ -77,7 +80,7 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool) Model {
+func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool, persist bool, persistRefreshInterval time.Duration) Model {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	return Model{
@@ -92,6 +95,8 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 		refreshInterval:         refreshInterval,
 		styles:                  styles,
 		enableLinks:             enableLinks,
+		persist:                 persist,
+		persistRefreshInterval:  persistRefreshInterval,
 		noAvg:                   noAvg,
 		jobAverages:             make(map[string]time.Duration),
 		workflowAverages:        make(map[int64]map[string]time.Duration),

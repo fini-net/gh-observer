@@ -80,6 +80,15 @@ func (m Model) View() tea.View {
 
 	b.WriteString("\n")
 
+	if allChecksComplete(m.checkRuns) && canTrustCompletion(&m) && m.persist {
+		exitLabel := "all checks passed"
+		if m.exitCode != 0 {
+			exitLabel = "checks failed"
+		}
+		b.WriteString(m.styles.Info.Render(fmt.Sprintf("  ✔ Watching (%s) — persist mode\n", exitLabel)))
+		b.WriteString("\n")
+	}
+
 	if allChecksComplete(m.checkRuns) && !canTrustCompletion(&m) {
 		b.WriteString(m.styles.Queued.Render("  ⏳ Waiting for more checks to appear...\n"))
 		if m.expectedCheckCount > 0 {
@@ -107,7 +116,11 @@ func (m Model) View() tea.View {
 	b.WriteString("\n")
 
 	if !m.quitting {
-		b.WriteString("\nPress q to quit\n")
+		if m.persist {
+			b.WriteString("\nPress q to quit (persist mode)\n")
+		} else {
+			b.WriteString("\nPress q to quit\n")
+		}
 	}
 
 	return tea.NewView(b.String())

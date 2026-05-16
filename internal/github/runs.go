@@ -9,6 +9,111 @@ import (
 	"github.com/google/go-github/v86/github"
 )
 
+// RepositoryRunInfo contains summary data for a workflow run in repo-watch mode.
+type RepositoryRunInfo struct {
+	ID             int64
+	DisplayTitle   string
+	WorkflowName   string
+	Status         string
+	Conclusion     string
+	HeadSHA        string
+	HeadBranch     string
+	CreatedAt      *github.Timestamp
+	RunStartedAt   *github.Timestamp
+	UpdatedAt      *github.Timestamp
+	HTMLURL        string
+}
+
+// FetchRepositoryRuns fetches recent workflow runs for a repository.
+// Returns runs (most recent first), rate limit remaining, and any error.
+func FetchRepositoryRuns(ctx context.Context, client *github.Client, owner, repo string) ([]RepositoryRunInfo, int, error) {
+	opts := &github.ListWorkflowRunsOptions{
+		ListOptions: github.ListOptions{PerPage: 30},
+	}
+
+	var allRuns []RepositoryRunInfo
+	rateLimitRemaining := 5000
+
+	for {
+		runs, resp, err := client.Actions.ListRepositoryWorkflowRuns(ctx, owner, repo, opts)
+		if err != nil {
+			return nil, rateLimitRemaining, fmt.Errorf("failed to list repository workflow runs: %w", err)
+		}
+
+		if resp != nil {
+			rateLimitRemaining = resp.Rate.Remaining
+		}
+
+		for _, run := range runs.WorkflowRuns {
+			info := RepositoryRunInfo{
+				ID:     run.GetID(),
+				Status: strings.ToLower(run.GetStatus()),
+			}
+
+			if run.Name != nil {
+				info.DisplayTitle = *run.Name
+			}
+			if run.DisplayTitle != nil && *run.DisplayTitle != "" {
+				info.DisplayTitle = *run.DisplayTitle
+			}
+			if run.Conclusion != nil {
+				info.Conclusion = strings.ToLower(*run.Conclusion)
+			}
+			if run.HeadSHA != nil {
+				info.HeadSHA = *run.HeadSHA
+			}
+			if run.HeadBranch != nil {
+				info.HeadBranch = *run.HeadBranch
+			}
+			info.CreatedAt = run.CreatedAt
+			info.RunStartedAt = run.RunStartedAt
+			info.UpdatedAt = run.UpdatedAt
+			if run.HTMLURL != nil {
+				info.HTMLURL = *run.HTMLURL
+			}
+
+			allRuns = append(allRuns, info)
+		}
+
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	debug.Log("fetch repository runs", "owner", owner, "repo", repo, "count", len(allRuns), "rate_limit_remaining", rateLimitRemaining)
+
+	return allRuns, rateLimitRemaining, nil
+}
+
+// FailureRunConclusion returns true if the conclusion indicates a failed run.
+func FailureRunConclusion(conclusion string) bool {
+	return conclusion == "failure" || conclusion == "timed_out" || conclusion == "action_required"
+}
+
+// AllRunsComplete returns true if all runs have finished.
+func AllRunsComplete(runs []RepositoryRunInfo) bool {
+	if len(runs) == 0 {
+		return false
+	}
+	for _, run := range runs {
+		if run.Status != "completed" {
+			return false
+		}
+	}
+	return true
+}
+
+// DetermineRepoWatchExitCode returns 1 if any run failed, 0 otherwise.
+func DetermineRepoWatchExitCode(runs []RepositoryRunInfo) int {
+	for _, run := range runs {
+		if FailureRunConclusion(run.Conclusion) {
+			return 1
+		}
+	}
+	return 0
+}
+
 // WorkflowJobInfo contains status data for a single job within a workflow run.
 type WorkflowJobInfo struct {
 	Name         string

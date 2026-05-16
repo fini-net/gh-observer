@@ -260,6 +260,109 @@ func TestParsePRViewWithRepo(t *testing.T) {
 	}
 }
 
+func TestParseRepoFlag(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		wantOwner string
+		wantRepo  string
+		wantErr   bool
+	}{
+		{
+			name:      "short form owner/repo",
+			value:     "fini-net/gh-observer",
+			wantOwner: "fini-net",
+			wantRepo:  "gh-observer",
+			wantErr:   false,
+		},
+		{
+			name:      "short form with hyphens and dots",
+			value:     "org-123/repo.name",
+			wantOwner: "org-123",
+			wantRepo:  "repo.name",
+			wantErr:   false,
+		},
+		{
+			name:      "full HTTPS URL",
+			value:     "https://github.com/fini-net/gh-observer",
+			wantOwner: "fini-net",
+			wantRepo:  "gh-observer",
+			wantErr:   false,
+		},
+		{
+			name:      "full HTTPS URL with trailing slash",
+			value:     "https://github.com/fini-net/gh-observer/",
+			wantOwner: "fini-net",
+			wantRepo:  "gh-observer",
+			wantErr:   false,
+		},
+		{
+			name:      "full HTTP URL",
+			value:     "http://github.com/owner/repo",
+			wantOwner: "owner",
+			wantRepo:  "repo",
+			wantErr:   false,
+		},
+		{
+			name:    "empty string",
+			value:   "",
+			wantErr: true,
+		},
+		{
+			name:    "just owner without repo",
+			value:   "owner",
+			wantErr: true,
+		},
+		{
+			name:    "too many slashes in short form",
+			value:   "owner/repo/extra",
+			wantErr: true,
+		},
+		{
+			name:    "wrong host",
+			value:   "https://gitlab.com/owner/repo",
+			wantErr: true,
+		},
+		{
+			name:    "PR URL instead of repo URL",
+			value:   "https://github.com/owner/repo/pull/123",
+			wantErr: true,
+		},
+		{
+			name:    "actions URL instead of repo URL",
+			value:   "https://github.com/owner/repo/actions/runs/123",
+			wantErr: true,
+		},
+		{
+			name:    "URL with query params",
+			value:   "https://github.com/owner/repo?tab=readme",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotOwner, gotRepo, err := ParseRepoFlag(tt.value)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ParseRepoFlag(%q) expected error, got nil", tt.value)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("ParseRepoFlag(%q) unexpected error: %v", tt.value, err)
+				return
+			}
+			if gotOwner != tt.wantOwner {
+				t.Errorf("ParseRepoFlag(%q) owner = %q, want %q", tt.value, gotOwner, tt.wantOwner)
+			}
+			if gotRepo != tt.wantRepo {
+				t.Errorf("ParseRepoFlag(%q) repo = %q, want %q", tt.value, gotRepo, tt.wantRepo)
+			}
+		})
+	}
+}
+
 func TestParseActionsRunURL(t *testing.T) {
 	tests := []struct {
 		name      string

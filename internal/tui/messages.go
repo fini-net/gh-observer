@@ -44,3 +44,10 @@ type JobAveragesPartialMsg struct {
 	Averages   map[string]time.Duration
 	Err        error
 }
+
+// RepoRunsUpdateMsg contains updated repository workflow runs
+type RepoRunsUpdateMsg struct {
+	Runs                []ghclient.RepositoryRunInfo
+	RateLimitRemaining  int
+	Err                 error
+}

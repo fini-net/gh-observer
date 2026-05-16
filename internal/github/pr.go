@@ -14,7 +14,21 @@ import (
 var (
 	prURLPattern          = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)$`)
 	actionsRunURLPattern = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/actions/runs/(\d+)$`)
+	repoURLPattern       = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/?]+)/?$`)
+	repoShortPattern     = regexp.MustCompile(`^([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)$`)
 )
+
+// ParseRepoFlag extracts owner and repo from a --repo flag value.
+// Accepts "owner/repo" short form or "https://github.com/owner/repo" full URL.
+func ParseRepoFlag(value string) (owner, repo string, err error) {
+	if matches := repoShortPattern.FindStringSubmatch(value); len(matches) == 3 {
+		return matches[1], matches[2], nil
+	}
+	if matches := repoURLPattern.FindStringSubmatch(value); len(matches) == 3 {
+		return matches[1], matches[2], nil
+	}
+	return "", "", fmt.Errorf("invalid repo format: %s (expected owner/repo or https://github.com/owner/repo)", value)
+}
 
 // PRInfo contains metadata about a pull request
 type PRInfo struct {

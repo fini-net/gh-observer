@@ -4,6 +4,12 @@
 # Refresh interval for polling GitHub API
 refresh_interval: 5s
 
+# Refresh interval when all checks are complete in persist mode (--repo)
+persist_refresh_interval: 30s
+
+# Whether to render hyperlinks in terminal
+enable_links: true
+
 # Color codes for terminal output (ANSI 256-color palette)
 colors:
   success: 10  # Green - completed successfully
