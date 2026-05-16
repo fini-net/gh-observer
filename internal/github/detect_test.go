@@ -54,6 +54,20 @@ func TestFindDotJJNotFound(t *testing.T) {
 }
 
 func TestSetGITDirForJJNoJJ(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir to temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(origDir); err != nil {
+			t.Logf("restore cwd: %v", err)
+		}
+	})
+
 	resetJJDetection()
 
 	cmd := exec.Command("echo", "test")
@@ -71,21 +85,57 @@ func TestSetGITDirForJJNoJJ(t *testing.T) {
 }
 
 func TestSetGITDirForJJReplacesExistingGITDir(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir to temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(origDir); err != nil {
+			t.Logf("restore cwd: %v", err)
+		}
+	})
+
 	resetJJDetection()
 
+	jjOnce.Do(func() {
+		jjDetected = true
+		jjGitRootVal = "/fake/git/root"
+	})
+
 	cmd := exec.Command("echo", "test")
-	cmd.Env = append(os.Environ(), "GIT_DIR=/old/path")
+	env := filterGITDir(os.Environ())
+	env = append(env, "GIT_DIR=/old/path")
+	cmd.Env = env
 	SetGITDirForJJ(cmd)
 
-	count := 0
+	gitDirCount := 0
+	gitDirValue := ""
 	for _, env := range cmd.Env {
 		if strings.HasPrefix(env, "GIT_DIR=") {
-			count++
+			gitDirCount++
+			gitDirValue = strings.TrimPrefix(env, "GIT_DIR=")
 		}
 	}
-	if count > 1 {
-		t.Errorf("SetGITDirForJJ should replace existing GIT_DIR, found %d entries", count)
+	if gitDirCount != 1 {
+		t.Errorf("expected exactly 1 GIT_DIR entry, found %d", gitDirCount)
 	}
+	if gitDirValue != "/fake/git/root" {
+		t.Errorf("GIT_DIR = %q, want %q", gitDirValue, "/fake/git/root")
+	}
+}
+
+func filterGITDir(env []string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, "GIT_DIR=") {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
 }
 
 func resetJJDetection() {
