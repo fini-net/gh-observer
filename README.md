@@ -35,6 +35,10 @@ slow?"
   avoid interruptions
 - 📊 **Historical averages** - Shows average runtime for each job based on
   recent completed runs, so you know if things are taking longer than usual
+- 🏢 **Repo-wide monitoring** - Watch all workflow runs across a repository
+  with `--repo owner/repo`, not just a single PR
+- 🔄 **Persist mode** - Keep watching after checks complete; automatically
+  tracks new runs when used with `--repo`
 - ⚡ **`--quick` mode** - Skip the historical averages fetch when you just want
   a fast snapshot
 - ✅ **CI-friendly** - Returns exit codes (0=success, 1=failure) for script
@@ -218,6 +222,58 @@ This skips the extra API calls for historical job runtimes and prints
 immediately. Useful when you're in a hurry or don't have the API budget
 to spare.
 
+### Watch a repository's workflow runs
+
+You can watch all recent workflow runs for a repository using `--repo`
+(or `-r`). This is useful for monitoring CI across an entire repo rather
+than a single PR:
+
+```bash
+# Watch all recent workflow runs on a repo
+gh observer --repo owner/repo
+
+# Equivalent short form
+gh observer -r owner/repo
+```
+
+This shows each workflow run with its status, duration, and branch:
+
+```ShellOutput
+owner/repo — workflow runs 15:04:05 UTC
+Updated 5s ago
+
+  Workflow                                 Status      Duration    Branch
+
+✓ CI                                        success     2m 10s       main
+● Release                                   in_progress 45s          main
+✗ Docs                                      failure     1m 30s       feature-branch
+
+Press q to quit
+```
+
+The `--repo` flag also enables **persist mode** when used with a PR number
+or URL. In persist mode, gh-observer continues watching after all checks
+complete instead of exiting — handy for monitoring a repo continuously:
+
+```bash
+# Watch PR #123 on owner/repo with persist mode
+gh observer --repo owner/repo 123
+
+# Watch a specific Actions run with persist mode
+gh observer --repo owner/repo https://github.com/owner/repo/actions/runs/123456789
+```
+
+When all checks complete in persist mode, the display stays alive and
+switches to a slower refresh interval (default 30s, configurable via
+`persist_refresh_interval`). New runs appearing on the repo are tracked
+automatically.
+
+You can also specify the repo as a full URL:
+
+```bash
+gh observer --repo https://github.com/owner/repo
+```
+
 ### Use in CI pipelines
 
 Our primary focus is on improving the interactive experience, but we also
@@ -238,6 +294,9 @@ Create `~/.config/gh-observer/config.yaml` to customize settings:
 ```yaml
 # Refresh interval for polling GitHub API
 refresh_interval: 5s
+
+# Refresh interval when all checks are complete in persist mode (--repo)
+persist_refresh_interval: 30s
 
 # Color codes for terminal output (ANSI 256-color palette)
 colors:
