@@ -5,7 +5,7 @@
 refresh_interval: 5s
 
 # Refresh interval for repo mode (--repo flag)
-repo_refresh_interval: 15s
+repo_refresh_interval: 30s
 
 # How long completed checks remain visible before fading out
 fade_success: 15m  # Successful checks disappear after 15 minutes

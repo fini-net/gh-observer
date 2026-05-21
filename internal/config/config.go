@@ -36,7 +36,7 @@ func Load() (*Config, error) {
 	v.SetDefault("colors.failure", 9)  // Red
 	v.SetDefault("colors.running", 11) // Yellow
 	v.SetDefault("colors.queued", 8)   // Gray
-	v.SetDefault("repo_refresh_interval", "15s")
+	v.SetDefault("repo_refresh_interval", "30s")
 	v.SetDefault("fade_success", "15m")
 	v.SetDefault("fade_failure", "30m")
 	v.SetDefault("repo_show_branch_runs", true)

@@ -101,6 +101,8 @@ func (m Model) View() tea.View {
 	}
 
 	if m.rateLimitRemaining < minRateLimitForFetch {
+		b.WriteString(m.styles.Failure.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
+	} else if m.rateLimitRemaining < rateWarningThreshold {
 		b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
 	}
 
