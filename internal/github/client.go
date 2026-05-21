@@ -50,3 +50,17 @@ func NewClientFromToken(ctx context.Context, token string) *github.Client {
 	tc := oauth2.NewClient(ctx, ts)
 	return github.NewClient(tc)
 }
+
+// FetchDefaultBranch retrieves the default branch name for a repository.
+func FetchDefaultBranch(ctx context.Context, client *github.Client, owner, repo string) (string, error) {
+	r, _, err := client.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch repository info: %w", err)
+	}
+	branch := r.GetDefaultBranch()
+	if branch == "" {
+		return "", fmt.Errorf("repository %s/%s has no default branch", owner, repo)
+	}
+	debug.Log("detected default branch", "owner", owner, "repo", repo, "branch", branch)
+	return branch, nil
+}

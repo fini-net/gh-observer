@@ -6,56 +6,55 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
+	"github.com/google/go-github/v86/github"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
-// PRViewData holds the display state for a single PR in repo mode.
 type PRViewData struct {
 	Title          string
 	CheckRuns      []ghclient.CheckRunInfo
 	HeadCommitTime time.Time
 }
 
-// RepoModel holds the application state for persistent repo-watching mode.
 type RepoModel struct {
 	ctx      context.Context
 	token    string
+	client   *github.Client
 	owner    string
 	repo     string
-	prs     map[int]PRViewData
+	prs      map[int]PRViewData
 
-	// Rate limiting
+	standaloneRuns []ghclient.BranchRunData
+	defaultBranch  string
+	allBranches    bool
+	showBranchRuns bool
+
 	rateLimitRemaining int
 
-	// UI state
 	spinner         spinner.Model
 	startTime       time.Time
 	lastUpdate      time.Time
 	refreshInterval time.Duration
 	styles          Styles
 
-	// Fade-out timeouts
 	fadeSuccess time.Duration
 	fadeFailure time.Duration
 
-	// Exit tracking
 	exitCode int
 	quitting bool
 
-	// Error state
 	err error
 
-	// Feature flags
 	enableLinks bool
 }
 
-// NewRepoModel creates a new TUI model for persistent repo-watching mode.
-func NewRepoModel(ctx context.Context, token, owner, repo string, refreshInterval time.Duration, styles Styles, enableLinks bool, fadeSuccess, fadeFailure time.Duration) RepoModel {
+func NewRepoModel(ctx context.Context, token string, client *github.Client, owner, repo string, refreshInterval time.Duration, styles Styles, enableLinks bool, fadeSuccess, fadeFailure time.Duration, showBranchRuns bool, allBranches bool) RepoModel {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	return RepoModel{
 		ctx:             ctx,
 		token:           token,
+		client:          client,
 		owner:           owner,
 		repo:            repo,
 		prs:             make(map[int]PRViewData),
@@ -67,15 +66,15 @@ func NewRepoModel(ctx context.Context, token, owner, repo string, refreshInterva
 		enableLinks:     enableLinks,
 		fadeSuccess:     fadeSuccess,
 		fadeFailure:     fadeFailure,
+		showBranchRuns:  showBranchRuns,
+		allBranches:     allBranches,
 	}
 }
 
-// ExitCode returns the exit code for the program
 func (m RepoModel) ExitCode() int {
 	return m.exitCode
 }
 
-// sortedPRNumbers returns PR numbers sorted numerically (ascending).
 func (m RepoModel) sortedPRNumbers() []int {
 	nums := make([]int, 0, len(m.prs))
 	for n := range m.prs {

@@ -26,11 +26,13 @@ func main() {
 var quickFlag bool
 var debugFlag bool
 var repoFlag string
+var allBranchesFlag bool
 
 func init() {
 	rootCmd.Flags().BoolVarP(&quickFlag, "quick", "q", false, "Skip fetching historical average runtimes")
 	rootCmd.Flags().BoolVarP(&debugFlag, "debug", "d", false, "Log suppressed errors and internal state to a file")
 	rootCmd.Flags().StringVar(&repoFlag, "repo", "", "Watch all active PRs on a repo persistently (owner/repo or URL)")
+	rootCmd.Flags().BoolVar(&allBranchesFlag, "all-branches", false, "Show workflow runs on all branches in --repo mode (default: default branch only)")
 }
 
 var rootCmd = &cobra.Command{
@@ -48,7 +50,10 @@ Also supports watching GitHub Actions runs by passing a run URL:
 
 Use --repo to persistently watch all active PRs on a repository:
   gh-observer --repo owner/repo
-  gh-observer --repo https://github.com/owner/repo`,
+  gh-observer --repo https://github.com/owner/repo
+
+Use --all-branches with --repo to also show workflow runs on all branches:
+  gh-observer --repo owner/repo --all-branches`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		exitCode := run(cmd, args)
@@ -99,6 +104,10 @@ func run(cmd *cobra.Command, args []string) int {
 	}
 	if repoMode && !term.IsTerminal(int(os.Stdout.Fd())) {
 		fmt.Fprintf(os.Stderr, "Error: --repo flag requires an interactive terminal\n")
+		return 1
+	}
+	if allBranchesFlag && !repoMode {
+		fmt.Fprintf(os.Stderr, "Error: --all-branches flag requires --repo mode\n")
 		return 1
 	}
 
@@ -259,14 +268,15 @@ func runActionsMode(ctx context.Context, token string, parsed runArgs, cfg *conf
 
 // runRepoMode handles persistent watching of all active PRs on a repo.
 func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, owner, repo string) int {
-	// Get GitHub token
 	token, err := ghclient.GetToken()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get GitHub token: %v\n", err)
 		return 1
 	}
 
-	model := tui.NewRepoModel(ctx, token, owner, repo, cfg.RepoRefreshInterval, styles, cfg.EnableLinks, cfg.FadeSuccess, cfg.FadeFailure)
+	client := ghclient.NewClientFromToken(ctx, token)
+
+	model := tui.NewRepoModel(ctx, token, client, owner, repo, cfg.RepoRefreshInterval, styles, cfg.EnableLinks, cfg.FadeSuccess, cfg.FadeFailure, cfg.RepoShowBranchRuns, allBranchesFlag)
 
 	p := tea.NewProgram(model)
 	finalModel, err := p.Run()

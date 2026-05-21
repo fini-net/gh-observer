@@ -154,3 +154,111 @@ func TestRepoChecksUpdateFadeOut(t *testing.T) {
 		})
 	}
 }
+
+func TestRepoBranchRunsFadeOut(t *testing.T) {
+	now := time.Now()
+	fadeSuccess := 15 * time.Minute
+	fadeFailure := 30 * time.Minute
+
+	recentStart := now.Add(-5 * time.Minute)
+	fadedStart := now.Add(-45 * time.Minute)
+
+	tests := []struct {
+		name         string
+		runs         []ghclient.BranchRunData
+		wantVisible  int
+	}{
+		{
+			name: "in_progress run stays visible",
+			runs: []ghclient.BranchRunData{
+				{RunID: 1, Status: "in_progress", Event: "push", HeadBranch: "main"},
+			},
+			wantVisible: 1,
+		},
+		{
+			name: "queued run stays visible",
+			runs: []ghclient.BranchRunData{
+				{RunID: 2, Status: "queued", Event: "push", HeadBranch: "main"},
+			},
+			wantVisible: 1,
+		},
+		{
+			name: "recently completed success stays visible",
+			runs: []ghclient.BranchRunData{
+				{RunID: 3, Status: "completed", Conclusion: "success", Event: "push", HeadBranch: "main", RunStartedAt: recentStart},
+			},
+			wantVisible: 1,
+		},
+		{
+			name: "recently completed failure stays visible",
+			runs: []ghclient.BranchRunData{
+				{RunID: 4, Status: "completed", Conclusion: "failure", Event: "push", HeadBranch: "main", RunStartedAt: recentStart},
+			},
+			wantVisible: 1,
+		},
+		{
+			name: "faded completed run removed",
+			runs: []ghclient.BranchRunData{
+				{RunID: 5, Status: "completed", Conclusion: "success", Event: "push", HeadBranch: "main", RunStartedAt: fadedStart},
+			},
+			wantVisible: 0,
+		},
+		{
+			name: "mixed - active and faded",
+			runs: []ghclient.BranchRunData{
+				{RunID: 6, Status: "in_progress", Event: "push", HeadBranch: "main"},
+				{RunID: 7, Status: "completed", Conclusion: "success", Event: "schedule", HeadBranch: "main", RunStartedAt: fadedStart},
+			},
+			wantVisible: 1,
+		},
+		{
+			name: "empty list",
+			runs:  []ghclient.BranchRunData{},
+			wantVisible: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := RepoModel{
+				prs:         make(map[int]PRViewData),
+				fadeSuccess: fadeSuccess,
+				fadeFailure: fadeFailure,
+			}
+
+			msg := RepoBranchRunsMsg{
+				Runs:               tt.runs,
+				RateLimitRemaining: 5000,
+			}
+
+			newModel, _ := m.Update(msg)
+			rm := newModel.(*RepoModel)
+
+			if len(rm.standaloneRuns) != tt.wantVisible {
+				t.Errorf("visible branch runs = %d, want %d", len(rm.standaloneRuns), tt.wantVisible)
+			}
+		})
+	}
+}
+
+func TestIsActiveBranchRun(t *testing.T) {
+	tests := []struct {
+		status string
+		want   bool
+	}{
+		{"in_progress", true},
+		{"queued", true},
+		{"waiting", true},
+		{"pending", true},
+		{"completed", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			if got := isActiveBranchRun(tt.status); got != tt.want {
+				t.Errorf("isActiveBranchRun(%q) = %v, want %v", tt.status, got, tt.want)
+			}
+		})
+	}
+}

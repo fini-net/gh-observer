@@ -11,6 +11,9 @@ repo_refresh_interval: 15s
 fade_success: 15m  # Successful checks disappear after 15 minutes
 fade_failure: 30m  # Failed checks disappear after 30 minutes
 
+# Show non-PR workflow runs (post-merge, scheduled, workflow_dispatch) in --repo mode
+repo_show_branch_runs: true
+
 # Color codes for terminal output (ANSI 256-color palette)
 colors:
   success: 10  # Green - completed successfully

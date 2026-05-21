@@ -8,28 +8,43 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/fini-net/gh-observer/internal/debug"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
+	"github.com/google/go-github/v86/github"
 )
 
-// RepoTickMsg is sent on each poll interval for repo-watching mode.
 type RepoTickMsg time.Time
 
-// RepoChecksUpdateMsg contains updated check data for all active PRs.
 type RepoChecksUpdateMsg struct {
 	PRData             map[int]ghclient.PRCheckData
 	RateLimitRemaining int
 	Err                error
 }
 
-// Init initializes the repo model.
+type DefaultBranchMsg struct {
+	Branch string
+	Err    error
+}
+
+type RepoBranchRunsMsg struct {
+	Runs               []ghclient.BranchRunData
+	RateLimitRemaining int
+	Err                error
+}
+
 func (m RepoModel) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.spinner.Tick,
 		fetchRepoCheckRuns(m.ctx, m.token, m.owner, m.repo),
 		repoTick(m.refreshInterval),
-	)
+	}
+	if m.showBranchRuns {
+		cmds = append(cmds, fetchDefaultBranch(m.ctx, m.client, m.owner, m.repo))
+		if m.allBranches {
+			cmds = append(cmds, fetchBranchRunsCmd(m.ctx, m.client, m.owner, m.repo, "", m.fadeWindow()))
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
-// Update handles messages for repo-watching mode.
 func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -49,19 +64,39 @@ func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			debug.Log("rate limit backoff (repo)", "remaining", m.rateLimitRemaining, "threshold", rateBackoffThreshold)
 			return m, repoTick(m.refreshInterval * 3)
 		}
-		return m, tea.Batch(
+		cmds := []tea.Cmd{
 			fetchRepoCheckRuns(m.ctx, m.token, m.owner, m.repo),
 			repoTick(m.refreshInterval),
-		)
+		}
+		if m.showBranchRuns && (m.defaultBranch != "" || m.allBranches) {
+			branch := m.defaultBranch
+			if m.allBranches {
+				branch = ""
+			}
+			cmds = append(cmds, fetchBranchRunsCmd(m.ctx, m.client, m.owner, m.repo, branch, m.fadeWindow()))
+		}
+		return m, tea.Batch(cmds...)
 
 	case RepoChecksUpdateMsg:
 		return m.handleRepoChecksUpdate(msg)
+
+	case DefaultBranchMsg:
+		return m.handleDefaultBranch(msg)
+
+	case RepoBranchRunsMsg:
+		return m.handleBranchRunsUpdate(msg)
 	}
 
 	return m, nil
 }
 
-// handleRepoChecksUpdate processes updated check data for all PRs.
+func (m RepoModel) fadeWindow() time.Duration {
+	if m.fadeFailure > m.fadeSuccess {
+		return m.fadeFailure
+	}
+	return m.fadeSuccess
+}
+
 func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	if msg.Err != nil {
 		m.err = msg.Err
@@ -115,14 +150,64 @@ func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, 
 	return m, nil
 }
 
-// repoTick creates a command that sends a RepoTickMsg after duration d.
+func (m *RepoModel) handleDefaultBranch(msg DefaultBranchMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		debug.Log("failed to detect default branch", "err", msg.Err)
+		return m, nil
+	}
+	m.defaultBranch = msg.Branch
+	debug.Log("default branch detected", "branch", msg.Branch)
+	return m, fetchBranchRunsCmd(m.ctx, m.client, m.owner, m.repo, m.defaultBranch, m.fadeWindow())
+}
+
+func (m *RepoModel) handleBranchRunsUpdate(msg RepoBranchRunsMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		debug.Log("branch runs fetch error", "err", msg.Err)
+		return m, nil
+	}
+
+	if msg.RateLimitRemaining < m.rateLimitRemaining {
+		m.rateLimitRemaining = msg.RateLimitRemaining
+	}
+	m.lastUpdate = time.Now()
+
+	now := time.Now()
+	var visible []ghclient.BranchRunData
+	for _, run := range msg.Runs {
+		if isActiveBranchRun(run.Status) {
+			visible = append(visible, run)
+			continue
+		}
+		fadeTimeout := m.fadeSuccess
+		if ghclient.FailureConclusion(run.Conclusion) {
+			fadeTimeout = m.fadeFailure
+		}
+		if !run.RunStartedAt.IsZero() && now.Sub(run.RunStartedAt) < fadeTimeout {
+			visible = append(visible, run)
+		}
+	}
+
+	m.standaloneRuns = visible
+
+	debug.Log("branch runs update", "total", len(msg.Runs), "visible", len(visible))
+
+	return m, nil
+}
+
+func isActiveBranchRun(status string) bool {
+	switch status {
+	case "in_progress", "queued", "waiting", "pending":
+		return true
+	}
+	return false
+}
+
 func repoTick(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(t time.Time) tea.Msg {
 		return RepoTickMsg(t)
 	})
 }
 
-// fetchRepoCheckRuns fetches check runs for all open PRs in a repo.
 func fetchRepoCheckRuns(ctx context.Context, token, owner, repo string) tea.Cmd {
 	return func() tea.Msg {
 		prData, rateLimit, err := ghclient.FetchRepoCheckRunsGraphQL(ctx, token, owner, repo)
@@ -132,6 +217,38 @@ func fetchRepoCheckRuns(ctx context.Context, token, owner, repo string) tea.Cmd 
 
 		return RepoChecksUpdateMsg{
 			PRData:             prData,
+			RateLimitRemaining: rateLimit,
+		}
+	}
+}
+
+func fetchDefaultBranch(ctx context.Context, client *github.Client, owner, repo string) tea.Cmd {
+	return func() tea.Msg {
+		branch, err := ghclient.FetchDefaultBranch(ctx, client, owner, repo)
+		if err != nil {
+			return DefaultBranchMsg{Err: err}
+		}
+		return DefaultBranchMsg{Branch: branch}
+	}
+}
+
+func fetchBranchRunsCmd(ctx context.Context, client *github.Client, owner, repo, branch string, fadeWindow time.Duration) tea.Cmd {
+	return func() tea.Msg {
+		runs, rateLimit, err := ghclient.FetchBranchRuns(ctx, client, owner, repo, branch, fadeWindow)
+		if err != nil {
+			return RepoBranchRunsMsg{Err: err}
+		}
+
+		enriched, rateLimit2, err := ghclient.EnrichBranchRunsWithJobs(ctx, client, owner, repo, runs)
+		if err != nil {
+			debug.Log("enrich branch runs error", "err", err)
+		}
+		if rateLimit2 < rateLimit {
+			rateLimit = rateLimit2
+		}
+
+		return RepoBranchRunsMsg{
+			Runs:               enriched,
 			RateLimitRemaining: rateLimit,
 		}
 	}

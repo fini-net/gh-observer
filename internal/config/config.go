@@ -18,12 +18,13 @@ type ColorConfig struct {
 }
 
 type Config struct {
-	RefreshInterval    time.Duration `mapstructure:"refresh_interval"`
+	RefreshInterval     time.Duration `mapstructure:"refresh_interval"`
 	RepoRefreshInterval time.Duration `mapstructure:"repo_refresh_interval"`
-	FadeSuccess        time.Duration `mapstructure:"fade_success"`
-	FadeFailure        time.Duration `mapstructure:"fade_failure"`
-	Colors             ColorConfig   `mapstructure:"colors"`
-	EnableLinks        bool          `mapstructure:"enable_links"`
+	FadeSuccess         time.Duration `mapstructure:"fade_success"`
+	FadeFailure         time.Duration `mapstructure:"fade_failure"`
+	RepoShowBranchRuns  bool          `mapstructure:"repo_show_branch_runs"`
+	Colors              ColorConfig   `mapstructure:"colors"`
+	EnableLinks         bool          `mapstructure:"enable_links"`
 }
 
 func Load() (*Config, error) {
@@ -38,6 +39,7 @@ func Load() (*Config, error) {
 	v.SetDefault("repo_refresh_interval", "15s")
 	v.SetDefault("fade_success", "15m")
 	v.SetDefault("fade_failure", "30m")
+	v.SetDefault("repo_show_branch_runs", true)
 	v.SetDefault("enable_links", true)
 
 	// Config location: ~/.config/gh-observer/config.yaml
