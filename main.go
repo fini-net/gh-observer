@@ -25,10 +25,12 @@ func main() {
 
 var quickFlag bool
 var debugFlag bool
+var repoFlag string
 
 func init() {
 	rootCmd.Flags().BoolVarP(&quickFlag, "quick", "q", false, "Skip fetching historical average runtimes")
 	rootCmd.Flags().BoolVarP(&debugFlag, "debug", "d", false, "Log suppressed errors and internal state to a file")
+	rootCmd.Flags().StringVar(&repoFlag, "repo", "", "Watch all active PRs on a repo persistently (owner/repo or URL)")
 }
 
 var rootCmd = &cobra.Command{
@@ -42,10 +44,14 @@ Supports watching checks on external repositories by passing a full PR URL:
   gh-observer https://github.com/owner/repo/pull/123
 
 Also supports watching GitHub Actions runs by passing a run URL:
-  gh-observer https://github.com/owner/repo/actions/runs/123456789`,
+  gh-observer https://github.com/owner/repo/actions/runs/123456789
+
+Use --repo to persistently watch all active PRs on a repository:
+  gh-observer --repo owner/repo
+  gh-observer --repo https://github.com/owner/repo`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		exitCode := run(args)
+		exitCode := run(cmd, args)
 		os.Exit(exitCode)
 	},
 }
@@ -56,18 +62,19 @@ type runMode int
 const (
 	modePR   runMode = iota // Watch a PR's checks
 	modeRun                  // Watch an Actions workflow run
+	modeRepo                 // Watch all active PRs on a repo persistently
 )
 
 // runArgs holds the parsed arguments for either mode.
 type runArgs struct {
-	mode       runMode
-	owner      string
-	repo       string
-	prNumber   int
-	runID      int64
+	mode     runMode
+	owner    string
+	repo     string
+	prNumber int
+	runID    int64
 }
 
-func run(args []string) int {
+func run(cmd *cobra.Command, args []string) int {
 	ctx := context.Background()
 
 	if debugFlag {
@@ -77,6 +84,22 @@ func run(args []string) int {
 		}
 		defer debug.Close()
 		fmt.Fprintf(os.Stderr, "Debug log: %s\n", debug.LogPath())
+	}
+
+	repoMode := cmd.Flags().Changed("repo")
+
+	// Validate flag combinations early
+	if repoMode && len(args) > 0 {
+		fmt.Fprintf(os.Stderr, "Error: --repo flag cannot be used with positional arguments\n")
+		return 1
+	}
+	if repoMode && quickFlag {
+		fmt.Fprintf(os.Stderr, "Error: --repo flag cannot be used with --quick\n")
+		return 1
+	}
+	if repoMode && !term.IsTerminal(int(os.Stdout.Fd())) {
+		fmt.Fprintf(os.Stderr, "Error: --repo flag requires an interactive terminal\n")
+		return 1
 	}
 
 	// Load configuration
@@ -93,6 +116,16 @@ func run(args []string) int {
 		cfg.Colors.Running,
 		cfg.Colors.Queued,
 	)
+
+	// Handle repo mode
+	if repoMode {
+		owner, repo, err := resolveRepoArg(repoFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			return 1
+		}
+		return runRepoMode(ctx, cfg, styles, owner, repo)
+	}
 
 	// Parse arguments
 	parsed, err := parseArgs(args)
@@ -117,6 +150,19 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "Unknown mode\n")
 		return 1
 	}
+}
+
+// resolveRepoArg resolves the owner/repo from the --repo flag value.
+// If the value is empty, it auto-detects the current repo from git remote.
+func resolveRepoArg(val string) (string, string, error) {
+	if val != "" {
+		return ghclient.ParseRepoArg(val)
+	}
+	owner, repo, err := ghclient.GetCurrentRepo()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to detect current repo: %v\nUse --repo owner/repo to specify explicitly", err)
+	}
+	return owner, repo, nil
 }
 
 // parseArgs determines whether the argument is a PR number, PR URL, or Actions run URL.
@@ -205,6 +251,31 @@ func runActionsMode(ctx context.Context, token string, parsed runArgs, cfg *conf
 	}
 
 	if m, ok := finalModel.(tui.RunModel); ok {
+		return m.ExitCode()
+	}
+
+	return 0
+}
+
+// runRepoMode handles persistent watching of all active PRs on a repo.
+func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, owner, repo string) int {
+	// Get GitHub token
+	token, err := ghclient.GetToken()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get GitHub token: %v\n", err)
+		return 1
+	}
+
+	model := tui.NewRepoModel(ctx, token, owner, repo, cfg.RepoRefreshInterval, styles, cfg.EnableLinks, cfg.FadeSuccess, cfg.FadeFailure)
+
+	p := tea.NewProgram(model)
+	finalModel, err := p.Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
+		return 1
+	}
+
+	if m, ok := finalModel.(tui.RepoModel); ok {
 		return m.ExitCode()
 	}
 
