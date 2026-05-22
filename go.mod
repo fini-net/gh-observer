@@ -7,6 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.6
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/google/go-github/v86 v86.0.0
+	github.com/google/go-github/v87 v87.0.0
 	github.com/mattn/go-runewidth v0.0.23
 	github.com/muesli/termenv v0.16.0
 	github.com/shurcooL/githubv4 v0.0.0-20260209031235-2402fdf4a9ed
