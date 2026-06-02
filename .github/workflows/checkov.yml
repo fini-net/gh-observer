@@ -38,7 +38,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkov GitHub Action
-        uses: bridgecrewio/checkov-action@b75da993a1a8b73d1086c8d330cadeee5bcccb31 # v12
+        uses: bridgecrewio/checkov-action@6772af193d58e46738c9401a4ca9c1f39de0fec8 # v12
         with:
           # This will add both a CLI output to the console and create a results.sarif file
           output_format: cli,sarif
