@@ -7,7 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/google/go-github/v86/github"
+	"github.com/google/go-github/v88/github"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
 	"github.com/mattn/go-runewidth"

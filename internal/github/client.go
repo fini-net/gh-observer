@@ -8,8 +8,7 @@ import (
 	"strings"
 
 	"github.com/fini-net/gh-observer/internal/debug"
-	"github.com/google/go-github/v86/github"
-	"golang.org/x/oauth2"
+	"github.com/google/go-github/v88/github"
 )
 
 // GetToken retrieves the GitHub token from GITHUB_TOKEN env var or gh CLI
@@ -41,12 +40,10 @@ func NewClient(ctx context.Context) (*github.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewClientFromToken(ctx, token), nil
+	return NewClientFromToken(token)
 }
 
 // NewClientFromToken creates a GitHub API client using an already-obtained token.
-func NewClientFromToken(ctx context.Context, token string) *github.Client {
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	tc := oauth2.NewClient(ctx, ts)
-	return github.NewClient(tc)
+func NewClientFromToken(token string) (*github.Client, error) {
+	return github.NewClient(github.WithAuthToken(token))
 }
