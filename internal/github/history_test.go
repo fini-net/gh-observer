@@ -7,8 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v86/github"
+	"github.com/google/go-github/v88/github"
 )
+
+func ptrTo(s string) *string {
+	return &s
+}
 
 func TestParseRunIDFromURL(t *testing.T) {
 	tests := []struct {
@@ -133,8 +137,7 @@ func TestAverageJobDurations(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(tt.mockHandler)
 			defer server.Close()
-			client := github.NewClient(nil)
-			client.BaseURL, _ = client.BaseURL.Parse(server.URL + "/")
+			client, _ := github.NewClient(github.WithURLs(ptrTo(server.URL+"/"), ptrTo(server.URL+"/")))
 
 			averages := averageJobDurations(
 				context.Background(),
@@ -290,10 +293,9 @@ func TestDiscoverWorkflows(t *testing.T) {
 			if tt.mockHandler != nil {
 				server := httptest.NewServer(tt.mockHandler)
 				defer server.Close()
-				client = github.NewClient(nil)
-				client.BaseURL, _ = client.BaseURL.Parse(server.URL + "/")
+				client, _ = github.NewClient(github.WithURLs(ptrTo(server.URL+"/"), ptrTo(server.URL+"/")))
 			} else {
-				client = github.NewClient(nil)
+				client, _ = github.NewClient()
 			}
 
 			runIDs, workflowIDs, err := DiscoverWorkflows(
@@ -528,8 +530,7 @@ func TestFetchWorkflowHistory(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(tt.mockHandler)
 			defer server.Close()
-			client := github.NewClient(nil)
-			client.BaseURL, _ = client.BaseURL.Parse(server.URL + "/")
+			client, _ := github.NewClient(github.WithURLs(ptrTo(server.URL+"/"), ptrTo(server.URL+"/")))
 
 			averages, err := FetchWorkflowHistory(
 				context.Background(),

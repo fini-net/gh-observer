@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/fini-net/gh-observer/internal/debug"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
-	"github.com/google/go-github/v86/github"
+	"github.com/google/go-github/v88/github"
 )
 
 // RunTickMsg is sent on each poll interval for run-watching mode.

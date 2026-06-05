@@ -291,7 +291,11 @@ func runRunSnapshot(ctx context.Context, owner, repo string, runID int64, enable
 		fmt.Fprintf(os.Stderr, "failed to get GitHub token: %v\n", err)
 		return 1
 	}
-	client := ghclient.NewClientFromToken(ctx, token)
+	client, err := ghclient.NewClientFromToken(token)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create GitHub client: %v\n", err)
+		return 1
+	}
 
 	runInfo, err := ghclient.FetchRunInfo(ctx, client, owner, repo, runID)
 	if err != nil {

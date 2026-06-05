@@ -463,7 +463,7 @@ gh-observer && echo "All checks passed!"
 - `charm.land/bubbletea/v2` - TUI framework (Elm Architecture)
 - `charm.land/lipgloss/v2` - Terminal styling and layout
 - `charm.land/bubbles/v2` - Reusable TUI components (spinner)
-- `github.com/google/go-github/v84` - GitHub REST API client (PR metadata and log fetching)
+- `github.com/google/go-github/v88` - GitHub REST API client (PR metadata and log fetching)
 - `github.com/shurcooL/githubv4` - GitHub GraphQL API client (check runs)
 - `github.com/spf13/cobra` - CLI framework for command-line argument parsing
 - `github.com/spf13/viper` - Configuration management
