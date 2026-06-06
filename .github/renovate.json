@@ -18,13 +18,13 @@
     },
     {
       "matchUpdateTypes": ["patch"],
-      "excludeManagers": ["github-actions"],
+      "matchManagers": ["!github-actions"],
       "groupName": "patches",
       "automerge": true
     },
     {
       "matchUpdateTypes": ["minor"],
-      "excludeManagers": ["github-actions"],
+      "matchManagers": ["!github-actions"],
       "groupName": "minor updates",
       "automerge": true
     },
