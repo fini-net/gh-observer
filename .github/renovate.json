@@ -11,12 +11,20 @@
   },
   "packageRules": [
     {
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "automerge": false,
+      "minimumReleaseAge": "3 days"
+    },
+    {
       "matchUpdateTypes": ["patch"],
+      "excludeManagers": ["github-actions"],
       "groupName": "patches",
       "automerge": true
     },
     {
       "matchUpdateTypes": ["minor"],
+      "excludeManagers": ["github-actions"],
       "groupName": "minor updates",
       "automerge": true
     },
