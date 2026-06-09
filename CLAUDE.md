@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Purpose
 
-gh-observer is a GitHub PR check watcher CLI tool that improves on `gh pr checks --watch` by showing runtime metrics, queue latency, and better handling of startup delays. Built as a Go application with a TUI (Terminal User Interface) using Bubbletea.
+gh-observer is a GitHub PR check watcher and Actions run monitor that improves on `gh pr checks --watch` by showing runtime metrics, queue latency, and better handling of startup delays. Built as a Go application with a TUI (Terminal User Interface) using Bubbletea. It supports watching both PR checks (by PR number or PR URL) and standalone Actions workflow runs (by run URL).
 
 ## Development Workflow
 
@@ -113,7 +113,7 @@ The `.github/workflows/release.yml` workflow:
 - **Build**: Uses `cli/gh-extension-precompile@v2.1.0` with `generate_attestations: true`
 - **Signing**: Keyless cosign signing of each binary after build
 - **Provenance**: SLSA Level 3 provenance via `slsa-framework/slsa-github-generator@v2.1.0`
-- **Go Version**: Auto-detected from `go.mod` (currently 1.26.2) via `go_version_file` parameter
+- **Go Version**: Auto-detected from `go.mod` (currently 1.26.4) via `go_version_file` parameter
 - **Permissions**: Requires `contents: write`, `id-token: write`, `attestations: write`
 
 ### Testing with Prereleases
@@ -217,7 +217,7 @@ All current tags are lightweight (unsigned). Annotated + signed tags would provi
 
 gh-observer follows a clean architecture with distinct layers:
 
-1. **Main entry point** (`main.go`) - Handles command-line arguments using Cobra, configuration loading, and mode selection (TUI vs snapshot)
+1. **Main entry point** (`main.go`) - Handles command-line arguments using Cobra, configuration loading, and mode selection (PR vs run, TUI vs snapshot). `parseArgs()` detects whether the argument is a PR number, PR URL, or Actions run URL and sets a `runMode` enum (`modePR` or `modeRun`)
 2. **GitHub client layer** (`internal/github/`) - Abstracts GitHub API interactions
 3. **TUI layer** (`internal/tui/`) - Implements Bubbletea model/view/update pattern for interactive mode
 4. **Configuration** (`internal/config/`) - Loads user config from `~/.config/gh-observer/config.yaml`
@@ -226,7 +226,14 @@ gh-observer follows a clean architecture with distinct layers:
 
 ### Execution modes
 
-The application operates in two modes based on whether stdout is a terminal:
+The application has two orthogonal mode axes:
+
+**Input type** (determined by parsing the argument in `parseArgs()`):
+
+- **PR mode** (`modePR`) - Watches checks on a pull request; accepts a PR number, `https://github.com/owner/repo/pull/NNN` URL, or auto-detects from current branch
+- **Run mode** (`modeRun`) - Watches jobs in a standalone Actions workflow run; accepts a `https://github.com/owner/repo/actions/runs/ID` URL. Has no queue latency column since runs aren't tied to a commit push event
+
+**Output type** (determined by `term.IsTerminal(os.Stdout.Fd())`):
 
 **Interactive mode** (default when running in a terminal):
 
@@ -249,6 +256,8 @@ The application operates in two modes based on whether stdout is a terminal:
 
 The TUI follows the Elm Architecture pattern (Model-View-Update):
 
+**PR mode files** (`model.go` / `update.go` / `view.go`):
+
 - **Model** (`internal/tui/model.go`) - Application state including PR metadata, check runs, rate limits, and UI state
 - **Init** (`internal/tui/update.go`) - Initializes the model and kicks off PR info fetch
 - **Update** (`internal/tui/update.go`) - Message handler that processes:
@@ -259,6 +268,15 @@ The TUI follows the Elm Architecture pattern (Model-View-Update):
   - `JobAveragesPartialMsg` - Per-workflow history fetch results (averages for one workflow)
   - `tea.KeyMsg` - Keyboard input (q to quit)
 - **View** (`internal/tui/view.go`) - Renders the terminal UI
+
+**Run mode files** (`runmodel.go` / `runupdate.go` / `runview.go`):
+
+- **RunModel** (`internal/tui/runmodel.go`) - Application state for a workflow run: jobs (`[]WorkflowJobInfo`), run metadata (`RunInfo`), and per-job averages
+- **RunUpdate** (`internal/tui/runupdate.go`) - Parallel to `update.go` but for run mode; processes `RunInfoMsg`, `JobsUpdateMsg`, and the same history-fetch message types
+- **RunView** (`internal/tui/runview.go`) - Renders the run-mode TUI; omits the queue latency column since runs have no commit-push event
+
+**Shared files**:
+
 - **Display** (`internal/tui/display.go`) - Column formatting, alignment widths, URL building for check hyperlinks
 - **Styles** (`internal/tui/styles.go`) - Lipgloss color scheme and styling
 - **Messages** (`internal/tui/messages.go`) - Custom message types for async operations
@@ -367,6 +385,16 @@ This follows the approach recommended in jj's own documentation: `GIT_DIR=$(jj g
 
 - `ParseTimestamp()` - Parses GitHub API timestamps using `TimestampFormat` ("2006-01-02T15:04:05Z")
 
+- `FetchRunInfo()` - Retrieves metadata for a workflow run by its run ID (`internal/github/runs.go`)
+
+- `FetchRunJobs()` - Lists all jobs for a workflow run with status, timestamps, and URLs
+
+- `WorkflowJobInfoToCheckRuns()` - Adapts `WorkflowJobInfo` slices to `CheckRunInfo` so run mode can reuse history-fetching and display logic
+
+- `AllJobsComplete()` / `DetermineRunExitCode()` - Run-mode equivalents of `allChecksComplete()` and `determineExitCode()` from PR mode
+
+- `ParseActionsRunURL()` - Extracts owner, repo, and run ID from a `https://github.com/owner/repo/actions/runs/ID` URL
+
 ### Configuration system
 
 User configuration lives in `~/.config/gh-observer/config.yaml`:
@@ -441,6 +469,9 @@ gh-observer 123
 
 # Watch PR on external repository by URL
 gh-observer https://github.com/owner/repo/pull/123
+
+# Watch a standalone Actions workflow run (not tied to a PR)
+gh-observer https://github.com/owner/repo/actions/runs/123456789
 
 # Use in CI pipelines (exits with check status)
 gh-observer && echo "All checks passed!"
