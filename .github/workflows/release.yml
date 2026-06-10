@@ -79,6 +79,9 @@ jobs:
       actions: read
       id-token: write
       contents: write
+    # SLSA generator requires a tag ref (refs/tags/vX.Y.Z) for its internal builder checkout;
+    # pinning to a git SHA causes "Invalid ref" errors and provenance generation failure.
+    # See: https://github.com/fini-net/gh-observer/actions/runs/27281001944
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: "${{ needs.release.outputs.hashes }}"
