@@ -5,4 +5,5 @@ rules:
       policies:
         "actions/*": ref-pin
         "github/*": ref-pin
+        "slsa-framework/slsa-github-generator": ref
         "*": ref-pin
