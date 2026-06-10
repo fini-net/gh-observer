@@ -3,7 +3,5 @@ rules:
   unpinned-uses:
     config:
       policies:
-        "actions/*": ref-pin
-        "github/*": ref-pin
-        "slsa-framework/slsa-github-generator": ref
-        "*": ref-pin
+        "slsa-framework/slsa-github-generator/*": ref-pin
+        "*": hash-pin
