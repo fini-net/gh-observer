@@ -37,20 +37,20 @@ jobs:
 
       - name: Validate PR inputs
         id: validate
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUM: ${{ github.event.pull_request.number }}
         run: |
-          # Validate github.repository matches expected pattern (owner/repo)
-          if ! echo "${{ github.repository }}" | grep -qE '^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$'; then
-            echo "::error::Invalid repository format: ${{ github.repository }}"
+          if ! echo "$REPO" | grep -qE '^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$'; then
+            echo "::error::Invalid repository format: $REPO"
             exit 1
           fi
-          # Validate PR number is a positive integer
-          pr_num="${{ github.event.pull_request.number }}"
-          if ! echo "$pr_num" | grep -qE '^[1-9][0-9]*$'; then
-            echo "::error::Invalid PR number: $pr_num"
+          if ! echo "$PR_NUM" | grep -qE '^[1-9][0-9]*$'; then
+            echo "::error::Invalid PR number: $PR_NUM"
             exit 1
           fi
-          echo "repository=${{ github.repository }}" >> "$GITHUB_OUTPUT"
-          echo "pr_number=$pr_num" >> "$GITHUB_OUTPUT"
+          echo "repository=$REPO" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$PR_NUM" >> "$GITHUB_OUTPUT"
 
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
