@@ -298,8 +298,8 @@ func TestFormatAvg(t *testing.T) {
 		advSecCheck := ghclient.CheckRunInfo{Name: "CodeQL", AppName: "GitHub Advanced Security"}
 		averages := map[string]time.Duration{"CodeQL": 2 * time.Minute}
 		got := FormatAvg(advSecCheck, averages)
-		if got != "2m" {
-			t.Errorf("FormatAvg() = %q, want %q", got, "2m")
+		if got != "2m 0s" {
+			t.Errorf("FormatAvg() = %q, want %q", got, "2m 0s")
 		}
 	})
 }

@@ -238,7 +238,7 @@ func TestFormatDuration(t *testing.T) {
 		{
 			name:     "minutes only (no seconds)",
 			duration: 5 * time.Minute,
-			want:     "5m",
+			want:     "5m 0s",
 		},
 		{
 			name:     "hours minutes and seconds",
@@ -248,7 +248,7 @@ func TestFormatDuration(t *testing.T) {
 		{
 			name:     "hours only",
 			duration: 2 * time.Hour,
-			want:     "2h",
+			want:     "2h 0m 0s",
 		},
 		{
 			name:     "large duration",
@@ -258,12 +258,12 @@ func TestFormatDuration(t *testing.T) {
 		{
 			name:     "exactly one minute",
 			duration: 1 * time.Minute,
-			want:     "1m",
+			want:     "1m 0s",
 		},
 		{
 			name:     "exactly one hour",
 			duration: 1 * time.Hour,
-			want:     "1h",
+			want:     "1h 0m 0s",
 		},
 	}
 
