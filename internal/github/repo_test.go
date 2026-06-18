@@ -42,6 +42,17 @@ func TestParseRepoArg(t *testing.T) {
 			wantRepo:  "repo",
 		},
 		{
+			// Embedded underscores are allowed in GitHub owner/repo names.
+			input:     "my_org/my_repo",
+			wantOwner: "my_org",
+			wantRepo:  "my_repo",
+		},
+		{
+			input:     "https://github.com/my_org/my_repo",
+			wantOwner: "my_org",
+			wantRepo:  "my_repo",
+		},
+		{
 			input:   "",
 			wantErr: true,
 		},
@@ -63,6 +74,38 @@ func TestParseRepoArg(t *testing.T) {
 		},
 		{
 			input:   "https://github.com/owner/repo/actions/runs/456",
+			wantErr: true,
+		},
+		// All-underscore segments are rejected so the --repo auto-detect
+		// sentinel "_" in main.go can't collide with a literal owner/repo.
+		// These should error rather than being treated as auto-detect or as
+		// a real repo named "_".
+		{
+			input:   "_",
+			wantErr: true,
+		},
+		{
+			input:   "__",
+			wantErr: true,
+		},
+		{
+			input:   "_/repo",
+			wantErr: true,
+		},
+		{
+			input:   "owner/_",
+			wantErr: true,
+		},
+		{
+			input:   "__/__",
+			wantErr: true,
+		},
+		{
+			input:   "https://github.com/_/repo",
+			wantErr: true,
+		},
+		{
+			input:   "https://github.com/owner/_",
 			wantErr: true,
 		},
 	}

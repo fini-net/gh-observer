@@ -19,14 +19,35 @@ var (
 // ParseRepoArg extracts owner and repo from a string in "owner/repo" or
 // "https://github.com/owner/repo" format. PR URLs and Actions run URLs are
 // rejected — this is only for repo-level arguments.
+//
+// All-underscore segments (e.g. "_", "__") are rejected even though the
+// regex character class allows underscores. This keeps "_" usable as the
+// NoOptDefVal sentinel for the --repo flag in main.go: a user typing
+// `gh-observer --repo _` gets a clean "invalid repo argument" error rather
+// than silently being treated as auto-detect or as a literal owner/repo of
+// "_". Embedded underscores (e.g. "my_org/my_repo") are still accepted.
 func ParseRepoArg(arg string) (owner, repo string, err error) {
 	if m := repoSlugPattern.FindStringSubmatch(arg); len(m) == 3 {
+		if isAllUnderscoreSegment(m[1]) || isAllUnderscoreSegment(m[2]) {
+			return "", "", fmt.Errorf("invalid repo argument: %q (expected \"owner/repo\" or \"https://github.com/owner/repo\")", arg)
+		}
 		return m[1], m[2], nil
 	}
 	if m := repoURLPattern.FindStringSubmatch(arg); len(m) == 3 {
+		if isAllUnderscoreSegment(m[1]) || isAllUnderscoreSegment(m[2]) {
+			return "", "", fmt.Errorf("invalid repo argument: %q (expected \"owner/repo\" or \"https://github.com/owner/repo\")", arg)
+		}
 		return m[1], m[2], nil
 	}
 	return "", "", fmt.Errorf("invalid repo argument: %q (expected \"owner/repo\" or \"https://github.com/owner/repo\")", arg)
+}
+
+// isAllUnderscoreSegment returns true for strings composed entirely of
+// underscores (e.g. "_", "__", "___"). Such strings are valid against the
+// slug regex but are not real GitHub owner/repo names, and "_" is used as
+// the --repo auto-detect sentinel in main.go.
+func isAllUnderscoreSegment(s string) bool {
+	return s != "" && strings.Trim(s, "_") == ""
 }
 
 // GetCurrentRepo detects the owner and repo from the current git remote.

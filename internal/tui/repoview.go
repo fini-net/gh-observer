@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
 	"github.com/mattn/go-runewidth"
@@ -71,12 +71,24 @@ func (m RepoModel) View() tea.View {
 		}
 	}
 
-	// Non-fatal fetch error status line. The last good state remains on screen
-	// above this line; polling continues and the line clears on next success.
-	if m.fetchErr != nil {
-		errText := truncateFetchError(m.fetchErr.Error(), 80)
-		age := timing.FormatDuration(time.Since(m.fetchErrAt))
-		b.WriteString(m.styles.Failure.Render(fmt.Sprintf("  [Fetch error: %s — %s ago]", errText, age)))
+	// Non-fatal fetch error status line. The last good state remains on
+	// screen above this line; polling continues and the relevant source's
+	// line clears on its next success. The two fetch sources (GraphQL PR
+	// checks and REST standalone runs) track errors independently so a
+	// success from one cannot mask an ongoing error from the other. Render
+	// whichever source's error is most recent, prefixed by the source.
+	var err error
+	var errAt time.Time
+	var source string
+	if !m.fetchErrChecksAt.IsZero() && (m.fetchErrRunsAt.IsZero() || m.fetchErrChecksAt.After(m.fetchErrRunsAt)) {
+		err, errAt, source = m.fetchErrChecks, m.fetchErrChecksAt, "PR checks"
+	} else if m.fetchErrRuns != nil {
+		err, errAt, source = m.fetchErrRuns, m.fetchErrRunsAt, "Repo runs"
+	}
+	if err != nil {
+		errText := truncateFetchError(err.Error(), 70)
+		age := timing.FormatDuration(time.Since(errAt))
+		b.WriteString(m.styles.Failure.Render(fmt.Sprintf("  [%s fetch error: %s — %s ago]", source, errText, age)))
 		b.WriteString("\n")
 	}
 

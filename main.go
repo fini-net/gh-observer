@@ -30,8 +30,13 @@ var repoFlag string
 // repoFlagAutoSentinel is the NoOptDefVal for --repo: when the user passes
 // --repo with no value, pflag fills repoFlag with this sentinel so we can
 // distinguish "no value given (auto-detect)" from "value given explicitly".
-// Any string that can't be parsed as owner/repo or a GitHub URL works; we
-// use a single underscore which is invalid in both GitHub owner and repo names.
+//
+// The required properties are (a) not parseable as "owner/repo" or a
+// GitHub URL, and (b) not something a user would type on purpose. A single
+// underscore "_" satisfies both: ParseRepoArg in internal/github/repo.go
+// explicitly rejects all-underscore segments (see isAllUnderscoreSegment),
+// so `gh-observer --repo _` errors cleanly as an invalid argument rather
+// than being mistaken for auto-detect or treated as a literal owner/repo.
 const repoFlagAutoSentinel = "_"
 
 func init() {
@@ -40,8 +45,10 @@ func init() {
 	rootCmd.Flags().StringVar(&repoFlag, "repo", "", "Watch all active workflows on a repo persistently (owner/repo or URL; bare --repo auto-detects from current git remote)")
 	// Allow `--repo` with no value: pflag fills repoFlag with this sentinel
 	// so resolveRepoArg can distinguish "no value given (auto-detect)" from
-	// "value given explicitly". Any string invalid as owner/repo or a GitHub
-	// URL works; "_" is invalid in both GitHub owner and repo names.
+	// "value given explicitly". The sentinel must be not parseable as
+	// owner/repo or a GitHub URL and not something a user would type on
+	// purpose; ParseRepoArg explicitly rejects all-underscore segments so
+	// "_" works and `--repo _` errors cleanly.
 	rootCmd.Flags().Lookup("repo").NoOptDefVal = repoFlagAutoSentinel
 }
 

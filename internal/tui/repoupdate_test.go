@@ -253,7 +253,7 @@ func TestRepoRunsUpdateFadeOut(t *testing.T) {
 		},
 		{
 			name:        "empty list",
-			runs:         []ghclient.BranchRunData{},
+			runs:        []ghclient.BranchRunData{},
 			wantVisible: 0,
 		},
 	}
@@ -329,7 +329,7 @@ func TestRepoModelFadeWindow(t *testing.T) {
 		name        string
 		fadeSuccess time.Duration
 		fadeFailure time.Duration
-		want         time.Duration
+		want        time.Duration
 	}{
 		{"failure larger", 15 * time.Minute, 30 * time.Minute, 30 * time.Minute},
 		{"success larger", 30 * time.Minute, 15 * time.Minute, 30 * time.Minute},
@@ -381,13 +381,13 @@ func TestRepoChecksUpdateErrorNonFatal(t *testing.T) {
 				HeadCommitTime: now.Add(-2 * time.Minute),
 			},
 		},
-		fadeSuccess:    fadeSuccess,
-		fadeFailure:    fadeFailure,
-		fetchReceived:  true,
+		fadeSuccess:        fadeSuccess,
+		fadeFailure:        fadeFailure,
+		fetchReceived:      true,
 		rateLimitRemaining: 4000,
 	}
 
-	t.Run("error preserves last good state and sets fetchErr", func(t *testing.T) {
+	t.Run("error preserves last good state and sets fetchErrChecks", func(t *testing.T) {
 		m := seedPR
 		msg := RepoChecksUpdateMsg{
 			Err: fmt.Errorf("non-200 OK status code: 504 Gateway Timeout body: \"<!DOCTYPE html>..."),
@@ -396,11 +396,15 @@ func TestRepoChecksUpdateErrorNonFatal(t *testing.T) {
 		newModel, _ := m.Update(msg)
 		rm := newModel.(*RepoModel)
 
-		if rm.fetchErr == nil {
-			t.Error("fetchErr should be set on error")
+		if rm.fetchErrChecks == nil {
+			t.Error("fetchErrChecks should be set on error")
 		}
-		if rm.fetchErrAt.IsZero() {
-			t.Error("fetchErrAt should be set on error")
+		if rm.fetchErrChecksAt.IsZero() {
+			t.Error("fetchErrChecksAt should be set on error")
+		}
+		// The runs-source error should be untouched.
+		if rm.fetchErrRuns != nil {
+			t.Error("fetchErrRuns should not be touched by a checks-source error")
 		}
 		if rm.fetchReceived != true {
 			t.Error("fetchReceived should remain true after error (already received before)")
@@ -418,11 +422,14 @@ func TestRepoChecksUpdateErrorNonFatal(t *testing.T) {
 		}
 	})
 
-	t.Run("success clears fetchErr and updates state", func(t *testing.T) {
-		// Start from an errored state.
+	t.Run("success clears fetchErrChecks only and updates state", func(t *testing.T) {
+		// Start from an errored state on BOTH sources. The checks success
+		// must clear only fetchErrChecks, leaving fetchErrRuns intact.
 		m := seedPR
-		m.fetchErr = fmt.Errorf("previous 504")
-		m.fetchErrAt = time.Now().Add(-1 * time.Minute)
+		m.fetchErrChecks = fmt.Errorf("previous 504")
+		m.fetchErrChecksAt = time.Now().Add(-1 * time.Minute)
+		m.fetchErrRuns = fmt.Errorf("ongoing 502 from runs source")
+		m.fetchErrRunsAt = time.Now().Add(-30 * time.Second)
 
 		msg := RepoChecksUpdateMsg{
 			PRData: map[int]ghclient.PRCheckData{
@@ -440,17 +447,28 @@ func TestRepoChecksUpdateErrorNonFatal(t *testing.T) {
 		newModel, _ := m.Update(msg)
 		rm := newModel.(*RepoModel)
 
-		if rm.fetchErr != nil {
-			t.Error("fetchErr should be cleared on success")
+		if rm.fetchErrChecks != nil {
+			t.Error("fetchErrChecks should be cleared on checks success")
 		}
-		if !rm.fetchErrAt.IsZero() {
-			t.Error("fetchErrAt should be cleared on success")
+		if !rm.fetchErrChecksAt.IsZero() {
+			t.Error("fetchErrChecksAt should be cleared on checks success")
+		}
+		// The runs-side error must survive the checks success — this is
+		// the core isolation property fix #2 adds.
+		if rm.fetchErrRuns == nil {
+			t.Error("fetchErrRuns should survive a checks-source success")
+		}
+		if rm.fetchErrRunsAt.IsZero() {
+			t.Error("fetchErrRunsAt should survive a checks-source success")
 		}
 		if rm.fetchReceived != true {
 			t.Error("fetchReceived should remain true")
 		}
-		if rm.rateLimitRemaining != 4900 {
-			t.Errorf("rateLimitRemaining = %d, want 4900", rm.rateLimitRemaining)
+		// Fix #4: handleRepoChecksUpdate now applies the min-across-sources
+		// guard, so a 4900 message against a seeded 4000 leaves 4000 in
+		// place rather than overwriting with 4900.
+		if rm.rateLimitRemaining != 4000 {
+			t.Errorf("rateLimitRemaining = %d, want 4000 (min across sources)", rm.rateLimitRemaining)
 		}
 		// The PR map is replaced wholesale with the new message's PRs (fade-out
 		// only filters within the new message — it does not carry over PRs
@@ -460,6 +478,29 @@ func TestRepoChecksUpdateErrorNonFatal(t *testing.T) {
 		}
 		if _, ok := rm.prs[7]; !ok {
 			t.Error("PR #7 should be present after success")
+		}
+	})
+
+	t.Run("checks success does not clear runs error", func(t *testing.T) {
+		// Minimal isolation check: seed only fetchErrRuns, send a successful
+		// RepoChecksUpdateMsg, and assert fetchErrRuns is still set.
+		m := seedPR
+		m.fetchErrRuns = fmt.Errorf("ongoing 502")
+		m.fetchErrRunsAt = time.Now().Add(-30 * time.Second)
+
+		msg := RepoChecksUpdateMsg{
+			PRData:             map[int]ghclient.PRCheckData{},
+			RateLimitRemaining: 4900,
+		}
+
+		newModel, _ := m.Update(msg)
+		rm := newModel.(*RepoModel)
+
+		if rm.fetchErrRuns == nil {
+			t.Error("fetchErrRuns should survive a checks-source success")
+		}
+		if rm.fetchErrChecks != nil {
+			t.Error("fetchErrChecks should be nil on a checks success")
 		}
 	})
 }
@@ -472,14 +513,14 @@ func TestRepoRunsUpdateErrorNonFatal(t *testing.T) {
 		{RunID: 1, Status: "in_progress", Event: "push", HeadBranch: "main"},
 	}
 	m := RepoModel{
-		standaloneRuns:    seedRuns,
-		fadeSuccess:       fadeSuccess,
-		fadeFailure:       fadeFailure,
-		fetchReceived:     true,
+		standaloneRuns:     seedRuns,
+		fadeSuccess:        fadeSuccess,
+		fadeFailure:        fadeFailure,
+		fetchReceived:      true,
 		rateLimitRemaining: 4000,
 	}
 
-	t.Run("error preserves last good runs and sets fetchErr", func(t *testing.T) {
+	t.Run("error preserves last good runs and sets fetchErrRuns", func(t *testing.T) {
 		msg := RepoRunsUpdateMsg{
 			Err: fmt.Errorf("non-200 OK status code: 502 Bad Gateway"),
 		}
@@ -487,20 +528,29 @@ func TestRepoRunsUpdateErrorNonFatal(t *testing.T) {
 		newModel, _ := m.Update(msg)
 		rm := newModel.(*RepoModel)
 
-		if rm.fetchErr == nil {
-			t.Error("fetchErr should be set on error")
+		if rm.fetchErrRuns == nil {
+			t.Error("fetchErrRuns should be set on error")
 		}
-		if rm.fetchErrAt.IsZero() {
-			t.Error("fetchErrAt should be set on error")
+		if rm.fetchErrRunsAt.IsZero() {
+			t.Error("fetchErrRunsAt should be set on error")
+		}
+		// The checks-source error should be untouched.
+		if rm.fetchErrChecks != nil {
+			t.Error("fetchErrChecks should not be touched by a runs-source error")
 		}
 		if len(rm.standaloneRuns) != 1 {
 			t.Errorf("standaloneRuns = %d, want 1 (last good state preserved)", len(rm.standaloneRuns))
 		}
 	})
 
-	t.Run("success clears fetchErr", func(t *testing.T) {
+	t.Run("success clears fetchErrRuns only", func(t *testing.T) {
+		// Seed both source errors; the runs success must clear only
+		// fetchErrRuns, leaving fetchErrChecks intact.
 		m2 := m
-		m2.fetchErr = fmt.Errorf("previous 502")
+		m2.fetchErrRuns = fmt.Errorf("previous 502")
+		m2.fetchErrRunsAt = time.Now().Add(-1 * time.Minute)
+		m2.fetchErrChecks = fmt.Errorf("ongoing 504 from checks source")
+		m2.fetchErrChecksAt = time.Now().Add(-30 * time.Second)
 
 		msg := RepoRunsUpdateMsg{
 			Runs: []ghclient.BranchRunData{
@@ -512,14 +562,137 @@ func TestRepoRunsUpdateErrorNonFatal(t *testing.T) {
 		newModel, _ := m2.Update(msg)
 		rm := newModel.(*RepoModel)
 
-		if rm.fetchErr != nil {
-			t.Error("fetchErr should be cleared on success")
+		if rm.fetchErrRuns != nil {
+			t.Error("fetchErrRuns should be cleared on runs success")
+		}
+		// The checks-side error must survive the runs success.
+		if rm.fetchErrChecks == nil {
+			t.Error("fetchErrChecks should survive a runs-source success")
+		}
+		if rm.fetchErrChecksAt.IsZero() {
+			t.Error("fetchErrChecksAt should survive a runs-source success")
 		}
 		if len(rm.standaloneRuns) != 1 {
 			t.Errorf("standaloneRuns = %d, want 1 (new active run)", len(rm.standaloneRuns))
 		}
 		if rm.standaloneRuns[0].RunID != 2 {
 			t.Errorf("standaloneRuns[0].RunID = %d, want 2", rm.standaloneRuns[0].RunID)
+		}
+	})
+
+	t.Run("runs success does not clear checks error", func(t *testing.T) {
+		// Minimal isolation check: seed only fetchErrChecks, send a
+		// successful RepoRunsUpdateMsg, and assert fetchErrChecks is still set.
+		m3 := m
+		m3.fetchErrChecks = fmt.Errorf("ongoing 504")
+		m3.fetchErrChecksAt = time.Now().Add(-30 * time.Second)
+
+		msg := RepoRunsUpdateMsg{
+			Runs: []ghclient.BranchRunData{
+				{RunID: 3, Status: "in_progress", Event: "push", HeadBranch: "main"},
+			},
+			RateLimitRemaining: 4900,
+		}
+
+		newModel, _ := m3.Update(msg)
+		rm := newModel.(*RepoModel)
+
+		if rm.fetchErrChecks == nil {
+			t.Error("fetchErrChecks should survive a runs-source success")
+		}
+		if rm.fetchErrRuns != nil {
+			t.Error("fetchErrRuns should be nil on a runs success")
+		}
+	})
+}
+
+// TestRepoChecksUpdateRateLimitMinAcrossSources verifies fix #4: the checks
+// source applies a min-across-sources guard (mirroring handleRepoRunsUpdate)
+// so a GraphQL response with a higher remaining quota cannot raise the model
+// value past what the REST runs source already observed.
+func TestRepoChecksUpdateRateLimitMinAcrossSources(t *testing.T) {
+	t.Run("min wins when checks quota is higher", func(t *testing.T) {
+		m := RepoModel{
+			prs:                make(map[int]PRViewData),
+			fadeSuccess:        15 * time.Minute,
+			fadeFailure:        30 * time.Minute,
+			fetchReceived:      true,
+			rateLimitRemaining: 4000,
+		}
+		msg := RepoChecksUpdateMsg{
+			PRData:             map[int]ghclient.PRCheckData{},
+			RateLimitRemaining: 4900,
+		}
+		newModel, _ := m.Update(msg)
+		rm := newModel.(*RepoModel)
+		if rm.rateLimitRemaining != 4000 {
+			t.Errorf("rateLimitRemaining = %d, want 4000 (min across sources)", rm.rateLimitRemaining)
+		}
+	})
+
+	t.Run("first observed wins on a fresh model", func(t *testing.T) {
+		m := RepoModel{
+			prs:           make(map[int]PRViewData),
+			fadeSuccess:   15 * time.Minute,
+			fadeFailure:   30 * time.Minute,
+			fetchReceived: false,
+		}
+		msg := RepoChecksUpdateMsg{
+			PRData:             map[int]ghclient.PRCheckData{},
+			RateLimitRemaining: 4500,
+		}
+		newModel, _ := m.Update(msg)
+		rm := newModel.(*RepoModel)
+		if rm.rateLimitRemaining != 4500 {
+			t.Errorf("rateLimitRemaining = %d, want 4500 (first observed)", rm.rateLimitRemaining)
+		}
+		if !rm.fetchReceived {
+			t.Error("fetchReceived should be true after first successful checks update")
+		}
+	})
+}
+
+// TestRepoRunsUpdateRateLimitMinAcrossSources hardens the existing behavior
+// on the runs side (the min-across-sources guard in handleRepoRunsUpdate) so
+// it stays tested alongside the new checks-side equivalent above.
+func TestRepoRunsUpdateRateLimitMinAcrossSources(t *testing.T) {
+	t.Run("min wins when runs quota is higher", func(t *testing.T) {
+		m := RepoModel{
+			standaloneRuns:     []ghclient.BranchRunData{},
+			fadeSuccess:        15 * time.Minute,
+			fadeFailure:        30 * time.Minute,
+			fetchReceived:      true,
+			rateLimitRemaining: 4000,
+		}
+		msg := RepoRunsUpdateMsg{
+			Runs:               []ghclient.BranchRunData{},
+			RateLimitRemaining: 4900,
+		}
+		newModel, _ := m.Update(msg)
+		rm := newModel.(*RepoModel)
+		if rm.rateLimitRemaining != 4000 {
+			t.Errorf("rateLimitRemaining = %d, want 4000 (min across sources)", rm.rateLimitRemaining)
+		}
+	})
+
+	t.Run("first observed wins on a fresh model", func(t *testing.T) {
+		m := RepoModel{
+			standaloneRuns: []ghclient.BranchRunData{},
+			fadeSuccess:    15 * time.Minute,
+			fadeFailure:    30 * time.Minute,
+			fetchReceived:  false,
+		}
+		msg := RepoRunsUpdateMsg{
+			Runs:               []ghclient.BranchRunData{},
+			RateLimitRemaining: 4500,
+		}
+		newModel, _ := m.Update(msg)
+		rm := newModel.(*RepoModel)
+		if rm.rateLimitRemaining != 4500 {
+			t.Errorf("rateLimitRemaining = %d, want 4500 (first observed)", rm.rateLimitRemaining)
+		}
+		if !rm.fetchReceived {
+			t.Error("fetchReceived should be true after first successful runs update")
 		}
 	})
 }
@@ -549,10 +722,10 @@ func TestRepoModelFetchReceivedGatesRateLimit(t *testing.T) {
 
 func TestTruncateFetchError(t *testing.T) {
 	tests := []struct {
-		name   string
-		input  string
-		max    int
-		want   string
+		name  string
+		input string
+		max   int
+		want  string
 	}{
 		{
 			name:  "short passthrough",

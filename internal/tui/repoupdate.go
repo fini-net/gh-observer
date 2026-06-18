@@ -86,21 +86,30 @@ func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // is within the configured fade window (fadeSuccess or fadeFailure).
 //
 // Transient fetch errors (e.g. 504 Gateway Timeout) are non-fatal: the last
-// good m.prs is preserved on screen, the error is surfaced via m.fetchErr for
-// the view to render as a status line, and polling continues. The error
-// clears automatically on the next successful fetch.
+// good m.prs is preserved on screen, the error is surfaced via
+// m.fetchErrChecks for the view to render as a status line, and polling
+// continues. Only the PR-checks error is touched here; the standalone-runs
+// error (m.fetchErrRuns) is managed by handleRepoRunsUpdate so a success
+// from one source cannot mask an ongoing error from the other.
 func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	if msg.Err != nil {
-		m.fetchErr = msg.Err
-		m.fetchErrAt = time.Now()
+		m.fetchErrChecks = msg.Err
+		m.fetchErrChecksAt = time.Now()
 		debug.Log("repo checks fetch error", "err", msg.Err)
 		return m, nil
 	}
 
-	m.rateLimitRemaining = msg.RateLimitRemaining
+	// Take the minimum across sources, but accept the first observed value
+	// so the zero default doesn't pin rateLimitRemaining at 0 forever (which
+	// would trigger permanent rate-limit backoff and show "0 remaining").
+	// Mirrors handleRepoRunsUpdate so neither source can raise the value
+	// past what the other already observed.
+	if !m.fetchReceived || msg.RateLimitRemaining < m.rateLimitRemaining {
+		m.rateLimitRemaining = msg.RateLimitRemaining
+	}
 	m.lastUpdate = time.Now()
-	m.fetchErr = nil
-	m.fetchErrAt = time.Time{}
+	m.fetchErrChecks = nil
+	m.fetchErrChecksAt = time.Time{}
 	m.fetchReceived = true
 
 	now := time.Now()
@@ -151,11 +160,14 @@ func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, 
 // completed runs are kept if RunStartedAt is within the fade window.
 //
 // Transient fetch errors are non-fatal: the last good m.standaloneRuns is
-// preserved, the error is surfaced via m.fetchErr, and polling continues.
+// preserved, the error is surfaced via m.fetchErrRuns, and polling continues.
+// Only the standalone-runs error is touched here; the PR-checks error
+// (m.fetchErrChecks) is managed by handleRepoChecksUpdate so a success from
+// one source cannot mask an ongoing error from the other.
 func (m *RepoModel) handleRepoRunsUpdate(msg RepoRunsUpdateMsg) (tea.Model, tea.Cmd) {
 	if msg.Err != nil {
-		m.fetchErr = msg.Err
-		m.fetchErrAt = time.Now()
+		m.fetchErrRuns = msg.Err
+		m.fetchErrRunsAt = time.Now()
 		debug.Log("repo runs fetch error", "err", msg.Err)
 		return m, nil
 	}
@@ -167,8 +179,8 @@ func (m *RepoModel) handleRepoRunsUpdate(msg RepoRunsUpdateMsg) (tea.Model, tea.
 		m.rateLimitRemaining = msg.RateLimitRemaining
 	}
 	m.lastUpdate = time.Now()
-	m.fetchErr = nil
-	m.fetchErrAt = time.Time{}
+	m.fetchErrRuns = nil
+	m.fetchErrRunsAt = time.Time{}
 	m.fetchReceived = true
 
 	now := time.Now()
