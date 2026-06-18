@@ -10,9 +10,13 @@ import (
 )
 
 // maxPRsPerQuery caps the number of open PRs fetched per repo query.
-// 50 matches GitHub's typical "first" page size for pullRequests and keeps
-// the batched query cost reasonable.
-const maxPRsPerQuery = 50
+// GitHub's GraphQL server-side query timeout is ~10s. Fetching check rollups
+// (contexts(first: 100)) for each PR scales linearly: prLimit=50 504s on
+// high-traffic repos like grafana/grafana (137 workflows, thousands of open
+// PRs), while prLimit=10 returns in ~6s even for grafana. 10 most-recently-
+// updated PRs is a useful persistent overview; the fade-out window means
+// older completed checks disappear from the display soon anyway.
+const maxPRsPerQuery = 10
 
 // PRCheckData holds check run data for a single PR in repo mode.
 type PRCheckData struct {

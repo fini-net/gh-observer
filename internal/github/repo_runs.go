@@ -51,9 +51,12 @@ func FetchRepoWorkflowRuns(ctx context.Context, client *github.Client, owner, re
 	}
 
 	// Recently completed: filter by creation date to bound the result set.
+	// RFC3339 (not time.DateOnly) so a 30m fade window queries the last 30
+	// minutes, not the whole calendar day — the date-only form made the
+	// server-side scan ~10x more expensive and triggered 504s on busy repos.
 	recent := &github.ListWorkflowRunsOptions{
 		ExcludePullRequests: true,
-		Created:              ">=" + time.Now().Add(-fadeWindow).Format(time.DateOnly),
+		Created:             ">=" + time.Now().Add(-fadeWindow).Format(time.RFC3339),
 		ListOptions:         github.ListOptions{PerPage: 100},
 	}
 	completedRuns, rl2, err := fetchRepoRunPage(ctx, client, owner, repo, recent)
@@ -87,26 +90,29 @@ func FetchRepoWorkflowRuns(ctx context.Context, client *github.Client, owner, re
 	return result, rateLimitRemaining, nil
 }
 
+// fetchRepoRunPage fetches a single page of workflow runs. It deliberately does
+// NOT follow pagination: paginating through hundreds of recent runs on a
+// high-traffic repo (e.g. grafana/grafana with ~400 completions/30m) takes
+// multiple round-trips that can exceed GitHub's ~10s server-side query timeout
+// and return 504 Gateway Timeout. The first 100 runs is enough for the
+// persistent repo-watch view — the fade-out window means older runs would
+// disappear from the display soon anyway.
 func fetchRepoRunPage(ctx context.Context, client *github.Client, owner, repo string, opts *github.ListWorkflowRunsOptions) ([]BranchRunData, int, error) {
-	var allRuns []BranchRunData
 	rateLimitRemaining := 5000
 
-	for {
-		runs, resp, err := client.Actions.ListRepositoryWorkflowRuns(ctx, owner, repo, opts)
-		if err != nil {
-			return nil, rateLimitRemaining, fmt.Errorf("failed to list repo workflow runs: %w", err)
-		}
-		if resp != nil {
-			rateLimitRemaining = resp.Rate.Remaining
-		}
-		for _, run := range runs.WorkflowRuns {
-			allRuns = append(allRuns, convertBranchRun(run))
-		}
-		if resp == nil || resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
+	runs, resp, err := client.Actions.ListRepositoryWorkflowRuns(ctx, owner, repo, opts)
+	if err != nil {
+		return nil, rateLimitRemaining, fmt.Errorf("failed to list repo workflow runs: %w", err)
 	}
+	if resp != nil {
+		rateLimitRemaining = resp.Rate.Remaining
+	}
+
+	var allRuns []BranchRunData
+	for _, run := range runs.WorkflowRuns {
+		allRuns = append(allRuns, convertBranchRun(run))
+	}
+
 	return allRuns, rateLimitRemaining, nil
 }
 
