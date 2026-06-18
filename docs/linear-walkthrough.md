@@ -2,6 +2,16 @@
 
 This document provides a comprehensive walkthrough of the gh-observer codebase, following the execution flow from entry point through all code paths. It's designed for contributors who need a deep technical understanding of how the application works.
 
+The binary is named `gh-observer` (the installable name when installed via `go install`); the user-facing help text and the `gh` extension invocation prefer `gh observer` without the dash. This doc uses `gh-observer` when referring to the binary and `gh observer` when quoting help text.
+
+gh-observer runs in one of three input modes, selected by parsing the argument:
+
+- **PR mode** (`modePR`) — watches checks on a pull request (PR number, PR URL, or auto-detected from the current branch)
+- **Run mode** (`modeRun`) — watches jobs in a standalone Actions workflow run (Actions run URL)
+- **Repo mode** (`modeRepo`) — persistently watches all active PR checks plus standalone branch runs on a repo (`--repo` flag; interactive only)
+
+PR and Run modes each support two output types: interactive TUI (terminal) and snapshot (non-terminal). Repo mode is always interactive.
+
 ## Table of Contents
 
 1. [Application Entry Point](#1-application-entry-point)
@@ -15,81 +25,134 @@ This document provides a comprehensive walkthrough of the gh-observer codebase, 
 9. [Error Handling & Edge Cases](#9-error-handling--edge-cases)
 10. [Data Flow Diagrams](#10-data-flow-diagrams)
 11. [Exit Behavior](#11-exit-behavior)
+12. [Repo Mode](#12-repo-mode)
 
 ---
 
 ## 1. Application Entry Point
 
-### Command Registration (`main.go:26-48`)
+### Command Registration (`main.go:26-80`)
 
 The application uses [Cobra](https://github.com/spf13/cobra) for CLI argument parsing. The root command is registered with:
 
-- **Usage**: `gh-observer [PR_NUMBER | PR_URL]`
-- **Arguments**: Maximum of 1 argument (optional PR number or full PR URL)
+- **Usage**: `gh-observer [PR_NUMBER | PR_URL | ACTIONS_RUN_URL]`
+- **Arguments**: Maximum of 1 positional argument (optional PR number, full PR URL, or Actions run URL)
 - **Flags**:
   - `--quick` / `-q`: Skip fetching historical average runtimes
   - `--debug` / `-d`: Enable structured debug logging to `os.TempDir()/gh-observer-debug/`
-- **Execution**: Calls `run(args)` and exits with the returned exit code
+  - `--repo` `[owner/repo|URL]`: Persistently watch all active workflows on a repo. Bare `--repo` (no value) auto-detects from the current git remote via pflag's `NoOptDefVal` sentinel. Incompatible with `--quick` or positional arguments and requires an interactive terminal.
+- **Execution**: Calls `run(cmd, args)` and exits with the returned exit code
 
 ```go
 var quickFlag bool
 var debugFlag bool
+var repoFlag string
+
+// repoFlagAutoSentinel is the NoOptDefVal for --repo: when the user passes
+// --repo with no value, pflag fills repoFlag with this sentinel so we can
+// distinguish "no value given (auto-detect)" from "value given explicitly".
+const repoFlagAutoSentinel = "_"
 
 func init() {
     rootCmd.Flags().BoolVarP(&quickFlag, "quick", "q", false, "Skip fetching historical average runtimes")
     rootCmd.Flags().BoolVarP(&debugFlag, "debug", "d", false, "Log suppressed errors and internal state to a file")
+    rootCmd.Flags().StringVar(&repoFlag, "repo", "", "Watch all active workflows on a repo persistently (owner/repo or URL; bare --repo auto-detects from current git remote)")
+    rootCmd.Flags().Lookup("repo").NoOptDefVal = repoFlagAutoSentinel
 }
 
 var rootCmd = &cobra.Command{
-    Use:   "gh-observer [PR_NUMBER | PR_URL]",
-    Short: "Watch GitHub PR checks with runtime metrics",
-    Long: `gh-observer is a GitHub PR check watcher CLI tool that improves on 
-'gh pr checks --watch' by showing runtime metrics, queue latency, 
-and better handling of startup delays.
+    Use:   "gh-observer [PR_NUMBER | PR_URL | ACTIONS_RUN_URL]",
+    Short: "Watch GitHub PR checks or Actions runs with runtime metrics",
+    Long: `gh observer (invoked as gh-observer when installed via go install) is a
+GitHub PR check watcher CLI tool that improves on 'gh pr checks --watch' by
+showing runtime metrics, queue latency, and better handling of startup delays.
 
 Supports watching checks on external repositories by passing a full PR URL:
-  gh-observer https://github.com/owner/repo/pull/123`,
+  gh observer https://github.com/owner/repo/pull/123
+
+Also supports watching GitHub Actions runs by passing a run URL:
+  gh observer https://github.com/owner/repo/actions/runs/123456789
+
+Use --repo to persistently watch all active workflows on a repository:
+  gh observer --repo              # auto-detect from current git remote
+  gh observer --repo owner/repo
+  gh observer --repo https://github.com/owner/repo
+`,
     Args: cobra.MaximumNArgs(1),
     Run: func(cmd *cobra.Command, args []string) {
-        exitCode := run(args)
+        exitCode := run(cmd, args)
         os.Exit(exitCode)
     },
 }
-```
 
-**Design Decision**: The exit code is captured and passed to `os.Exit()` explicitly. This allows the TUI to clean up properly before exiting.
+// runMode determines which mode the application is running in.
+type runMode int
 
-### URL Support (`main.go:168-191`)
+const (
+    modePR   runMode = iota // Watch a PR's checks
+    modeRun                 // Watch an Actions workflow run
+    modeRepo                // Watch all active workflows on a repo persistently
+)
 
-The application accepts either a PR number or a full GitHub PR URL:
-
-```go
-if len(args) > 0 {
-    arg := args[0]
-    if owner, repo, prNumber, err = ghclient.ParsePRURL(arg); err == nil {
-        // valid PR URL
-    } else if n, convErr := strconv.Atoi(arg); convErr == nil {
-        // numeric PR number
-        prNumber, owner, repo, err = ghclient.GetPRWithRepo(n)
-    } else {
-        fmt.Fprintf(os.Stderr, "Invalid PR number or URL: %s\n", arg)
-        return 1
-    }
-} else {
-    // Auto-detect from current branch (correctly handles forks)
-    prNumber, owner, repo, err = ghclient.GetCurrentPRWithRepo()
+// runArgs holds the parsed arguments for either mode.
+type runArgs struct {
+    mode     runMode
+    owner    string
+    repo     string
+    prNumber int
+    runID    int64
 }
 ```
 
-**Why use PR URL?** External repositories can be watched without cloning them locally. The URL contains all the information needed (owner, repo, PR number).
+The `--repo` flag uses `NoOptDefVal = "_"` so `--repo` with no value (bare flag) is distinguishable from `--repo=VALUE`. The sentinel `_` is rejected by `ParseRepoArg` (which refuses all-underscore segments), so `gh-observer --repo _` errors cleanly instead of being mistaken for auto-detect or a literal owner/repo.
 
-**Fork Handling**: The code uses `GetPRWithRepo()` and `GetCurrentPRWithRepo()` to correctly identify the repository for forked PRs. The local git remote might point to a fork, but the PR lives in the upstream repository. Owner/repo is derived from the PR URL returned by `gh pr view`, not from git remotes.
+**Design Decision**: The exit code is captured and passed to `os.Exit()` explicitly. This allows the TUI to clean up properly before exiting.
 
-### Main Run Function (`main.go:137-223`)
+### URL / Argument Support (`main.go:204-240` via `parseArgs()`)
 
-The `run()` function orchestrates all initialization and mode selection:
+`parseArgs()` returns a `runArgs` value whose `mode` field selects the execution path. It tries, in order:
 
-#### Step 1: Debug Logging Setup (`main.go:140-147`)
+```go
+func parseArgs(args []string) (runArgs, error) {
+    if len(args) == 0 {
+        // Auto-detect PR from current branch (correctly handles forks; jj-aware)
+        prNumber, owner, repo, err := ghclient.GetCurrentPRWithRepo()
+        // ...
+        return runArgs{mode: modePR, owner: owner, repo: repo, prNumber: prNumber}, nil
+    }
+
+    arg := args[0]
+
+    // Try PR URL first
+    if owner, repo, prNumber, err := ghclient.ParsePRURL(arg); err == nil {
+        return runArgs{mode: modePR, ...}, nil
+    }
+
+    // Try Actions run URL
+    if owner, repo, runID, err := ghclient.ParseActionsRunURL(arg); err == nil {
+        return runArgs{mode: modeRun, ...}, nil
+    }
+
+    // Try numeric PR number
+    if n, convErr := strconv.Atoi(arg); convErr == nil {
+        prNumber, owner, repo, err := ghclient.GetPRWithRepo(n)
+        // ...
+        return runArgs{mode: modePR, ...}, nil
+    }
+
+    return runArgs{}, fmt.Errorf("invalid PR number, PR URL, or Actions run URL: %s", arg)
+}
+```
+
+**Why try URLs first?** A PR URL or Actions run URL unambiguously identifies the target. Numeric values are treated as PR numbers only after URL parsing fails.
+
+**Fork Handling**: `GetPRWithRepo()` and `GetCurrentPRWithRepo()` use `gh pr view --json number,url` and derive owner/repo from the PR URL — the local git remote may point at a fork, but the PR lives upstream.
+
+### Main Run Function (`main.go:100-187`)
+
+The `run()` function orchestrates initialization and mode selection:
+
+#### Step 1: Debug Logging Setup (`main.go:103-110`)
 
 ```go
 if debugFlag {
@@ -104,7 +167,34 @@ if debugFlag {
 
 When `--debug` is enabled, structured debug logging via `slog` writes to `os.TempDir()/gh-observer-debug/`. Debug statements throughout the codebase log key events like check updates, rate limit backoff, and completion trust decisions.
 
-#### Step 2: Configuration Loading (`main.go:149-154`)
+#### Step 2: Repo-mode validation (`main.go:112-137`)
+
+```go
+repoMode := cmd.Flags().Changed("repo")
+bareRepoFlag := repoMode && repoFlag == repoFlagAutoSentinel
+
+// Allow `gh-observer --repo owner/repo` by consuming a trailing positional.
+if bareRepoFlag && len(args) == 1 {
+    repoFlag = args[0]
+    args = nil
+}
+if repoMode && len(args) > 0 {
+    fmt.Fprintf(os.Stderr, "Error: --repo flag cannot be used with positional arguments\n")
+    return 1
+}
+if repoMode && quickFlag {
+    fmt.Fprintf(os.Stderr, "Error: --repo flag cannot be used with --quick\n")
+    return 1
+}
+if repoMode && !term.IsTerminal(int(os.Stdout.Fd())) {
+    fmt.Fprintf(os.Stderr, "Error: --repo flag requires an interactive terminal\n")
+    return 1
+}
+```
+
+Repo mode is the only mode that does **not** flow through `parseArgs()`: because `--repo` is incompatible with positionals, it's validated and dispatched before argument parsing.
+
+#### Step 3: Configuration Loading (`main.go:139-144`)
 
 ```go
 cfg, err := config.Load()
@@ -114,7 +204,10 @@ Calls `internal/config/config.go` which:
 
 1. Creates a new Viper instance
 2. Sets defaults:
-   - `refresh_interval: 5s`
+   - `refresh_interval: 5s` (PR/run modes)
+   - `repo_refresh_interval: 30s` (repo mode)
+   - `fade_success: 15m` (repo mode: how long a passing completed check stays on screen)
+   - `fade_failure: 30m` (repo mode: how long a failed completed check stays on screen)
    - `colors.success: 10` (green)
    - `colors.failure: 9` (red)
    - `colors.running: 11` (yellow)
@@ -124,7 +217,7 @@ Calls `internal/config/config.go` which:
 4. Falls back to defaults if config file missing
 5. Unmarshals into `Config` struct
 
-#### Step 3: Style Creation (`main.go:157-162`)
+#### Step 4: Style Creation (`main.go:147-152`)
 
 ```go
 styles := tui.NewStyles(
@@ -137,26 +230,23 @@ styles := tui.NewStyles(
 
 Creates Lipgloss styles for rendering colored output. See `internal/tui/styles.go` for implementation.
 
-#### Step 4: PR Resolution (`main.go:164-191`)
+#### Step 5: Repo-mode dispatch (`main.go:154-162`)
 
-Two scenarios:
+If `--repo` was given, `resolveRepoArg(repoFlag)` resolves owner/repo (auto-detect via `ghclient.GetCurrentRepo()` reading `git remote get-url origin`, or parse via `ghclient.ParseRepoArg`) and calls `runRepoMode(ctx, cfg, styles, owner, repo)`. Repo mode never reaches `parseArgs()`.
 
-**Explicit PR number**: Uses `GetPRWithRepo(n)` to get owner/repo from the PR URL (handles forks correctly).
-
-**Explicit PR URL**: Uses `ParsePRURL(url)` to extract owner/repo/number directly — this uses the same approach as `main.go:170` where `ParsePRURL` is tried first:
+#### Step 6: Argument Parsing (`main.go:164-169`)
 
 ```go
-if owner, repo, prNumber, err = ghclient.ParsePRURL(arg); err == nil {
-    // valid PR URL
-} else if n, convErr := strconv.Atoi(arg); convErr == nil {
-    // numeric PR number
-    prNumber, owner, repo, err = ghclient.GetPRWithRepo(n)
+parsed, err := parseArgs(args)
+if err != nil {
+    fmt.Fprintf(os.Stderr, "%v\n", err)
+    return 1
 }
 ```
 
-**Auto-detection**: Uses `GetCurrentPRWithRepo()` which calls `gh pr view --json number,url` and extracts the correct repository from the PR URL.
+Returns a `runArgs` value with `mode` set to `modePR` or `modeRun`.
 
-#### Step 5: Authentication (`main.go:193-198`)
+#### Step 7: Authentication (`main.go:171-176`)
 
 ```go
 token, err := ghclient.GetToken()
@@ -168,18 +258,21 @@ Located at `internal/github/client.go`. Token acquisition strategy:
 2. **Fallback**: Run `gh auth token` command
 3. **Error**: Return message if both fail
 
-#### Step 6: Mode Selection (`main.go:200-204`)
+#### Step 8: Mode Selection (`main.go:178-186`)
 
 ```go
-if !term.IsTerminal(int(os.Stdout.Fd())) {
-    return runSnapshot(ctx, token, owner, repo, prNumber, cfg.EnableLinks, quickFlag)
+switch parsed.mode {
+case modePR:
+    return runPRMode(ctx, token, parsed, cfg, styles)
+case modeRun:
+    return runActionsMode(ctx, token, parsed, cfg, styles)
 }
 ```
 
-Uses `golang.org/x/term` to detect if stdout is a terminal:
+`runPRMode` and `runActionsMode` each check `term.IsTerminal(os.Stdout.Fd())` internally:
 
-- **Not a terminal** (piped, redirected, or CI): Runs snapshot mode
-- **Is a terminal**: Runs interactive TUI mode
+- **Not a terminal** (piped, redirected, or CI): Runs snapshot mode (`runSnapshot` / `runRunSnapshot`)
+- **Is a terminal**: Runs interactive TUI mode (`tui.NewModel` / `tui.NewRunModel`)
 
 ---
 
@@ -223,9 +316,9 @@ client := githubv4.NewClient(httpClient)
 
 ## 3. Execution Path A: Snapshot Mode
 
-Snapshot mode runs when stdout is not a terminal (e.g., scripts, CI, redirected output).
+Snapshot mode runs when stdout is not a terminal (e.g., scripts, CI, redirected output). There are two snapshot variants — one per input mode — selected by `runPRMode` / `runActionsMode`:
 
-### Implementation (`main.go:50-135`)
+### PR snapshot (`runSnapshot`, `main.go:331-402`)
 
 #### Step 1: Fetch PR Metadata
 
@@ -251,6 +344,7 @@ Returns `[]CheckRunInfo` with workflow names, status, timestamps, and annotation
 if len(checkRuns) == 0 {
     sinceCreation := time.Since(headCommitTime)
     fmt.Printf("No checks found (commit pushed %s ago)\n", timing.FormatDuration(sinceCreation))
+    fmt.Println("Checks may still be starting up or not configured for this PR")
     return 0
 }
 ```
@@ -280,7 +374,7 @@ widths := tui.CalculateColumnWidths(checkRuns, headCommitTime, jobAverages)
 
 Now includes a 4th column for historical averages.
 
-#### Step 7: Render Output
+#### Step 6: Render Output
 
 ```go
 headerQueue, headerName, headerDuration, headerAvg := tui.FormatHeaderColumns(widths)
@@ -296,7 +390,7 @@ Start     Workflow/Job        ThisRun  HistAvg
 1m 5s  ◐  Lint / check            1m 3s    45s
 ```
 
-#### Step 8: Exit Code Determination
+#### Step 7: Exit Code Determination
 
 Uses `ghclient.FailureConclusion()` from `internal/github/conclusion.go`:
 
@@ -308,19 +402,53 @@ if check.Status == "completed" {
 }
 ```
 
+### Actions run snapshot (`runRunSnapshot`, `main.go:404-478`)
+
+Mirrors the PR snapshot but for a standalone workflow run:
+
+```go
+runInfo, err := ghclient.FetchRunInfo(ctx, client, owner, repo, runID)
+jobs, _, err := ghclient.FetchRunJobs(ctx, client, owner, repo, runID)
+
+// Header: pushed/created time, display title
+fmt.Printf("%s/%s: %s\n", owner, repo, runInfo.DisplayTitle)
+
+// Optional history fetch (unless --quick) via WorkflowJobInfoToCheckRuns(jobs)
+// to reuse FetchJobAverages, then tui.FormatRunHeaderColumns for layout.
+
+for _, job := range jobs {
+    // icon, nameCol, durationText, avgText
+    if job.Status == "completed" && ghclient.FailureJobConclusion(job.Conclusion) {
+        exitCode = 1
+    }
+}
+```
+
+Run snapshot mode **omits the queue-latency (Start) column** because a standalone run isn't tied to a commit-push event the way a PR check is. Columns are `Workflow/Job | ThisRun | HistAvg` via `tui.CalculateRunColumnWidths` and `tui.FormatRunHeaderColumns`.
+
+**Failure detection**: Uses `FailureJobConclusion()` (run-mode equivalent of `FailureConclusion()`) to match the conclusion vocabulary returned by the Actions jobs API.
+
 ---
 
 ## 4. Execution Path B: Interactive TUI Mode
 
-TUI mode runs when stdout is a terminal, providing real-time updates.
+TUI mode runs when stdout is a terminal, providing real-time updates. PR mode and Run mode each have their own model files but share display helpers and constants. Repo mode has its own model and is covered in [Section 12](#12-repo-mode).
 
-### Model Creation (`main.go:207`)
+### Model Creation
+
+**PR mode** (`main.go:252`):
 
 ```go
 model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag)
 ```
 
-The `type Model struct` definition (`internal/tui/model.go:12-67`) holds all TUI state:
+**Run mode** (`main.go:279`):
+
+```go
+model := tui.NewRunModel(ctx, token, owner, repo, runID, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag)
+```
+
+The `type Model struct` definition (`internal/tui/model.go`) holds all PR-mode TUI state:
 
 ```go
 type Model struct {
@@ -380,18 +508,20 @@ type Model struct {
 }
 ```
 
-The `NewModel(...)` constructor (`internal/tui/model.go:70-92`) initializes the Bubbletea model with defaults.
+The `NewModel(...)` constructor initializes the Bubbletea model with defaults.
 
 **Premature Exit Prevention**: `expectedCheckCount` tracks how many distinct job names the history fetch has discovered (set from `len(m.jobAverages)` each time a partial result arrives). `peakCheckCount` tracks the maximum number of checks seen in any single poll. These fields power the `canTrustCompletion()` function that prevents exiting when fast checks (like DCO) complete before slower checks have even appeared in the API response.
 
-### Program Initialization (`main.go:210-211`)
+The run-mode equivalent `RunModel` (`internal/tui/runmodel.go`) holds the equivalent state for a workflow run: `jobs []ghclient.WorkflowJobInfo`, `runInfo ghclient.RunInfo`, `runInfoLoaded bool`, the same incremental-history-fetch maps, plus a `seenJobKeys` dedup map and `historyFetchCompleted` flag to drive a single discovery cycle per unique job set. It pre-builds a `*github.Client` in `NewRunModel` so per-poll REST calls don't re-authenticate.
+
+### Program Initialization (`main.go:255-256`)
 
 ```go
 p := tea.NewProgram(model)
 finalModel, err := p.Run()
 ```
 
-Creates a Bubbletea program and enters the event loop.
+Creates a Bubbletea program and enters the event loop. After `p.Run()` returns, `main()` asserts on the concrete model type (`tui.Model` or `tui.RunModel`) and calls `m.ExitCode()`. For repo mode, the assertion uses a small `exitCoder` interface so it works whether `Update` returned a value or pointer `RepoModel` (the per-message handlers use pointer receivers).
 
 ---
 
@@ -458,7 +588,7 @@ type ErrorMsg struct {               // Error occurred
 
 The `Update()` method handles all incoming messages:
 
-#### Premature Exit Prevention (`update.go:14-53`)
+#### Premature Exit Prevention (`update.go:14-61`)
 
 The `canTrustCompletion()` function prevents premature exit when fast checks (like DCO) complete before other jobs have appeared in the API response (issue #236):
 
@@ -469,6 +599,12 @@ func canTrustCompletion(m *Model) bool {
     }
 
     checkCount := len(m.checkRuns)
+
+    // --quick mode: no history fetch, so trust peak tracking alone.
+    if m.noAvg {
+        return m.peakCheckCount <= checkCount
+    }
+
     elapsed := time.Since(m.firstCheckSeenAt)
 
     // After grace period, trust completion regardless
@@ -495,11 +631,12 @@ func canTrustCompletion(m *Model) bool {
 }
 ```
 
-**Three-tier trust logic**:
+**Four-tier trust logic**:
 
-1. **Grace period elapsed** (`startupGracePeriod` = 2 minutes): Always trust completion
-2. **Appearance ratio met** (`minCheckAppearanceRatio` = 30%): Trust if we've seen enough of the expected checks
-3. **Checks disappearing** (current count < peak): Never trust — some checks vanished from the API
+1. **Quick mode** (`--quick` / `-q`): Skip the grace period and expected-count machinery; trust completion as soon as the visible count reaches the peak count seen so far. History isn't fetched in quick mode, so there's no `expectedCheckCount` to compare against.
+2. **Grace period elapsed** (`startupGracePeriod` = 2 minutes): Always trust completion
+3. **Appearance ratio met** (`minCheckAppearanceRatio` = 30%): Trust if we've seen enough of the expected checks
+4. **Checks disappearing** (current count < peak): Never trust — some checks vanished from the API
 
 The `expectedCheckCount` is derived from `len(m.jobAverages)` after each `JobAveragesPartialMsg`, since each job name in the historical averages represents a check that should eventually appear.
 
@@ -628,6 +765,17 @@ func SortCheckRuns(checks []ghclient.CheckRunInfo) {
 
 **Sorting Priority**: duration (shortest first) → status (in_progress first) → name (alphabetical)
 
+### Run-mode message loop (`internal/tui/runupdate.go`)
+
+`RunModel.Update` mirrors the PR-mode flow but with run-specific messages:
+
+- **`RunInfoMsg`** — run metadata (title, head SHA, commit timestamps)
+- **`JobsUpdateMsg`** — updated `[]WorkflowJobInfo` plus `RateLimitRemaining`
+- **`WorkflowsDiscoveredMsg` / `JobAveragesPartialMsg`** — same types as PR mode; both modes reuse the history-fetch pipeline (discovery → per-workflow fetch → merge)
+- **`TickMsg`** — same rate-limit backoff (triples interval when `rateLimitRemaining < rateBackoffThreshold`)
+
+Run mode has its own `canTrustCompletion()`-style gate via `allJobsComplete()` plus a `seenJobKeys` map so discovery is only retriggered when new job names appear, not on every poll. `historyFetchCompleted` is set once the first discovery cycle's pending fetches drain, which lets run mode skip re-discovering workflows whose averages are already cached.
+
 ### Exit Code Determination (`internal/tui/update.go`)
 
 ```go
@@ -641,7 +789,7 @@ func determineExitCode(checks []ghclient.CheckRunInfo) int {
 }
 ```
 
-Uses `FailureConclusion()` from `internal/github/conclusion.go` to check for failure states.
+Uses `FailureConclusion()` from `internal/github/conclusion.go` to check for failure states. Run mode's equivalent `determineRunExitCode()` uses `FailureJobConclusion()` to match the Actions jobs API conclusion vocabulary.
 
 ### Completion Gate: `canTrustCompletion()`
 
@@ -925,13 +1073,40 @@ func FinalDuration(check ghclient.CheckRunInfo) time.Duration {
 
 **Measures**: Total runtime for completed checks.
 
-### Duration Formatting (`calculator.go:35-57`)
+### Duration Formatting (`calculator.go:50-69`)
 
-**Output Examples**:
+`FormatDuration` rounds to the nearest second and **always renders all smaller units down to seconds**, so durations don't flicker between width-changing forms as they tick (issue #314):
+
+```go
+func FormatDuration(d time.Duration) string {
+    d = d.Round(time.Second)
+    if d <= 0 {
+        return "0s"
+    }
+    hours := int(d / time.Hour)
+    d -= time.Duration(hours) * time.Hour
+    minutes := int(d / time.Minute)
+    d -= time.Duration(minutes) * time.Minute
+    seconds := int(d / time.Second)
+    if hours > 0 {
+        return fmt.Sprintf("%dh %dm %ds", hours, minutes, seconds)
+    }
+    if minutes > 0 {
+        return fmt.Sprintf("%dm %ds", minutes, seconds)
+    }
+    return fmt.Sprintf("%ds", seconds)
+}
+```
+
+**Output Examples** (after the #314 change):
 
 - 45s → `45s`
+- 60s → `1m 0s` (was `1m`)
 - 125s → `2m 5s`
+- 3600s → `1h 0m 0s` (was `1h`)
 - 3725s → `1h 2m 5s`
+
+The two run-mode helpers `RunJobRuntime` (`calculator.go:35-40`) and `RunJobDuration` (`calculator.go:43-48`) compute durations from job timestamps; the formatted output still flows through `FormatDuration`.
 
 ---
 
@@ -944,8 +1119,9 @@ const (
     slowJobThreshold     = 2 * time.Minute
     verySlowJobThreshold = 3 * time.Minute
 
-    rateBackoffThreshold = 10
-    minRateLimitForFetch = 100
+    rateBackoffThreshold  = 10
+    rateWarningThreshold  = 500
+    minRateLimitForFetch  = 100
 
     historyFetchDelay = 10 * time.Second
 
@@ -959,6 +1135,7 @@ const (
 - `slowJobThreshold`: Time before showing "Still waiting" message
 - `verySlowJobThreshold`: Time before showing "No checks found" message
 - `rateBackoffThreshold`: Remaining API calls before tripling poll interval
+- `rateWarningThreshold`: Remaining API calls before showing a yellow rate-limit indicator (repo mode renders two-tier: yellow under 500, red under `minRateLimitForFetch`)
 - `minRateLimitForFetch`: Minimum rate limit to fetch historical averages
 - `historyFetchDelay`: Delay before starting historical average fetch (prevents premature API calls during check startup)
 - `minCheckAppearanceRatio`: Minimum ratio of seen checks to expected checks (30%) before trusting completion (prevents premature exit when only fast checks like DCO have appeared)
@@ -1135,38 +1312,40 @@ The TUI displays a visual "Waiting for more checks to appear..." message during 
 
 ## 10. Data Flow Diagrams
 
-### Snapshot Mode Flow
+### Snapshot Mode Flow (PR)
 
 ```text
-main.go:185 run()
+main.go run()
     │
     ├── config.Load()
-    │   └── Returns: Config{RefreshInterval, Colors, EnableLinks}
+    │   └── Returns: Config{RefreshInterval, RepoRefreshInterval, Fade*,
+    │                     Colors, EnableLinks}
     │
     ├── tui.NewStyles()
     │   └── Returns: Styles{Success, Failure, Running, Queued, Info, Warning, ...}
     │
-    ├── Determine PR (URL, number, or auto-detect)
+    ├── parseArgs() → runArgs{mode: modePR, owner, repo, prNumber}
     │   ├── URL: ghclient.ParsePRURL()
+    │   ├── Actions URL: ghclient.ParseActionsRunURL() → modeRun (handled by runRunSnapshot)
     │   ├── Number: ghclient.GetPRWithRepo()
     │   └── Auto: ghclient.GetCurrentPRWithRepo()
-    │       └── Runs: gh pr view --json number,url
+    │       └── Runs: gh pr view --json number,url (GIT_DIR set for jj)
     │
     ├── ghclient.GetToken()
     │
-    ├── Check terminal: term.IsTerminal()
-    │   └── FALSE: Run snapshot mode
+    ├── runPRMode → Check terminal: term.IsTerminal()
+    │   └── FALSE: runSnapshot()                        [main.go:331]
     │
-    └── runSnapshot()                               [main.go:50]
+    └── runSnapshot()
         │
         ├── ghclient.NewClient()
         │   └── Creates REST API client with OAuth2
         │
-        ├── ghclient.FetchPRInfo()                  [internal/github/pr.go:144]
+        ├── ghclient.FetchPRInfo()                      [internal/github/pr.go]
         │   └── Returns: PRInfo{Title, HeadSHA, HeadCommitDate}
         │
-        ├── ghclient.FetchCheckRunsGraphQL()        [internal/github/graphql.go:94]
-        │   └── Returns: []CheckRunInfo{Name, WorkflowName, Status, ...}
+        ├── ghclient.FetchCheckRunsGraphQL()            [internal/github/graphql.go]
+        │   └── Returns: []CheckRunInfo{Name, WorkflowName, AppName, Status, ...}
         │
         ├── ghclient.FetchJobAverages() (unless --quick)
         │   └── Returns: map[jobName]averageDuration
@@ -1183,23 +1362,25 @@ main.go:185 run()
             └── Determine exit code (ghclient.FailureConclusion())
 ```
 
-### TUI Mode Flow
+The run-mode snapshot path (`runActionsMode → runRunSnapshot`) is parallel but skips the PR metadata fetch and uses `FetchRunInfo` / `FetchRunJobs`, `tui.CalculateRunColumnWidths` / `tui.FormatRunHeaderColumns`, and `ghclient.FailureJobConclusion()`.
+
+### TUI Mode Flow (PR)
 
 ```text
-main.go:207 (TUI mode)
+main.go runPRMode()
     │
-    ├── tui.NewModel()                              [internal/tui/model.go:70]
+    ├── tui.NewModel()                                  [internal/tui/model.go]
     │   └── Returns: Model{ctx, token, owner, repo, prNumber, spinner, ...}
-    │       - Initializes empty maps: jobAverages, runIDToWorkflowID, 
+    │       - Initializes empty maps: jobAverages, runIDToWorkflowID,
     │         fetchedWorkflowIDs, pendingWorkflowFetch, dispatchedWorkflowFetch
     │       - expectedCheckCount = 0, peakCheckCount = 0
     │
     ├── tea.NewProgram(model)
     │   └── Creates program with model
     │
-    └── p.Run()                                     [Blocking event loop]
+    └── p.Run()                                         [Blocking event loop]
         │
-        └── model.Init()                            [internal/tui/update.go:56]
+        └── model.Init()                                [internal/tui/update.go]
             │
             ├── Returns: tea.Batch(
             │       spinner.Tick,
@@ -1264,13 +1445,63 @@ main.go:207 (TUI mode)
 ```text
 GetPRWithRepo() or GetCurrentPRWithRepo()
     │
-    ├── Exec: gh pr view --json number,url
+    ├── Exec: gh pr view --json number,url (GIT_DIR set for jj via SetGITDirForJJ)
     │
     ├── Parse JSON: {number, url}
     │
     └── ParsePRURL(url)
         └── Extract owner, repo from URL
             └── Returns: owner, repo, prNumber (from upstream repo, not fork)
+```
+
+### Repo Mode Flow
+
+```text
+main.go run() with --repo
+    │
+    ├── Validate: --repo not combined with positionals / --quick / non-tty
+    │
+    ├── config.Load()
+    ├── tui.NewStyles()
+    │
+    ├── resolveRepoArg(repoFlag)
+    │   ├── Explicit: ghclient.ParseRepoArg() (owner/repo or URL; rejects _)
+    │   └── Bare: ghclient.GetCurrentRepo() (git remote get-url origin)
+    │
+    └── runRepoMode()                                [main.go:296]
+        │
+        ├── ghclient.GetToken()
+        ├── tui.NewRepoModel(refresh=cfg.RepoRefreshInterval,
+        │                  fadeSuccess, fadeFailure)
+        ├── tea.NewProgram(model)
+        └── p.Run()
+            │
+            └── model.Init()                         [internal/tui/repoupdate.go]
+                │
+                ├── Returns: tea.Batch(
+                │       spinner.Tick,
+                │       fetchRepoCheckRuns(),          [GraphQL, no annotations]
+                │       fetchRepoRuns(fadeWindow),    [REST, ExcludePullRequests]
+                │       repoTick(refreshInterval)
+                │   )
+                │
+                └── Message processing loop
+                    │
+                    ├── [RepoTickMsg]
+                    │   ├── If fetchReceived && rateLimit < 10: back off 3x
+                    │   └── Re-dispatch both fetches
+                    │
+                    ├── [RepoChecksUpdateMsg]
+                    │   ├── On err: record fetchErrChecks, keep last good m.prs
+                    │   ├── Else: fade-filter checks per PR → m.prs
+                    │   └── Update rateLimitRemaining (min across sources)
+                    │
+                    ├── [RepoRunsUpdateMsg]
+                    │   ├── On err: record fetchErrRuns, keep last good m.standaloneRuns
+                    │   ├── Else: fade-filter runs → m.standaloneRuns
+                    │   └── Update rateLimitRemaining
+                    │
+                    └── [tea.KeyMsg q/ctrl+c] → tea.Quit (exitCode stays 0)
 ```
 
 ---
@@ -1284,10 +1515,11 @@ GetPRWithRepo() or GetCurrentPRWithRepo()
 | 0 | Success | All checks passed |
 | 0 | No checks | PR has no workflows (snapshot mode) |
 | 0 | Incomplete checks | Checks still running (snapshot mode) |
+| 0 | User quit | Repo mode always returns 0 (only exits on q/ctrl+c) |
 | 1 | Check failure | One or more checks failed |
 | 1 | Authentication error | Missing GITHUB_TOKEN |
 | 1 | Network error | Failed to fetch PR info (TUI mode initialization) |
-| 1 | Invalid input | Bad PR number or URL argument |
+| 1 | Invalid input | Bad PR number, URL, or repo argument; `--repo` with positionals / `--quick` / non-tty |
 
 ### Exit Code Determination
 
@@ -1350,6 +1582,121 @@ TUI mode exits cleanly by:
 5. Exit code extracted from model
 6. `os.Exit(exitCode)` terminates process
 
+Repo mode is the exception: it's persistent and only quits on `q`/`ctrl+c`, so `ExitCode()` always returns 0.
+
+---
+
+## 12. Repo Mode
+
+Repo mode (`--repo`, `main.go:296-329` via `runRepoMode()`) is a persistent dashboard for a whole repository: it shows **all active PRs' checks** alongside **standalone (non-PR) branch runs**, fading completed checks out so the view stays focused on what's in flight.
+
+### Why it's separate from PR/Run modes
+
+- **Different lifecycle**: persistent, never auto-exits, no exit-code semantics
+- **Two data sources**: a batched GraphQL query for all open PRs plus a REST query for standalone workflow runs — these run independently and their errors are tracked separately so a success from one source can't mask an ongoing error from the other
+- **Interactive only**: snapshot mode is rejected in `run()` (an error is printed and `1` returned), since the dashboard only makes sense live
+
+### Arg resolution (`main.go:189-202` via `resolveRepoArg()`)
+
+```go
+func resolveRepoArg(val string) (string, string, error) {
+    if val != "" && val != repoFlagAutoSentinel {
+        return ghclient.ParseRepoArg(val)
+    }
+    owner, repo, err := ghclient.GetCurrentRepo()
+    if err != nil {
+        return "", "", fmt.Errorf("failed to detect current repo: %v\nUse --repo owner/repo to specify explicitly", err)
+    }
+    return owner, repo, nil
+}
+```
+
+- Explicit value → `ghclient.ParseRepoArg()` accepts `owner/repo` or `https://github.com/owner/repo` (PR/Actions-run URLs are rejected; all-underscore segments are rejected so `_` stays a valid sentinel)
+- Bare `--repo` → `ghclient.GetCurrentRepo()` reads `git remote get-url origin` and parses SSH or HTTPS remote URLs
+
+### Model (`internal/tui/repomodel.go`)
+
+`RepoModel` holds:
+
+- `prs map[int]PRViewData` — already fade-filtered PR check data keyed by PR number
+- `standaloneRuns []ghclient.BranchRunData` — already fade-filtered standalone runs
+- `fadeSuccess`, `fadeFailure` — fade-out windows (defaults 15m / 30m from config)
+- `fetchErrChecks` / `fetchErrRuns` + timestamps — split per-source error tracking so transient 504s from one source don't wipe the other's error state
+- `fetchReceived` — gates the rate-limit indicator so the zero-value `0` doesn't render misleadingly before the first response
+
+`ExitCode()` always returns 0; repo mode is persistent.
+
+### Init and poll loop (`internal/tui/repoupdate.go`)
+
+```go
+func (m RepoModel) Init() tea.Cmd {
+    return tea.Batch(
+        m.spinner.Tick,
+        fetchRepoCheckRuns(m.ctx, m.token, m.owner, m.repo),
+        fetchRepoRuns(m.ctx, m.token, m.owner, m.repo, m.fadeWindow()),
+        repoTick(m.refreshInterval),
+    )
+}
+```
+
+Each tick batches **both** the GraphQL PR checks fetch and the REST standalone-runs fetch. Rate-limit backoff is gated on `m.fetchReceived` (mirroring RunModel) so the zero-value `rateLimitRemaining` before the first response doesn't pin the model in backoff forever.
+
+**Messages**:
+
+- `RepoTickMsg` — poll timer; re-dispatches both fetches
+- `RepoChecksUpdateMsg` — `{PRData map[int]PRCheckData, RateLimitRemaining int, Err error}`
+- `RepoRunsUpdateMsg` — `{Runs []BranchRunData, RateLimitRemaining int, Err error}`
+- `spinner.TickMsg`, `tea.KeyMsg` (q/ctrl+c)
+
+### Fade-out filtering (`handleRepoChecksUpdate`, `handleRepoRunsUpdate`)
+
+Both handlers apply the same fade logic:
+
+- **Active** statuses (`in_progress`, `queued`, `waiting`, and for runs also `pending`) are always kept
+- **Completed** checks are kept if `now - CompletedAt < fadeTimeout`, where `fadeTimeout = fadeSuccess` for success and `fadeFailure` for failures (`FailureConclusion`)
+- Otherwise the check/run drops off the screen
+
+Transient fetch errors are **non-fatal**: the last good `m.prs` / `m.standaloneRuns` is preserved, the error is recorded with a timestamp against its own source, and polling continues. The view renders whichever source's error is most recent (prefixed by "PR checks" or "Repo runs").
+
+### Rate-limit handling across sources
+
+Both handlers take the minimum across the two sources, but accept the first observed value so the zero default doesn't pin `rateLimitRemaining` at 0 forever:
+
+```go
+if !m.fetchReceived || msg.RateLimitRemaining < m.rateLimitRemaining {
+    m.rateLimitRemaining = msg.RateLimitRemaining
+}
+```
+
+### Rendering (`internal/tui/repoview.go`)
+
+`RepoModel.View()` renders:
+
+1. A repo header (`owner/repo` + UTC clock)
+2. A summary line (`N active PRs  •  M branch runs  •  Updated Xs ago`)
+3. Per-PR groups (`PR #NN: Title`) followed by their checks, reusing `display.go` helpers with a nil `jobAverages` (no HistAvg column in repo mode)
+4. A standalone-runs section: runs grouped by branch (`Branch: name`), each run header showing icon + title + event annotation + duration, followed by its jobs
+5. A two-tier rate-limit indicator (red under `minRateLimitForFetch`, yellow under `rateWarningThreshold`), only rendered after the first response
+6. An optional non-fatal fetch-error status line (`[PR checks fetch error: ... — 12s ago]`, truncated via `truncateFetchError` so embedded HTML from 504s doesn't span many lines)
+7. A `Press q to quit` hint
+
+`SortCheckRuns` is reused for PR checks; standalone runs are sorted by branch name via `sortedBranchNames()` and PR groups by `sortedPRNumbers()`.
+
+### GitHub API layer for repo mode
+
+- `internal/github/repo.go` — `ParseRepoArg`, `GetCurrentRepo` (SSH/HTTPS remote parsing with all-underscore-segment rejection)
+- `internal/github/repo_graphql.go` — `FetchRepoCheckRunsGraphQL` fetches up to `maxPRsPerQuery` (10) most-recently-updated open PRs with their check rollups in a single query. Uses a trimmed `repoContextNode` that **omits** `annotations(first: 5)` — annotations are the most expensive field and push the query over GitHub's GraphQL cost limit on high-traffic repos. Repo mode never renders annotation boxes, so dropping them is safe and makes the query 10/10 reliable.
+- `internal/github/repo_runs.go` — `FetchRepoWorkflowRuns` lists standalone runs with `ExcludePullRequests: true`, issuing two REST calls (in_progress, then recently-created within `fadeWindow`) and deduplicating. Uses RFC3339 timestamps (not date-only) so a 30m window queries the last 30 minutes, not the whole calendar day — the date-only form triggered 504s on busy repos. `EnrichRepoRunsWithJobs` then fetches per-run jobs; job-enrichment failure is non-fatal (runs come back with empty `Jobs` so headers still render).
+- `PRCheckData` and `BranchRunData` are the result types; `WorkflowJobInfo` and `CheckRunInfo` from PR/Run modes are reused where possible.
+
+### Configuration additions
+
+`internal/config/config.go` adds three repo-mode defaults:
+
+- `repo_refresh_interval: 30s` — repo mode poll interval (separate from PR/run modes' 5s, since repo mode makes more API calls per poll)
+- `fade_success: 15m` — how long a passing completed check stays on screen
+- `fade_failure: 30m` — how long a failed completed check stays on screen (longer so failures don't vanish before a human notices)
+
 ---
 
 ## Summary
@@ -1357,16 +1704,18 @@ TUI mode exits cleanly by:
 gh-observer demonstrates several best practices:
 
 1. **Clean separation of concerns**: Distinct packages for config, GitHub API, timing, and TUI rendering
-2. **Efficient API usage**: GraphQL for complex queries, REST for simple metadata
-3. **Graceful error handling**: Non-fatal errors during polling, fatal errors at initialization
-4. **Terminal-aware output**: Snapshot mode for CI, TUI mode for interactive use
-5. **Rate limit awareness**: Backoff strategy and remaining quota display
+2. **Efficient API usage**: GraphQL for complex queries, REST for simple metadata; repo mode uses a cost-trimmed GraphQL query (no annotations) to stay under GitHub's limits
+3. **Graceful error handling**: Non-fatal errors during polling, fatal errors at initialization; repo mode tracks per-source errors so a success from one source can't mask an ongoing error from another
+4. **Terminal-aware output**: Snapshot mode for CI, TUI mode for interactive use; repo mode is interactive-only
+5. **Rate limit awareness**: Backoff strategy, two-tier warning indicator, and `fetchReceived` gating so the zero-value rate limit doesn't mislead before the first response
 6. **Streaming data fetching**: Historical averages fetched per-workflow to reduce latency and provide early feedback
-7. **User feedback**: Startup phase messaging, real-time updates, fetch progress display
+7. **User feedback**: Startup phase messaging, real-time updates, fetch progress display, repo-mode summary line
 8. **Fork support**: Correctly identifies upstream repository for forked PRs
 9. **Delayed fetching**: Waits 10 seconds after first checks appear before fetching historical averages
 10. **Concurrent coordination**: Uses pending/dispatched tracking to coordinate multiple async fetches
-11. **Premature exit prevention**: Uses `canTrustCompletion()` with grace period, appearance ratio, and peak tracking to prevent exiting when fast checks complete before others appear
+11. **Premature exit prevention**: Uses `canTrustCompletion()` with grace period, appearance ratio, peak tracking, and a quick-mode shortcut to prevent exiting when fast checks complete before others appear
 12. **GHAS and third-party app detection**: Uses `AppName` from `checkSuite.app` to provide meaningful names for non-Actions checks like GitHub Code Scanning and Bridgecrew
+13. **Three input modes**: PR checks, standalone Actions runs, and persistent repo watching — each with its own model/update/view files but sharing display helpers, constants, and the history-fetch pipeline
+14. **Stable duration formatting**: `FormatDuration` always renders smaller units down to seconds to avoid display flicker (issue #314)
 
 The codebase follows the Elm Architecture pattern through Bubbletea, making the state management predictable and testable. The linear execution flow from initialization through polling to exit is clear and well-structured.
