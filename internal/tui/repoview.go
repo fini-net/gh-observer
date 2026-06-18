@@ -14,13 +14,14 @@ import (
 )
 
 // View renders the repo-watch state: a repo header, a summary line, PR groups
-// (each with its checks), standalone branch-run groups, the rate-limit indicator,
-// and the quit hint.
+// (each with its checks), standalone branch-run groups, the rate-limit
+// indicator, an optional non-fatal fetch-error status line, and the quit hint.
+//
+// Repo mode is persistent: transient fetch errors (e.g. 504 Gateway Timeout)
+// do NOT replace the screen. The last good state stays on screen and the
+// error is surfaced as a red status line so the user knows something is wrong
+// while polling continues and self-heals when the API returns.
 func (m RepoModel) View() tea.View {
-	if m.err != nil {
-		return tea.NewView(m.styles.Error.Render(fmt.Sprintf("Error: %v\n", m.err)))
-	}
-
 	var b strings.Builder
 
 	utcTime := time.Now().UTC().Format("15:04:05 UTC")
@@ -56,12 +57,26 @@ func (m RepoModel) View() tea.View {
 		}
 	}
 
-	// Two-tier rate-limit indicator: red under minRateLimitForFetch, yellow under rateWarningThreshold.
-	if m.rateLimitRemaining < minRateLimitForFetch {
-		b.WriteString(m.styles.Failure.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
-		b.WriteString("\n")
-	} else if m.rateLimitRemaining < rateWarningThreshold {
-		b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
+	// Two-tier rate-limit indicator: red under minRateLimitForFetch, yellow
+	// under rateWarningThreshold. Only render once we've actually received a
+	// response — before that, rateLimitRemaining is the Go zero value (0) and
+	// showing "[Rate limit: 0 remaining]" in red would be misleading.
+	if m.fetchReceived {
+		if m.rateLimitRemaining < minRateLimitForFetch {
+			b.WriteString(m.styles.Failure.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
+			b.WriteString("\n")
+		} else if m.rateLimitRemaining < rateWarningThreshold {
+			b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
+			b.WriteString("\n")
+		}
+	}
+
+	// Non-fatal fetch error status line. The last good state remains on screen
+	// above this line; polling continues and the line clears on next success.
+	if m.fetchErr != nil {
+		errText := truncateFetchError(m.fetchErr.Error(), 80)
+		age := timing.FormatDuration(time.Since(m.fetchErrAt))
+		b.WriteString(m.styles.Failure.Render(fmt.Sprintf("  [Fetch error: %s — %s ago]", errText, age)))
 		b.WriteString("\n")
 	}
 
@@ -72,6 +87,16 @@ func (m RepoModel) View() tea.View {
 	}
 
 	return tea.NewView(b.String())
+}
+
+// truncateFetchError shortens an error message to fit within maxWidth terminal
+// display cells, appending an ellipsis if truncation occurs. GitHub 504 errors
+// embed a large HTML body that would otherwise span many terminal lines.
+func truncateFetchError(s string, maxWidth int) string {
+	if runewidth.StringWidth(s) <= maxWidth {
+		return s
+	}
+	return runewidth.Truncate(s, maxWidth, "…")
 }
 
 // renderPRGroup renders a single PR's header and its (already fade-filtered) checks.

@@ -51,8 +51,13 @@ type RepoModel struct {
 	exitCode int
 	quitting bool
 
-	// Error state (non-fatal; surfaced in the view)
-	err error
+	// Non-fatal fetch error tracking. Transient errors (e.g. 504 Gateway
+	// Timeout) are surfaced as a status line without clearing the last good
+	// state, so a persistent watcher keeps showing stale data + an error
+	// indicator and recovers automatically when the API returns.
+	fetchErr       error
+	fetchErrAt     time.Time
+	fetchReceived  bool
 
 	// Feature flags
 	enableLinks bool

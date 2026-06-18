@@ -81,15 +81,24 @@ func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // the surviving PRs in m.prs. A PR stays visible while it has at least one
 // active (in_progress/queued) check, or a completed check whose CompletedAt
 // is within the configured fade window (fadeSuccess or fadeFailure).
+//
+// Transient fetch errors (e.g. 504 Gateway Timeout) are non-fatal: the last
+// good m.prs is preserved on screen, the error is surfaced via m.fetchErr for
+// the view to render as a status line, and polling continues. The error
+// clears automatically on the next successful fetch.
 func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	if msg.Err != nil {
-		m.err = msg.Err
+		m.fetchErr = msg.Err
+		m.fetchErrAt = time.Now()
+		debug.Log("repo checks fetch error", "err", msg.Err)
 		return m, nil
 	}
 
 	m.rateLimitRemaining = msg.RateLimitRemaining
 	m.lastUpdate = time.Now()
-	m.err = nil
+	m.fetchErr = nil
+	m.fetchErrAt = time.Time{}
+	m.fetchReceived = true
 
 	now := time.Now()
 	activePRs := make(map[int]PRViewData)
@@ -137,8 +146,13 @@ func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, 
 // handleRepoRunsUpdate applies the same fade-out logic to standalone runs and
 // stores the survivors in m.standaloneRuns. Active runs are always kept;
 // completed runs are kept if RunStartedAt is within the fade window.
+//
+// Transient fetch errors are non-fatal: the last good m.standaloneRuns is
+// preserved, the error is surfaced via m.fetchErr, and polling continues.
 func (m *RepoModel) handleRepoRunsUpdate(msg RepoRunsUpdateMsg) (tea.Model, tea.Cmd) {
 	if msg.Err != nil {
+		m.fetchErr = msg.Err
+		m.fetchErrAt = time.Now()
 		debug.Log("repo runs fetch error", "err", msg.Err)
 		return m, nil
 	}
@@ -147,6 +161,9 @@ func (m *RepoModel) handleRepoRunsUpdate(msg RepoRunsUpdateMsg) (tea.Model, tea.
 		m.rateLimitRemaining = msg.RateLimitRemaining
 	}
 	m.lastUpdate = time.Now()
+	m.fetchErr = nil
+	m.fetchErrAt = time.Time{}
+	m.fetchReceived = true
 
 	now := time.Now()
 	var visible []ghclient.BranchRunData

@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	ghclient "github.com/fini-net/gh-observer/internal/github"
+	"github.com/mattn/go-runewidth"
 )
 
 func TestRepoChecksUpdateFadeOut(t *testing.T) {
@@ -355,5 +359,235 @@ func TestPluralS(t *testing.T) {
 		if got := pluralS(tt.n); got != tt.want {
 			t.Errorf("pluralS(%d) = %q, want %q", tt.n, got, tt.want)
 		}
+	}
+}
+
+func TestRepoChecksUpdateErrorNonFatal(t *testing.T) {
+	fadeSuccess := 15 * time.Minute
+	fadeFailure := 30 * time.Minute
+
+	// Seed the model with a known good PR so we can verify the error path
+	// preserves it rather than clearing it.
+	now := time.Now()
+	goodCompletedAt := now.Add(-1 * time.Minute)
+	seedPR := RepoModel{
+		prs: map[int]PRViewData{
+			42: {
+				Title: "Pre-existing PR",
+				CheckRuns: []ghclient.CheckRunInfo{
+					{Status: "in_progress", Name: "build"},
+					{Status: "completed", Conclusion: "success", Name: "lint", CompletedAt: &goodCompletedAt},
+				},
+				HeadCommitTime: now.Add(-2 * time.Minute),
+			},
+		},
+		fadeSuccess:    fadeSuccess,
+		fadeFailure:    fadeFailure,
+		fetchReceived:  true,
+		rateLimitRemaining: 4000,
+	}
+
+	t.Run("error preserves last good state and sets fetchErr", func(t *testing.T) {
+		m := seedPR
+		msg := RepoChecksUpdateMsg{
+			Err: fmt.Errorf("non-200 OK status code: 504 Gateway Timeout body: \"<!DOCTYPE html>..."),
+		}
+
+		newModel, _ := m.Update(msg)
+		rm := newModel.(*RepoModel)
+
+		if rm.fetchErr == nil {
+			t.Error("fetchErr should be set on error")
+		}
+		if rm.fetchErrAt.IsZero() {
+			t.Error("fetchErrAt should be set on error")
+		}
+		if rm.fetchReceived != true {
+			t.Error("fetchReceived should remain true after error (already received before)")
+		}
+		// Last good PRs preserved.
+		if len(rm.prs) != 1 {
+			t.Errorf("prs = %d, want 1 (last good state preserved)", len(rm.prs))
+		}
+		if _, ok := rm.prs[42]; !ok {
+			t.Error("PR #42 should still be present after error")
+		}
+		// Rate limit should be unchanged from before (not reset to 5000-default-on-error).
+		if rm.rateLimitRemaining != 4000 {
+			t.Errorf("rateLimitRemaining = %d, want 4000 (unchanged on error)", rm.rateLimitRemaining)
+		}
+	})
+
+	t.Run("success clears fetchErr and updates state", func(t *testing.T) {
+		// Start from an errored state.
+		m := seedPR
+		m.fetchErr = fmt.Errorf("previous 504")
+		m.fetchErrAt = time.Now().Add(-1 * time.Minute)
+
+		msg := RepoChecksUpdateMsg{
+			PRData: map[int]ghclient.PRCheckData{
+				7: {
+					Number: 7,
+					Title:  "New PR",
+					CheckRuns: []ghclient.CheckRunInfo{
+						{Status: "in_progress", Name: "test"},
+					},
+				},
+			},
+			RateLimitRemaining: 4900,
+		}
+
+		newModel, _ := m.Update(msg)
+		rm := newModel.(*RepoModel)
+
+		if rm.fetchErr != nil {
+			t.Error("fetchErr should be cleared on success")
+		}
+		if !rm.fetchErrAt.IsZero() {
+			t.Error("fetchErrAt should be cleared on success")
+		}
+		if rm.fetchReceived != true {
+			t.Error("fetchReceived should remain true")
+		}
+		if rm.rateLimitRemaining != 4900 {
+			t.Errorf("rateLimitRemaining = %d, want 4900", rm.rateLimitRemaining)
+		}
+		// The PR map is replaced wholesale with the new message's PRs (fade-out
+		// only filters within the new message — it does not carry over PRs
+		// from the previous render). So only PR #7 should be present.
+		if len(rm.prs) != 1 {
+			t.Errorf("prs = %d, want 1 (new message replaces map)", len(rm.prs))
+		}
+		if _, ok := rm.prs[7]; !ok {
+			t.Error("PR #7 should be present after success")
+		}
+	})
+}
+
+func TestRepoRunsUpdateErrorNonFatal(t *testing.T) {
+	fadeSuccess := 15 * time.Minute
+	fadeFailure := 30 * time.Minute
+
+	seedRuns := []ghclient.BranchRunData{
+		{RunID: 1, Status: "in_progress", Event: "push", HeadBranch: "main"},
+	}
+	m := RepoModel{
+		standaloneRuns:    seedRuns,
+		fadeSuccess:       fadeSuccess,
+		fadeFailure:       fadeFailure,
+		fetchReceived:     true,
+		rateLimitRemaining: 4000,
+	}
+
+	t.Run("error preserves last good runs and sets fetchErr", func(t *testing.T) {
+		msg := RepoRunsUpdateMsg{
+			Err: fmt.Errorf("non-200 OK status code: 502 Bad Gateway"),
+		}
+
+		newModel, _ := m.Update(msg)
+		rm := newModel.(*RepoModel)
+
+		if rm.fetchErr == nil {
+			t.Error("fetchErr should be set on error")
+		}
+		if rm.fetchErrAt.IsZero() {
+			t.Error("fetchErrAt should be set on error")
+		}
+		if len(rm.standaloneRuns) != 1 {
+			t.Errorf("standaloneRuns = %d, want 1 (last good state preserved)", len(rm.standaloneRuns))
+		}
+	})
+
+	t.Run("success clears fetchErr", func(t *testing.T) {
+		m2 := m
+		m2.fetchErr = fmt.Errorf("previous 502")
+
+		msg := RepoRunsUpdateMsg{
+			Runs: []ghclient.BranchRunData{
+				{RunID: 2, Status: "in_progress", Event: "push", HeadBranch: "develop"},
+			},
+			RateLimitRemaining: 4900,
+		}
+
+		newModel, _ := m2.Update(msg)
+		rm := newModel.(*RepoModel)
+
+		if rm.fetchErr != nil {
+			t.Error("fetchErr should be cleared on success")
+		}
+		if len(rm.standaloneRuns) != 1 {
+			t.Errorf("standaloneRuns = %d, want 1 (new active run)", len(rm.standaloneRuns))
+		}
+		if rm.standaloneRuns[0].RunID != 2 {
+			t.Errorf("standaloneRuns[0].RunID = %d, want 2", rm.standaloneRuns[0].RunID)
+		}
+	})
+}
+
+func TestRepoModelFetchReceivedGatesRateLimit(t *testing.T) {
+	// Verify the fetchReceived flag starts false on a fresh model.
+	m := NewRepoModel(
+		context.Background(), "tok", "o", "r",
+		30*time.Second, NewStyles(10, 9, 11, 8), true,
+		15*time.Minute, 30*time.Minute,
+	)
+	if m.fetchReceived {
+		t.Error("fetchReceived should be false on a fresh model")
+	}
+
+	// A successful RepoChecksUpdateMsg flips it true.
+	msg := RepoChecksUpdateMsg{
+		PRData:             map[int]ghclient.PRCheckData{},
+		RateLimitRemaining: 4500,
+	}
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+	if !rm.fetchReceived {
+		t.Error("fetchReceived should be true after a successful checks update")
+	}
+}
+
+func TestTruncateFetchError(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		max    int
+		want   string
+	}{
+		{
+			name:  "short passthrough",
+			input: "connection refused",
+			max:   80,
+			want:  "connection refused",
+		},
+		{
+			name:  "under-max passthrough",
+			input: "0123456789012345678901234567890123456789012345678901234567890123", // 64 chars
+			max:   80,
+			want:  "0123456789012345678901234567890123456789012345678901234567890123",
+		},
+		{
+			name:  "truncates long 504 body",
+			input: `non-200 OK status code: 504 Gateway Timeout body: "<!DOCTYPE html><html><head><title>Server Error</title></head><body><h1>Server Error</h1><p>Sorry about that.</p></body></html>`,
+			max:   80,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateFetchError(tt.input, tt.max)
+			if tt.want != "" {
+				if got != tt.want {
+					t.Errorf("truncateFetchError() = %q, want %q", got, tt.want)
+				}
+				return
+			}
+			// For truncation cases, just verify it fits and ends with ellipsis.
+			if runewidth.StringWidth(got) > tt.max {
+				t.Errorf("truncateFetchError() width = %d, want <= %d", runewidth.StringWidth(got), tt.max)
+			}
+			if !strings.HasSuffix(got, "…") {
+				t.Errorf("truncateFetchError() = %q, want suffix …", got)
+			}
+		})
 	}
 }
