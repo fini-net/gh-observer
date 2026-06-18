@@ -245,11 +245,11 @@ func runPRMode(ctx context.Context, token string, parsed runArgs, cfg *config.Co
 
 	// Check if running in a terminal
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		return runSnapshot(ctx, token, owner, repo, prNumber, cfg.EnableLinks, quickFlag)
+		return runSnapshot(ctx, token, owner, repo, prNumber, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations())
 	}
 
 	// Create model
-	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag)
+	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations())
 
 	// Run TUI
 	p := tea.NewProgram(model)
@@ -272,11 +272,11 @@ func runActionsMode(ctx context.Context, token string, parsed runArgs, cfg *conf
 
 	// Check if running in a terminal
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		return runRunSnapshot(ctx, owner, repo, runID, cfg.EnableLinks, quickFlag)
+		return runRunSnapshot(ctx, owner, repo, runID, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations())
 	}
 
 	// Create run model
-	model := tui.NewRunModel(ctx, token, owner, repo, runID, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag)
+	model := tui.NewRunModel(ctx, token, owner, repo, runID, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations())
 
 	// Run TUI
 	p := tea.NewProgram(model)
@@ -329,7 +329,7 @@ func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, own
 }
 
 // runSnapshot prints a one-time snapshot of PR check status (non-interactive mode)
-func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, enableLinks bool, quick bool) int {
+func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, enableLinks bool, quick bool, presumedAverages map[string]time.Duration) int {
 	client, err := ghclient.NewClient(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create GitHub client: %v\n", err)
@@ -374,6 +374,11 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 		}
 	}
 
+	if jobAverages == nil {
+		jobAverages = make(map[string]time.Duration)
+	}
+	ghclient.ApplyPresumedAverages(jobAverages, checkRuns, presumedAverages)
+
 	widths := tui.CalculateColumnWidths(checkRuns, headCommitTime, jobAverages)
 
 	headerQueue, headerName, headerDuration, headerAvg := tui.FormatHeaderColumns(widths)
@@ -402,7 +407,7 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 }
 
 // runRunSnapshot prints a one-time snapshot of Actions run status (non-interactive mode)
-func runRunSnapshot(ctx context.Context, owner, repo string, runID int64, enableLinks bool, quick bool) int {
+func runRunSnapshot(ctx context.Context, owner, repo string, runID int64, enableLinks bool, quick bool, presumedAverages map[string]time.Duration) int {
 	token, err := ghclient.GetToken()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to get GitHub token: %v\n", err)
@@ -452,6 +457,11 @@ func runRunSnapshot(ctx context.Context, owner, repo string, runID int64, enable
 			jobAverages = avgs
 		}
 	}
+
+	if jobAverages == nil {
+		jobAverages = make(map[string]time.Duration)
+	}
+	ghclient.ApplyPresumedAverages(jobAverages, ghclient.WorkflowJobInfoToCheckRuns(jobs), presumedAverages)
 
 	widths := tui.CalculateRunColumnWidths(jobs, jobAverages)
 

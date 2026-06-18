@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/fini-net/gh-observer/internal/debug"
@@ -355,4 +356,66 @@ func DiscoverAdvSecWorkflows(
 	}
 
 	return advSecMatchWorkflow, workflowIDsToFetch
+}
+
+// IsExternalAppCheck reports whether a check run is from an external (non-GitHub
+// Actions) app — i.e., it has no WorkflowRunID and no WorkflowID, but has both
+// an AppName and a DetailsURL that does not point at an Actions run. The DCO app
+// provided by Probot is the canonical example; its DetailsURL points off-site
+// (https://probot.github.io/apps/dco/) so ParseRunIDFromURL cannot recover a run
+// ID and history can never be fetched for it. Such checks are candidates for a
+// presumed average (see ApplyPresumedAverages).
+func IsExternalAppCheck(cr CheckRunInfo) bool {
+	if cr.WorkflowRunID > 0 || cr.WorkflowID > 0 {
+		return false
+	}
+	if cr.AppName == "" || cr.DetailsURL == "" {
+		return false
+	}
+	if _, err := ParseRunIDFromURL(cr.DetailsURL); err == nil {
+		return false
+	}
+	return true
+}
+
+// ApplyPresumedAverages injects presumed historical durations for checks that
+// can never have real history (external GitHub App checks like DCO that have no
+// Actions workflow run). For each check Name in presumedAverages that (a) is
+// not already present in jobAverages and (b) appears in checkRuns as an
+// external app check, the presumed duration is written into jobAverages. The
+// jobAverages map is mutated in place; if it is nil it is left untouched.
+//
+// Matching is case-insensitive on the check Name to absorb viper's automatic
+// lowercasing of map keys (the default "DCO" is stored as "dco"). The
+// canonical check Name (preserving the original case from GitHub) is used as
+// the jobAverages key so the rest of the TUI lookup continues to work.
+//
+// This lets the TUI show a sensible ETA (e.g. "1s" for DCO) instead of a blank
+// HistAvg cell, without making any extra API calls.
+func ApplyPresumedAverages(
+	jobAverages map[string]time.Duration,
+	checkRuns []CheckRunInfo,
+	presumedAverages map[string]time.Duration,
+) {
+	if len(presumedAverages) == 0 || jobAverages == nil {
+		return
+	}
+	// Build a case-insensitive lookup so viper's lowercased map keys still
+	// match the canonical check Name from the GitHub API.
+	lower := make(map[string]time.Duration, len(presumedAverages))
+	for name, dur := range presumedAverages {
+		lower[strings.ToLower(name)] = dur
+	}
+	for _, cr := range checkRuns {
+		if !IsExternalAppCheck(cr) {
+			continue
+		}
+		if _, exists := jobAverages[cr.Name]; exists {
+			continue
+		}
+		if dur, ok := lower[strings.ToLower(cr.Name)]; ok {
+			jobAverages[cr.Name] = dur
+			debug.Log("presumed average applied", "check_name", cr.Name, "duration", dur)
+		}
+	}
 }

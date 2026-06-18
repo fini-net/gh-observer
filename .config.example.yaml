@@ -17,3 +17,14 @@ colors:
   failure: 9   # Red - completed with failure
   running: 11  # Yellow - currently in progress
   queued: 8    # Gray - waiting to start
+
+# Presumed historical averages for checks that have no Actions workflow run
+# to fetch history from (e.g. external GitHub App checks like DCO provided by
+# Probot). When such a check appears in the check list, the configured duration
+# is shown in the HistAvg column instead of a blank cell. Real history always
+# wins: if a workflow run is later found for a check name, that real average
+# replaces the presumed value. Keys are matched against the check Name field
+# case-insensitively (viper lowercases config map keys, so "DCO" and "dco" are
+# equivalent). Durations use Go time.ParseDuration syntax.
+presumed_averages:
+  DCO: 1s
