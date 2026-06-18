@@ -56,7 +56,10 @@ func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case RepoTickMsg:
 		// Rate-limit backoff: triple the interval when quota is critically low.
-		if m.rateLimitRemaining < rateBackoffThreshold {
+		// Gate on fetchReceived so the zero-value rateLimitRemaining (0) before
+		// the first successful response doesn't pin us in backoff forever and
+		// suppress the fetch commands that would clear that initial state.
+		if m.fetchReceived && m.rateLimitRemaining < rateBackoffThreshold {
 			debug.Log("rate limit backoff (repo)", "remaining", m.rateLimitRemaining, "threshold", rateBackoffThreshold)
 			return m, repoTick(m.refreshInterval * 3)
 		}

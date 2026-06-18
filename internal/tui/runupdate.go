@@ -73,7 +73,9 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case RunTickMsg:
-		if m.rateLimitRemaining < rateBackoffThreshold {
+		// Gate backoff on fetchReceived so the zero-value rateLimitRemaining
+		// (0) before the first successful response doesn't suppress fetches.
+		if m.fetchReceived && m.rateLimitRemaining < rateBackoffThreshold {
 			debug.Log("rate limit backoff (run)", "remaining", m.rateLimitRemaining, "threshold", rateBackoffThreshold)
 			return m, runTick(m.refreshInterval*3)
 		}
@@ -118,6 +120,7 @@ func (m *RunModel) handleRunJobsUpdate(msg RunJobsUpdateMsg) (tea.Model, tea.Cmd
 	m.jobs = msg.Jobs
 	SortRunJobs(m.jobs)
 	m.rateLimitRemaining = msg.RateLimitRemaining
+	m.fetchReceived = true
 	m.lastUpdate = time.Now()
 	m.err = nil
 

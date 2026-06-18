@@ -27,10 +27,22 @@ var quickFlag bool
 var debugFlag bool
 var repoFlag string
 
+// repoFlagAutoSentinel is the NoOptDefVal for --repo: when the user passes
+// --repo with no value, pflag fills repoFlag with this sentinel so we can
+// distinguish "no value given (auto-detect)" from "value given explicitly".
+// Any string that can't be parsed as owner/repo or a GitHub URL works; we
+// use a single underscore which is invalid in both GitHub owner and repo names.
+const repoFlagAutoSentinel = "_"
+
 func init() {
 	rootCmd.Flags().BoolVarP(&quickFlag, "quick", "q", false, "Skip fetching historical average runtimes")
 	rootCmd.Flags().BoolVarP(&debugFlag, "debug", "d", false, "Log suppressed errors and internal state to a file")
-	rootCmd.Flags().StringVar(&repoFlag, "repo", "", "Watch all active workflows on a repo persistently (owner/repo or URL)")
+	rootCmd.Flags().StringVar(&repoFlag, "repo", "", "Watch all active workflows on a repo persistently (owner/repo or URL; bare --repo auto-detects from current git remote)")
+	// Allow `--repo` with no value: pflag fills repoFlag with this sentinel
+	// so resolveRepoArg can distinguish "no value given (auto-detect)" from
+	// "value given explicitly". Any string invalid as owner/repo or a GitHub
+	// URL works; "_" is invalid in both GitHub owner and repo names.
+	rootCmd.Flags().Lookup("repo").NoOptDefVal = repoFlagAutoSentinel
 }
 
 var rootCmd = &cobra.Command{
@@ -47,6 +59,7 @@ Also supports watching GitHub Actions runs by passing a run URL:
   gh-observer https://github.com/owner/repo/actions/runs/123456789
 
 Use --repo to persistently watch all active workflows on a repository:
+  gh-observer --repo              # auto-detect from current git remote
   gh-observer --repo owner/repo
   gh-observer --repo https://github.com/owner/repo`,
 	Args: cobra.MaximumNArgs(1),
@@ -87,8 +100,19 @@ func run(cmd *cobra.Command, args []string) int {
 	}
 
 	repoMode := cmd.Flags().Changed("repo")
+	bareRepoFlag := repoMode && repoFlag == repoFlagAutoSentinel
 
 	// Validate flag combinations early.
+	//
+	// With NoOptDefVal set on --repo, a bare token after `--repo` is not
+	// consumed by the flag (only `--repo=VALUE` is). So accept the form
+	// `gh-observer --repo owner/repo` by treating a single trailing
+	// positional as the repo value when --repo was given bare. The
+	// `--repo=VALUE` form still rejects positionals.
+	if bareRepoFlag && len(args) == 1 {
+		repoFlag = args[0]
+		args = nil
+	}
 	if repoMode && len(args) > 0 {
 		fmt.Fprintf(os.Stderr, "Error: --repo flag cannot be used with positional arguments\n")
 		return 1
@@ -153,9 +177,11 @@ func run(cmd *cobra.Command, args []string) int {
 }
 
 // resolveRepoArg resolves the owner/repo from the --repo flag value.
-// If the value is empty, it auto-detects the current repo from git remote.
+// If the value is empty or the auto-detect sentinel (passed by pflag when
+// --repo is given with no value), it auto-detects the current repo from the
+// git remote. Otherwise it parses the value as owner/repo or a GitHub URL.
 func resolveRepoArg(val string) (string, string, error) {
-	if val != "" {
+	if val != "" && val != repoFlagAutoSentinel {
 		return ghclient.ParseRepoArg(val)
 	}
 	owner, repo, err := ghclient.GetCurrentRepo()

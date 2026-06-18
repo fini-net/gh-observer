@@ -85,8 +85,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case TickMsg:
-		// Check rate limit before polling
-		if m.rateLimitRemaining < rateBackoffThreshold {
+		// Check rate limit before polling. Gate on fetchReceived so the
+		// zero-value rateLimitRemaining (0) before the first successful
+		// response doesn't suppress the fetch that would clear that state.
+		if m.fetchReceived && m.rateLimitRemaining < rateBackoffThreshold {
 			debug.Log("rate limit backoff", "remaining", m.rateLimitRemaining, "threshold", rateBackoffThreshold)
 			// Back off if rate limited
 			return m, tick(m.refreshInterval * 3)
@@ -263,6 +265,7 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	m.checkRuns = msg.CheckRuns
 	SortCheckRuns(m.checkRuns)
 	m.rateLimitRemaining = msg.RateLimitRemaining
+	m.fetchReceived = true
 	m.lastUpdate = time.Now()
 	m.err = nil
 
