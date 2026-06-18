@@ -100,8 +100,16 @@ func (m Model) View() tea.View {
 		b.WriteString("\n")
 	}
 
-	if m.rateLimitRemaining < minRateLimitForFetch {
-		b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
+	// Two-tier rate-limit indicator: red under minRateLimitForFetch, yellow
+	// under rateWarningThreshold. Only render once we've actually received a
+	// response — before that, rateLimitRemaining is the Go zero value (0) and
+	// showing "[Rate limit: 0 remaining]" in red would be misleading.
+	if m.fetchReceived {
+		if m.rateLimitRemaining < minRateLimitForFetch {
+			b.WriteString(m.styles.Failure.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
+		} else if m.rateLimitRemaining < rateWarningThreshold {
+			b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
+		}
 	}
 
 	b.WriteString("\n")

@@ -7,6 +7,7 @@ const (
 	verySlowJobThreshold = 3 * time.Minute
 
 	rateBackoffThreshold = 10
+	rateWarningThreshold = 500
 	minRateLimitForFetch = 100
 
 	historyFetchDelay = 10 * time.Second

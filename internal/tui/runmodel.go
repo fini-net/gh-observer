@@ -27,6 +27,11 @@ type RunModel struct {
 
 	// Rate limiting
 	rateLimitRemaining int
+	// fetchReceived is true after the first successful API response that
+	// populated rateLimitRemaining. Before that, rateLimitRemaining is the
+	// Go zero value (0) and the view must not render a misleading
+	// "[Rate limit: 0 remaining]" indicator or trigger backoff.
+	fetchReceived bool
 
 	// UI state
 	spinner         spinner.Model

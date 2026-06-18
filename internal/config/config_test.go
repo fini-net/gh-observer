@@ -19,6 +19,15 @@ func TestLoad_DefaultValues(t *testing.T) {
 	if cfg.RefreshInterval != 5*time.Second {
 		t.Errorf("RefreshInterval = %v, want 5s", cfg.RefreshInterval)
 	}
+	if cfg.RepoRefreshInterval != 30*time.Second {
+		t.Errorf("RepoRefreshInterval = %v, want 30s", cfg.RepoRefreshInterval)
+	}
+	if cfg.FadeSuccess != 15*time.Minute {
+		t.Errorf("FadeSuccess = %v, want 15m", cfg.FadeSuccess)
+	}
+	if cfg.FadeFailure != 30*time.Minute {
+		t.Errorf("FadeFailure = %v, want 30m", cfg.FadeFailure)
+	}
 	if cfg.Colors.Success != 10 {
 		t.Errorf("Colors.Success = %d, want 10", cfg.Colors.Success)
 	}

@@ -25,10 +25,31 @@ func main() {
 
 var quickFlag bool
 var debugFlag bool
+var repoFlag string
+
+// repoFlagAutoSentinel is the NoOptDefVal for --repo: when the user passes
+// --repo with no value, pflag fills repoFlag with this sentinel so we can
+// distinguish "no value given (auto-detect)" from "value given explicitly".
+//
+// The required properties are (a) not parseable as "owner/repo" or a
+// GitHub URL, and (b) not something a user would type on purpose. A single
+// underscore "_" satisfies both: ParseRepoArg in internal/github/repo.go
+// explicitly rejects all-underscore segments (see isAllUnderscoreSegment),
+// so `gh-observer --repo _` errors cleanly as an invalid argument rather
+// than being mistaken for auto-detect or treated as a literal owner/repo.
+const repoFlagAutoSentinel = "_"
 
 func init() {
 	rootCmd.Flags().BoolVarP(&quickFlag, "quick", "q", false, "Skip fetching historical average runtimes")
 	rootCmd.Flags().BoolVarP(&debugFlag, "debug", "d", false, "Log suppressed errors and internal state to a file")
+	rootCmd.Flags().StringVar(&repoFlag, "repo", "", "Watch all active workflows on a repo persistently (owner/repo or URL; bare --repo auto-detects from current git remote)")
+	// Allow `--repo` with no value: pflag fills repoFlag with this sentinel
+	// so resolveRepoArg can distinguish "no value given (auto-detect)" from
+	// "value given explicitly". The sentinel must be not parseable as
+	// owner/repo or a GitHub URL and not something a user would type on
+	// purpose; ParseRepoArg explicitly rejects all-underscore segments so
+	// "_" works and `--repo _` errors cleanly.
+	rootCmd.Flags().Lookup("repo").NoOptDefVal = repoFlagAutoSentinel
 }
 
 var rootCmd = &cobra.Command{
@@ -42,10 +63,15 @@ Supports watching checks on external repositories by passing a full PR URL:
   gh-observer https://github.com/owner/repo/pull/123
 
 Also supports watching GitHub Actions runs by passing a run URL:
-  gh-observer https://github.com/owner/repo/actions/runs/123456789`,
+  gh-observer https://github.com/owner/repo/actions/runs/123456789
+
+Use --repo to persistently watch all active workflows on a repository:
+  gh-observer --repo              # auto-detect from current git remote
+  gh-observer --repo owner/repo
+  gh-observer --repo https://github.com/owner/repo`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		exitCode := run(args)
+		exitCode := run(cmd, args)
 		os.Exit(exitCode)
 	},
 }
@@ -55,19 +81,20 @@ type runMode int
 
 const (
 	modePR   runMode = iota // Watch a PR's checks
-	modeRun                  // Watch an Actions workflow run
+	modeRun                 // Watch an Actions workflow run
+	modeRepo                // Watch all active workflows on a repo persistently
 )
 
 // runArgs holds the parsed arguments for either mode.
 type runArgs struct {
-	mode       runMode
-	owner      string
-	repo       string
-	prNumber   int
-	runID      int64
+	mode     runMode
+	owner    string
+	repo     string
+	prNumber int
+	runID    int64
 }
 
-func run(args []string) int {
+func run(cmd *cobra.Command, args []string) int {
 	ctx := context.Background()
 
 	if debugFlag {
@@ -77,6 +104,33 @@ func run(args []string) int {
 		}
 		defer debug.Close()
 		fmt.Fprintf(os.Stderr, "Debug log: %s\n", debug.LogPath())
+	}
+
+	repoMode := cmd.Flags().Changed("repo")
+	bareRepoFlag := repoMode && repoFlag == repoFlagAutoSentinel
+
+	// Validate flag combinations early.
+	//
+	// With NoOptDefVal set on --repo, a bare token after `--repo` is not
+	// consumed by the flag (only `--repo=VALUE` is). So accept the form
+	// `gh-observer --repo owner/repo` by treating a single trailing
+	// positional as the repo value when --repo was given bare. The
+	// `--repo=VALUE` form still rejects positionals.
+	if bareRepoFlag && len(args) == 1 {
+		repoFlag = args[0]
+		args = nil
+	}
+	if repoMode && len(args) > 0 {
+		fmt.Fprintf(os.Stderr, "Error: --repo flag cannot be used with positional arguments\n")
+		return 1
+	}
+	if repoMode && quickFlag {
+		fmt.Fprintf(os.Stderr, "Error: --repo flag cannot be used with --quick\n")
+		return 1
+	}
+	if repoMode && !term.IsTerminal(int(os.Stdout.Fd())) {
+		fmt.Fprintf(os.Stderr, "Error: --repo flag requires an interactive terminal\n")
+		return 1
 	}
 
 	// Load configuration
@@ -93,6 +147,16 @@ func run(args []string) int {
 		cfg.Colors.Running,
 		cfg.Colors.Queued,
 	)
+
+	// Handle repo mode up front: it has its own arg resolution and entry point.
+	if repoMode {
+		owner, repo, err := resolveRepoArg(repoFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			return 1
+		}
+		return runRepoMode(ctx, cfg, styles, owner, repo)
+	}
 
 	// Parse arguments
 	parsed, err := parseArgs(args)
@@ -117,6 +181,21 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "Unknown mode\n")
 		return 1
 	}
+}
+
+// resolveRepoArg resolves the owner/repo from the --repo flag value.
+// If the value is empty or the auto-detect sentinel (passed by pflag when
+// --repo is given with no value), it auto-detects the current repo from the
+// git remote. Otherwise it parses the value as owner/repo or a GitHub URL.
+func resolveRepoArg(val string) (string, string, error) {
+	if val != "" && val != repoFlagAutoSentinel {
+		return ghclient.ParseRepoArg(val)
+	}
+	owner, repo, err := ghclient.GetCurrentRepo()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to detect current repo: %v\nUse --repo owner/repo to specify explicitly", err)
+	}
+	return owner, repo, nil
 }
 
 // parseArgs determines whether the argument is a PR number, PR URL, or Actions run URL.
@@ -206,6 +285,41 @@ func runActionsMode(ctx context.Context, token string, parsed runArgs, cfg *conf
 
 	if m, ok := finalModel.(tui.RunModel); ok {
 		return m.ExitCode()
+	}
+
+	return 0
+}
+
+// runRepoMode handles persistent watching of all active workflows on a repo.
+// It is always interactive (snapshot mode is rejected earlier in run()).
+func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, owner, repo string) int {
+	token, err := ghclient.GetToken()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get GitHub token: %v\n", err)
+		return 1
+	}
+
+	model := tui.NewRepoModel(
+		ctx, token, owner, repo,
+		cfg.RepoRefreshInterval, styles, cfg.EnableLinks,
+		cfg.FadeSuccess, cfg.FadeFailure,
+	)
+
+	p := tea.NewProgram(model)
+	finalModel, err := p.Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
+		return 1
+	}
+
+	// RepoModel.Update can return either a value or pointer RepoModel
+	// (the per-message handlers use pointer receivers), so assert on the
+	// ExitCode method rather than a concrete type to handle both forms.
+	type exitCoder interface {
+		ExitCode() int
+	}
+	if ec, ok := finalModel.(exitCoder); ok {
+		return ec.ExitCode()
 	}
 
 	return 0
