@@ -321,7 +321,7 @@ See `.config.example.yaml` for reference.
 
 ## Authentication
 
-gh-observer uses GitHub authentication in this order:
+gh observer uses GitHub authentication in this order:
 
 1. `GITHUB_TOKEN` environment variable
 2. `gh` CLI authentication (`gh auth token`)

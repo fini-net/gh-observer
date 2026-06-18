@@ -55,20 +55,23 @@ func init() {
 var rootCmd = &cobra.Command{
 	Use:   "gh-observer [PR_NUMBER | PR_URL | ACTIONS_RUN_URL]",
 	Short: "Watch GitHub PR checks or Actions runs with runtime metrics",
-	Long: `gh-observer is a GitHub PR check watcher CLI tool that improves on 
-'gh pr checks --watch' by showing runtime metrics, queue latency, 
-and better handling of startup delays.
+	Long: `gh observer (invoked as gh-observer when installed via go install) is a
+GitHub PR check watcher CLI tool that improves on 'gh pr checks --watch' by
+showing runtime metrics, queue latency, and better handling of startup delays.
 
 Supports watching checks on external repositories by passing a full PR URL:
-  gh-observer https://github.com/owner/repo/pull/123
+  gh observer https://github.com/owner/repo/pull/123
 
 Also supports watching GitHub Actions runs by passing a run URL:
-  gh-observer https://github.com/owner/repo/actions/runs/123456789
+  gh observer https://github.com/owner/repo/actions/runs/123456789
 
 Use --repo to persistently watch all active workflows on a repository:
-  gh-observer --repo              # auto-detect from current git remote
-  gh-observer --repo owner/repo
-  gh-observer --repo https://github.com/owner/repo`,
+  gh observer --repo              # auto-detect from current git remote
+  gh observer --repo owner/repo
+  gh observer --repo https://github.com/owner/repo
+
+If installed via go install rather than as a gh extension, replace
+"gh observer" with "gh-observer" in the examples above.`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		exitCode := run(cmd, args)
@@ -205,7 +208,7 @@ func parseArgs(args []string) (runArgs, error) {
 		prNumber, owner, repo, err := ghclient.GetCurrentPRWithRepo()
 		if err != nil {
 			if ghclient.IsJujutsu() {
-				return runArgs{}, fmt.Errorf("failed to detect PR in jj (Jujutsu) repo: %v\n\nHint: In a jj repo, you may need to:\n  1. Pass an explicit PR number: gh-observer 123\n  2. Pass a PR URL: gh-observer https://github.com/owner/repo/pull/123\n  3. Enable colocated mode: jj git colocation enable", err)
+				return runArgs{}, fmt.Errorf("failed to detect PR in jj (Jujutsu) repo: %v\n\nHint: In a jj repo, you may need to:\n  1. Pass an explicit PR number: gh observer 123\n  2. Pass a PR URL: gh observer https://github.com/owner/repo/pull/123\n  3. Enable colocated mode: jj git colocation enable", err)
 			}
 			return runArgs{}, fmt.Errorf("failed to detect PR: %v\nMake sure you're on a PR branch or provide a PR number or URL", err)
 		}
