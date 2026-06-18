@@ -341,9 +341,6 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, fetchWorkflowHistory(m.ctx, m.owner, m.repo, wfID))
 				}
 			}
-			if len(advSecWFIDs) == 0 && len(m.pendingWorkflowFetch) == 0 && !m.avgFetchPending {
-				m.avgFetchLastDuration = time.Since(m.avgFetchStartTime)
-			}
 		}
 
 		if needsDiscovery {
