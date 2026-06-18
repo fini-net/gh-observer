@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/fini-net/gh-observer/internal/debug"
@@ -26,8 +27,49 @@ type PRCheckData struct {
 	HeadCommitTime time.Time
 }
 
+// repoContextNode is the union type for StatusCheckRollup contexts in the
+// repo-mode query. It is a trimmed copy of contextNode from graphql.go that
+// OMITS the annotations(first: 5) field. Annotations are the single most
+// expensive part of the query (5 nodes × ~100 contexts × N PRs) and push the
+// query over GitHub's GraphQL "Resource limits for this query exceeded"
+// threshold on high-traffic repos like grafana/grafana at prLimit=10. Repo
+// mode is a persistent overview and never renders annotations (only single-PR
+// mode's renderErrorBox does), so dropping them here is safe and makes the
+// query 10/10 reliable instead of 7/10 borderline-504.
+type repoContextNode struct {
+	Typename        string `graphql:"__typename"`
+	CheckRunContext struct {
+		Name        string
+		Summary     string
+		Status      string
+		Conclusion  string
+		StartedAt   githubv4.DateTime
+		CompletedAt githubv4.DateTime
+		DetailsURL  string `graphql:"detailsUrl"`
+		CheckSuite  struct {
+			WorkflowRun struct {
+				DatabaseID BigInt `graphql:"databaseId"`
+				Workflow   struct {
+					DatabaseID BigInt `graphql:"databaseId"`
+					Name       string
+				}
+			}
+			App struct {
+				Name string
+				Slug string
+			}
+		}
+	} `graphql:"... on CheckRun"`
+	StatusContext struct {
+		Context     string
+		Description string
+		State       string
+		TargetURL   string `graphql:"targetUrl"`
+	} `graphql:"... on StatusContext"`
+}
+
 // repoPRQuery fetches open PRs with their check rollup in a single query.
-// Reuses contextNode from graphql.go so contextNodesToCheckRuns works unchanged.
+// Uses repoContextNode (no annotations) to stay under GitHub's query cost limit.
 type repoPRQuery struct {
 	Repository struct {
 		PullRequests struct {
@@ -41,7 +83,7 @@ type repoPRQuery struct {
 							CommittedDate githubv4.DateTime `graphql:"committedDate"`
 							StatusCheckRollup struct {
 								Contexts struct {
-									Nodes    []contextNode
+									Nodes    []repoContextNode
 									PageInfo struct {
 										HasNextPage bool
 										EndCursor   githubv4.String
@@ -66,6 +108,11 @@ type repoPRQuery struct {
 // Note: each PR's status contexts are capped at 100 (no cursor pagination).
 // PRs with more than 100 status contexts will show an incomplete set; a future
 // enhancement can fall back to per-PR pagination for PRs that hit the cap.
+//
+// The query deliberately omits the annotations(first: 5) field to stay under
+// GitHub's GraphQL query cost limit on high-traffic repos. Repo mode never
+// renders inline error annotations (only single-PR mode does), so CheckRunInfo
+// entries from this path have an empty Annotations slice.
 func FetchRepoCheckRunsGraphQL(ctx context.Context, token, owner, repo string) (map[int]PRCheckData, int, error) {
 	src := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	httpClient := oauth2.NewClient(ctx, src)
@@ -107,7 +154,7 @@ func fetchRepoCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner
 			headCommitTime = commit.CommittedDate.Time
 		}
 
-		checkRuns := contextNodesToCheckRuns(commit.StatusCheckRollup.Contexts.Nodes)
+		checkRuns := repoContextNodesToCheckRuns(commit.StatusCheckRollup.Contexts.Nodes)
 
 		if len(checkRuns) == 0 && headCommitTime.IsZero() {
 			continue
@@ -122,4 +169,79 @@ func fetchRepoCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner
 	}
 
 	return result, rateLimitRemaining, nil
+}
+
+// repoContextNodesToCheckRuns converts repoContextNode slice to CheckRunInfo.
+// It is a trimmed copy of contextNodesToCheckRuns from graphql.go that always
+// produces an empty Annotations slice (the repo query does not fetch them).
+func repoContextNodesToCheckRuns(nodes []repoContextNode) []CheckRunInfo {
+	var checkRuns []CheckRunInfo
+
+	for _, node := range nodes {
+		if node.Typename == "StatusContext" {
+			statusContext := node.StatusContext
+			state := strings.ToLower(statusContext.State)
+
+			var status, conclusion string
+			switch state {
+			case "success":
+				status = "completed"
+				conclusion = "success"
+			case "error", "failure":
+				status = "completed"
+				conclusion = "failure"
+			case "pending":
+				status = "queued"
+				conclusion = ""
+			default:
+				status = "queued"
+				conclusion = ""
+			}
+
+			checkRuns = append(checkRuns, CheckRunInfo{
+				Name:       statusContext.Context,
+				Summary:    statusContext.Description,
+				Status:     status,
+				Conclusion: conclusion,
+				DetailsURL: statusContext.TargetURL,
+			})
+			continue
+		}
+
+		if node.Typename != "CheckRun" {
+			continue
+		}
+
+		checkRun := node.CheckRunContext
+		workflowName := checkRun.CheckSuite.WorkflowRun.Workflow.Name
+		appName := checkRun.CheckSuite.App.Name
+		workflowRunID := int64(checkRun.CheckSuite.WorkflowRun.DatabaseID)
+		workflowID := int64(checkRun.CheckSuite.WorkflowRun.Workflow.DatabaseID)
+
+		var startedAt, completedAt *time.Time
+		if !checkRun.StartedAt.IsZero() {
+			t := checkRun.StartedAt.Time
+			startedAt = &t
+		}
+		if !checkRun.CompletedAt.IsZero() {
+			t := checkRun.CompletedAt.Time
+			completedAt = &t
+		}
+
+		checkRuns = append(checkRuns, CheckRunInfo{
+			Name:          checkRun.Name,
+			WorkflowName:  workflowName,
+			AppName:       appName,
+			Summary:       checkRun.Summary,
+			Status:        strings.ToLower(checkRun.Status),
+			Conclusion:    strings.ToLower(checkRun.Conclusion),
+			StartedAt:     startedAt,
+			CompletedAt:   completedAt,
+			DetailsURL:    checkRun.DetailsURL,
+			WorkflowRunID: workflowRunID,
+			WorkflowID:    workflowID,
+		})
+	}
+
+	return checkRuns
 }
