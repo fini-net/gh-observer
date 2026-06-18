@@ -61,8 +61,8 @@ type runMode int
 
 const (
 	modePR   runMode = iota // Watch a PR's checks
-	modeRun                  // Watch an Actions workflow run
-	modeRepo                 // Watch all active workflows on a repo persistently
+	modeRun                 // Watch an Actions workflow run
+	modeRepo                // Watch all active workflows on a repo persistently
 )
 
 // runArgs holds the parsed arguments for either mode.
@@ -279,8 +279,14 @@ func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, own
 		return 1
 	}
 
-	if m, ok := finalModel.(tui.RepoModel); ok {
-		return m.ExitCode()
+	// RepoModel.Update can return either a value or pointer RepoModel
+	// (the per-message handlers use pointer receivers), so assert on the
+	// ExitCode method rather than a concrete type to handle both forms.
+	type exitCoder interface {
+		ExitCode() int
+	}
+	if ec, ok := finalModel.(exitCoder); ok {
+		return ec.ExitCode()
 	}
 
 	return 0

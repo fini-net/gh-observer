@@ -157,7 +157,10 @@ func (m *RepoModel) handleRepoRunsUpdate(msg RepoRunsUpdateMsg) (tea.Model, tea.
 		return m, nil
 	}
 
-	if msg.RateLimitRemaining < m.rateLimitRemaining {
+	// Take the minimum across sources, but accept the first observed value
+	// so the zero default doesn't pin rateLimitRemaining at 0 forever (which
+	// would trigger permanent rate-limit backoff and show "0 remaining").
+	if !m.fetchReceived || msg.RateLimitRemaining < m.rateLimitRemaining {
 		m.rateLimitRemaining = msg.RateLimitRemaining
 	}
 	m.lastUpdate = time.Now()
