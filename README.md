@@ -7,8 +7,10 @@
 ![GitHub License](https://img.shields.io/github/license/fini-net/gh-observer)
 ![GitHub watchers](https://img.shields.io/github/watchers/fini-net/gh-observer)
 
-A GitHub PR check and Actions run watcher that improves on `gh pr checks --watch`
-by showing runtime metrics, queue latency, and better handling of startup delays.
+A GitHub PR check, Actions run, and repo watcher that improves on
+`gh pr checks --watch` by showing runtime metrics, queue latency, and better
+handling of startup delays. It can also persistently watch all active
+workflows across a repository with `--repo`.
 
 ![project banner: abstract representation of code flowing through a pull request, using interconnected nodes and lines.](docs/gh-observer-banner.jpeg)
 
@@ -31,8 +33,11 @@ slow?"
   start..." during the 30-90s GitHub delay
 - 🔧 **Actions run watching** - Monitor any GitHub Actions workflow run by
   URL, not just PR checks
+- 🔭 **Repo watcher** - `--repo` persistently monitors all active workflows
+  across a repo (PR checks grouped per PR plus standalone branch runs), with
+  completed checks fading out after configurable windows
 - 🛡️ **Rate limits** - Backs off automatically when approaching API limits to
-  avoid interruptions
+  avoid interruptions (refresh interval triples below 10 remaining)
 - 📊 **Historical averages** - Shows average runtime for each job based on
   recent completed runs, so you know if things are taking longer than usual
 - ⚡ **`--quick` mode** - Skip the historical averages fetch when you just want
@@ -204,6 +209,64 @@ the head commit was pushed (or when the run was created if commit info is
 unavailable). Exit code follows the same convention: 0 if all jobs succeed,
 1 if any job fails.
 
+### Watch all active workflows on a repo
+
+`--repo` opens a persistent overview of every active workflow on a repository.
+It shows open PRs (each with its checks grouped underneath) alongside
+standalone non-PR workflow runs (post-merge, scheduled, or `workflow_dispatch`)
+grouped by branch. Completed checks fade out of the view after a configurable
+window so the screen stays focused on what's still active. Repo mode is
+always interactive — it keeps running until you quit with `q`/`ctrl+c` and
+never auto-exits.
+
+```bash
+# Auto-detect owner/repo from the current git remote's origin URL
+gh observer --repo
+
+# Explicit owner/repo slug
+gh observer --repo owner/repo
+
+# Or a full GitHub URL
+gh observer --repo https://github.com/owner/repo
+```
+
+Bare `--repo` also accepts a trailing positional, so `gh observer --repo owner/repo`
+works (only `--repo=VALUE` rejects positionals). `--repo` cannot be combined
+with `--quick` and requires an interactive terminal — snapshot mode is rejected
+since a persistent watcher has no one-shot output.
+
+```ShellOutput
+fini-net/gh-observer  15:04:05 UTC
+3 active PRs  •  1 branch run  •  Updated 4s ago
+
+PR #142: Refactor token handling
+  15s ✓ CUE Validation / verify                        6s         -
+  15s ✓ Lint GitHub Actions workflows / actionlint     8s         -
+  12s ◐ Claude Code Review / claude-review           1m 32s       -
+
+PR #138: Fix fade-out window edge case
+  2m  ✓ CI / test                                    1m 40s       -
+  1m  ✗ CI / lint                                       45s       -
+
+PR #137: Update docs
+  3m  ✓ MarkdownLint / lint                              5s        -
+
+Branch: main
+  ✓ Deploy to staging (deploy)                          2m 10s
+    ✓ CI / build                                       1m 20s
+    ✓ CI / deploy                                        50s
+  ◐ CI / release (schedule)                            1m 05s
+    ◐ build                                           1m 05s
+
+Press q to quit
+```
+
+PR groups show each check's queue latency, runtime, and historical average
+(when available). Standalone branch runs show a run header (icon, title,
+event annotation, elapsed time) followed by indented job rows. Transient
+fetch errors (e.g. 504 Gateway Timeout) do not replace the screen: the last
+good state stays visible with a red error line so polling can self-heal.
+
 ### Skip historical averages for a faster snapshot
 
 If you just want a quick look without waiting for the historical averages
@@ -216,7 +279,7 @@ gh observer -q 123
 
 This skips the extra API calls for historical job runtimes and prints
 immediately. Useful when you're in a hurry or don't have the API budget
-to spare.
+to spare. `--quick` cannot be combined with `--repo`.
 
 ### Use in CI pipelines
 
@@ -236,8 +299,15 @@ gh observer https://github.com/owner/repo/actions/runs/123456789 && echo "All jo
 Create `~/.config/gh-observer/config.yaml` to customize settings:
 
 ```yaml
-# Refresh interval for polling GitHub API
+# Refresh interval for polling GitHub API (single PR/run mode)
 refresh_interval: 5s
+
+# Refresh interval for repo mode (--repo flag)
+repo_refresh_interval: 30s
+
+# How long completed checks remain visible before fading out (repo mode)
+fade_success: 15m  # Successful checks disappear after 15 minutes
+fade_failure: 30m  # Failed checks disappear after 30 minutes
 
 # Color codes for terminal output (ANSI 256-color palette)
 colors:
@@ -436,6 +506,13 @@ Built with:
 - [Lipgloss](https://github.com/charmbracelet/lipgloss) - Terminal styling
 - [go-github](https://github.com/google/go-github) - GitHub API client
 - [Viper](https://github.com/spf13/viper) - Configuration management
+
+The application has three execution modes: PR mode (watch a pull request's
+checks), run mode (watch a standalone Actions workflow run), and repo mode
+(`--repo`, which persistently watches all active workflows across a repo via
+a batched GraphQL query capped at the 10 most-recently-updated open PRs plus
+a REST fetch of standalone workflow runs, applying fade-out filtering to
+completed checks).
 
 See `CLAUDE.md` for detailed implementation notes.  Read the [linear walkthrough](docs/linear-walkthrough.md)
 to get a detailed walkthrough of the code and to learn why some
