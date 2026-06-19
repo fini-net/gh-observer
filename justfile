@@ -22,6 +22,27 @@ list:
 test2cast pr="25": build
 	asciinema record -c "./gh-observer {{ pr }}" --overwrite ".cache/pr-{{ pr }}.cast"
 
+# record a cast for repo mode to help AI understand problems
+# repo mode is persistent (never auto-quits), so we wrap gh-observer in
+# GNU `timeout`, which sends SIGTERM after 60s; bubbletea treats SIGTERM as
+# a clean QuitMsg and exits, letting asciinema finalize the cast.
+# Requires GNU coreutils `timeout` (brew install coreutils on macOS).
+[group('Testing')]
+test2cast-repo repo="fini-net/gh-observer": build
+	#!/usr/bin/env bash
+	set -euo pipefail
+	repo="{{ repo }}"
+	owner="${repo%/*}"
+	name="${repo#*/}"
+	out="docs/repo_${owner}_${name}.cast"
+	TIMEOUT="$(command -v timeout || command -v gtimeout)" || {
+		echo "error: GNU 'timeout' not found. Install with: brew install coreutils" >&2
+		exit 1
+	}
+	mkdir -p docs
+	asciinema record --headless --idle-time-limit 2 --overwrite \
+		--command "$TIMEOUT --signal=SIGTERM 60 ./gh-observer --repo ${repo}" "$out"
+
 # run unit tests
 [group('Testing')]
 test:
