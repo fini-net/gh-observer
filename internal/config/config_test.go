@@ -227,9 +227,9 @@ func TestLoad_DurationParsing(t *testing.T) {
 				t.Fatalf("Load() returned error: %v", err)
 			}
 
-	if cfg.RefreshInterval != tt.want {
-			t.Errorf("RefreshInterval = %v, want %v", cfg.RefreshInterval, tt.want)
-		}
+			if cfg.RefreshInterval != tt.want {
+				t.Errorf("RefreshInterval = %v, want %v", cfg.RefreshInterval, tt.want)
+			}
 		})
 	}
 }

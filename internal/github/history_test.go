@@ -589,7 +589,7 @@ func TestIsExternalAppCheck(t *testing.T) {
 			cr: CheckRunInfo{
 				Name:          "build",
 				WorkflowRunID: 123,
-				DetailsURL:     "https://github.com/owner/repo/actions/runs/123/job/456",
+				DetailsURL:    "https://github.com/owner/repo/actions/runs/123/job/456",
 			},
 			want: false,
 		},
@@ -603,13 +603,22 @@ func TestIsExternalAppCheck(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "AdvSec check with /runs/ URL (no run ID) is external",
+			name: "AdvSec check with /runs/ URL is not external (GitHub-hosted, handled via aliasing)",
 			cr: CheckRunInfo{
 				Name:       "CodeQL",
 				AppName:    "GitHub Advanced Security",
 				DetailsURL: "https://github.com/owner/repo/runs/73263098935",
 			},
-			want: true,
+			want: false,
+		},
+		{
+			name: "Actions check with /actions/runs/<id> URL (no /job/) is not external (GitHub-hosted)",
+			cr: CheckRunInfo{
+				Name:       "build",
+				AppName:    "GitHub Actions",
+				DetailsURL: "https://github.com/owner/repo/actions/runs/12345678",
+			},
+			want: false,
 		},
 		{
 			name: "check with no AppName and no DetailsURL is not external",
