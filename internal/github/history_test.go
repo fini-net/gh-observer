@@ -559,3 +559,183 @@ func TestFetchWorkflowHistory(t *testing.T) {
 		})
 	}
 }
+
+func TestIsExternalAppCheck(t *testing.T) {
+	tests := []struct {
+		name string
+		cr   CheckRunInfo
+		want bool
+	}{
+		{
+			name: "DCO external app is external",
+			cr: CheckRunInfo{
+				Name:       "DCO",
+				AppName:    "DCO",
+				DetailsURL: "https://probot.github.io/apps/dco/",
+			},
+			want: true,
+		},
+		{
+			name: "GitHub Actions check with WorkflowID is not external",
+			cr: CheckRunInfo{
+				Name:       "build",
+				WorkflowID: 789,
+				DetailsURL: "https://github.com/owner/repo/actions/runs/123/job/456",
+			},
+			want: false,
+		},
+		{
+			name: "GitHub Actions check with WorkflowRunID is not external",
+			cr: CheckRunInfo{
+				Name:          "build",
+				WorkflowRunID: 123,
+				DetailsURL:    "https://github.com/owner/repo/actions/runs/123/job/456",
+			},
+			want: false,
+		},
+		{
+			name: "AdvSec check with parseable Actions run URL is not external",
+			cr: CheckRunInfo{
+				Name:       "CodeQL",
+				AppName:    "GitHub Advanced Security",
+				DetailsURL: "https://github.com/owner/repo/actions/runs/12345678/job/987654321",
+			},
+			want: false,
+		},
+		{
+			name: "AdvSec check with /runs/ URL is not external (GitHub-hosted, handled via aliasing)",
+			cr: CheckRunInfo{
+				Name:       "CodeQL",
+				AppName:    "GitHub Advanced Security",
+				DetailsURL: "https://github.com/owner/repo/runs/73263098935",
+			},
+			want: false,
+		},
+		{
+			name: "Actions check with /actions/runs/<id> URL (no /job/) is not external (GitHub-hosted)",
+			cr: CheckRunInfo{
+				Name:       "build",
+				AppName:    "GitHub Actions",
+				DetailsURL: "https://github.com/owner/repo/actions/runs/12345678",
+			},
+			want: false,
+		},
+		{
+			name: "check with no AppName and no DetailsURL is not external",
+			cr: CheckRunInfo{
+				Name: "lint",
+			},
+			want: false,
+		},
+		{
+			name: "check with only AppName but no DetailsURL is not external (cannot classify)",
+			cr: CheckRunInfo{
+				Name:    "DCO",
+				AppName: "DCO",
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsExternalAppCheck(tt.cr)
+			if got != tt.want {
+				t.Errorf("IsExternalAppCheck() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyPresumedAverages(t *testing.T) {
+	dco := CheckRunInfo{
+		Name:       "DCO",
+		AppName:    "DCO",
+		DetailsURL: "https://probot.github.io/apps/dco/",
+	}
+	build := CheckRunInfo{
+		Name:          "build",
+		WorkflowID:    789,
+		WorkflowRunID: 123,
+		DetailsURL:    "https://github.com/owner/repo/actions/runs/123/job/456",
+	}
+	codeQLAdvSec := CheckRunInfo{
+		Name:       "CodeQL",
+		AppName:    "GitHub Advanced Security",
+		DetailsURL: "https://github.com/owner/repo/runs/73263098935",
+	}
+	// external-but-not-in-map uses an off-site URL so IsExternalAppCheck
+	// classifies it as external (GitHub-hosted /runs/ URLs are non-external
+	// after the githubHostedURLRegexp fix).
+	externalNotInMap := CheckRunInfo{
+		Name:       "Worfload Bot",
+		AppName:    "Worfload",
+		DetailsURL: "https://example.com/worfload/status",
+	}
+
+	t.Run("injects presumed average for DCO", func(t *testing.T) {
+		jobAverages := map[string]time.Duration{}
+		presumed := map[string]time.Duration{"DCO": 1 * time.Second}
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{dco, build}, presumed)
+		if jobAverages["DCO"] != 1*time.Second {
+			t.Errorf("jobAverages[DCO] = %v, want 1s", jobAverages["DCO"])
+		}
+		if _, present := jobAverages["build"]; present {
+			t.Errorf("jobAverages[build] should not be set, got %v", jobAverages["build"])
+		}
+	})
+
+	t.Run("does not overwrite existing real history", func(t *testing.T) {
+		jobAverages := map[string]time.Duration{"DCO": 5 * time.Second}
+		presumed := map[string]time.Duration{"DCO": 1 * time.Second}
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{dco}, presumed)
+		if jobAverages["DCO"] != 5*time.Second {
+			t.Errorf("jobAverages[DCO] = %v, want 5s (should not overwrite existing)", jobAverages["DCO"])
+		}
+	})
+
+	t.Run("skips check names not in presumed map", func(t *testing.T) {
+		jobAverages := map[string]time.Duration{}
+		presumed := map[string]time.Duration{"DCO": 1 * time.Second}
+		// externalNotInMap is external but not in the presumed map
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{externalNotInMap}, presumed)
+		if _, present := jobAverages["Worfload Bot"]; present {
+			t.Errorf("jobAverages[Worfload Bot] should not be set, got %v", jobAverages["Worfload Bot"])
+		}
+	})
+
+	t.Run("no-op when presumed map is empty", func(t *testing.T) {
+		jobAverages := map[string]time.Duration{}
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{dco}, nil)
+		if len(jobAverages) != 0 {
+			t.Errorf("jobAverages should be empty, got %v", jobAverages)
+		}
+	})
+
+	t.Run("no-op when jobAverages is nil", func(t *testing.T) {
+		presumed := map[string]time.Duration{"DCO": 1 * time.Second}
+		// Should not panic
+		ApplyPresumedAverages(nil, []CheckRunInfo{dco}, presumed)
+	})
+
+	t.Run("no-op when no external app checks present", func(t *testing.T) {
+		jobAverages := map[string]time.Duration{}
+		presumed := map[string]time.Duration{"DCO": 1 * time.Second}
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{build}, presumed)
+		if len(jobAverages) != 0 {
+			t.Errorf("jobAverages should be empty, got %v", jobAverages)
+		}
+	})
+
+	t.Run("AdvSec /runs/ URL is not external, presumed average does not apply", func(t *testing.T) {
+		jobAverages := map[string]time.Duration{}
+		// A presumed average for "CodeQL" must not be injected because the
+		// AdvSec /runs/ URL is GitHub-hosted and should be handled by AdvSec
+		// aliasing instead, not presumed averages.
+		presumed := map[string]time.Duration{"CodeQL": 30 * time.Second}
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{codeQLAdvSec}, presumed)
+		if _, present := jobAverages["CodeQL"]; present {
+			t.Errorf("jobAverages[CodeQL] should not be set for AdvSec /runs/ URL, got %v", jobAverages["CodeQL"])
+		}
+	})
+}

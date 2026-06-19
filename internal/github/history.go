@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/fini-net/gh-observer/internal/debug"
@@ -355,4 +356,84 @@ func DiscoverAdvSecWorkflows(
 	}
 
 	return advSecMatchWorkflow, workflowIDsToFetch
+}
+
+// githubHostedURLRegexp matches DetailsURLs that point at a GitHub-hosted
+// Actions run (either a full run page or a specific job). AdvSec checks use
+// /runs/<id> URLs, and some Actions checks use /actions/runs/<id> without the
+// trailing /job/<id>. Both are GitHub-hosted, so they are not "external app"
+// checks even when ParseRunIDFromURL (which requires /job/) cannot recover a
+// run ID from them. Treating them as external would let a user-supplied
+// presumed average shadow the real history that AdvSec aliasing later writes.
+var githubHostedURLRegexp = regexp.MustCompile(`^https?://github\.com/[^/]+/[^/]+/(actions/runs/|runs/)`)
+
+// IsExternalAppCheck reports whether a check run is from an external (non-GitHub
+// Actions) app — i.e., it has no WorkflowRunID and no WorkflowID, but has both
+// an AppName and a DetailsURL that does not point at a GitHub-hosted Actions or
+// AdvSec run. The DCO app provided by Probot is the canonical example; its
+// DetailsURL points off-site (https://probot.github.io/apps/dco/) so neither
+// ParseRunIDFromURL nor githubHostedURLRegexp can recover a run ID and history
+// can never be fetched for it. Such checks are candidates for a presumed
+// average (see ApplyPresumedAverages).
+//
+// GitHub-hosted URLs (actions/runs/<id>, actions/runs/<id>/job/<id>, and AdvSec
+// runs/<id>) are treated as non-external so that AdvSec aliasing in the TUI
+// (which writes real history into jobAverages keyed by the check name) is not
+// blocked by a presumed average having already taken the slot.
+func IsExternalAppCheck(cr CheckRunInfo) bool {
+	if cr.WorkflowRunID > 0 || cr.WorkflowID > 0 {
+		return false
+	}
+	if cr.AppName == "" || cr.DetailsURL == "" {
+		return false
+	}
+	if _, err := ParseRunIDFromURL(cr.DetailsURL); err == nil {
+		return false
+	}
+	if githubHostedURLRegexp.MatchString(cr.DetailsURL) {
+		return false
+	}
+	return true
+}
+
+// ApplyPresumedAverages injects presumed historical durations for checks that
+// can never have real history (external GitHub App checks like DCO that have no
+// Actions workflow run). For each check Name in presumedAverages that (a) is
+// not already present in jobAverages and (b) appears in checkRuns as an
+// external app check, the presumed duration is written into jobAverages. The
+// jobAverages map is mutated in place; if it is nil it is left untouched.
+//
+// Matching is case-insensitive on the check Name to absorb viper's automatic
+// lowercasing of map keys (the default "DCO" is stored as "dco"). The
+// canonical check Name (preserving the original case from GitHub) is used as
+// the jobAverages key so the rest of the TUI lookup continues to work.
+//
+// This lets the TUI show a sensible ETA (e.g. "1s" for DCO) instead of a blank
+// HistAvg cell, without making any extra API calls.
+func ApplyPresumedAverages(
+	jobAverages map[string]time.Duration,
+	checkRuns []CheckRunInfo,
+	presumedAverages map[string]time.Duration,
+) {
+	if len(presumedAverages) == 0 || jobAverages == nil {
+		return
+	}
+	// Build a case-insensitive lookup so viper's lowercased map keys still
+	// match the canonical check Name from the GitHub API.
+	lower := make(map[string]time.Duration, len(presumedAverages))
+	for name, dur := range presumedAverages {
+		lower[strings.ToLower(name)] = dur
+	}
+	for _, cr := range checkRuns {
+		if !IsExternalAppCheck(cr) {
+			continue
+		}
+		if _, exists := jobAverages[cr.Name]; exists {
+			continue
+		}
+		if dur, ok := lower[strings.ToLower(cr.Name)]; ok {
+			jobAverages[cr.Name] = dur
+			debug.Log("presumed average applied", "check_name", cr.Name, "duration", dur)
+		}
+	}
 }

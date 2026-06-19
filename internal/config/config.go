@@ -18,12 +18,13 @@ type ColorConfig struct {
 }
 
 type Config struct {
-	RefreshInterval     time.Duration `mapstructure:"refresh_interval"`
-	RepoRefreshInterval time.Duration `mapstructure:"repo_refresh_interval"`
-	FadeSuccess         time.Duration `mapstructure:"fade_success"`
-	FadeFailure         time.Duration `mapstructure:"fade_failure"`
-	Colors              ColorConfig   `mapstructure:"colors"`
-	EnableLinks         bool          `mapstructure:"enable_links"`
+	RefreshInterval     time.Duration     `mapstructure:"refresh_interval"`
+	RepoRefreshInterval time.Duration     `mapstructure:"repo_refresh_interval"`
+	FadeSuccess         time.Duration     `mapstructure:"fade_success"`
+	FadeFailure         time.Duration     `mapstructure:"fade_failure"`
+	Colors              ColorConfig       `mapstructure:"colors"`
+	EnableLinks         bool              `mapstructure:"enable_links"`
+	PresumedAverages    map[string]string `mapstructure:"presumed_averages"`
 }
 
 func Load() (*Config, error) {
@@ -39,6 +40,7 @@ func Load() (*Config, error) {
 	v.SetDefault("colors.running", 11) // Yellow
 	v.SetDefault("colors.queued", 8)   // Gray
 	v.SetDefault("enable_links", true)
+	v.SetDefault("presumed_averages.DCO", "1s")
 
 	// Config location: ~/.config/gh-observer/config.yaml
 	home, err := os.UserHomeDir()
@@ -61,4 +63,27 @@ func Load() (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// PresumedAveragesDurations resolves the raw presumed_averages string map
+// into a map of time.Duration keyed by check Name. Invalid duration strings
+// are silently dropped (matching the lenient approach used elsewhere in the
+// config system). The returned map is never nil when cfg.PresumedAverages is
+// populated. The default DCO entry is included automatically via viper
+// defaults; note that viper lowercases map keys, so the default key is "dco"
+// and lookups should be case-insensitive (as ApplyPresumedAverages does).
+func (c *Config) PresumedAveragesDurations() map[string]time.Duration {
+	if len(c.PresumedAverages) == 0 {
+		return nil
+	}
+	result := make(map[string]time.Duration, len(c.PresumedAverages))
+	for name, raw := range c.PresumedAverages {
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			debug.Log("presumed_averages parse error", "name", name, "value", raw, "err", err)
+			continue
+		}
+		result[name] = d
+	}
+	return result
 }

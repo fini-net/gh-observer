@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -231,4 +232,110 @@ func TestLoad_DurationParsing(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoad_PresumedAveragesDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	dur := cfg.PresumedAveragesDurations()
+	if dur == nil {
+		t.Fatal("PresumedAveragesDurations() = nil, want map with DCO default")
+	}
+	// Viper lowercases map keys, so look up case-insensitively.
+	var dco time.Duration
+	found := false
+	for name, d := range dur {
+		if strings.EqualFold(name, "DCO") {
+			dco = d
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("PresumedAveragesDurations() = %v, want a DCO entry", dur)
+	}
+	if dco != 1*time.Second {
+		t.Errorf("DCO presumed average = %v, want 1s", dco)
+	}
+}
+
+func TestLoad_PresumedAveragesCustom(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, ".config", "gh-observer")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("failed to create config dir: %v", err)
+	}
+
+	configContent := `presumed_averages:
+  DCO: 2s
+  WIP: 5s
+`
+	configPath := filepath.Join(configDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	dur := cfg.PresumedAveragesDurations()
+	if d := lookupCI(dur, "DCO"); d != 2*time.Second {
+		t.Errorf("PresumedAveragesDurations()[DCO] = %v, want 2s (custom value)", d)
+	}
+	if d := lookupCI(dur, "WIP"); d != 5*time.Second {
+		t.Errorf("PresumedAveragesDurations()[WIP] = %v, want 5s", d)
+	}
+}
+
+func TestLoad_PresumedAveragesInvalidDropped(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, ".config", "gh-observer")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("failed to create config dir: %v", err)
+	}
+
+	configContent := `presumed_averages:
+  DCO: 1s
+  Broken: not-a-duration
+`
+	configPath := filepath.Join(configDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	dur := cfg.PresumedAveragesDurations()
+	if d := lookupCI(dur, "DCO"); d != 1*time.Second {
+		t.Errorf("PresumedAveragesDurations()[DCO] = %v, want 1s", d)
+	}
+	if d := lookupCI(dur, "Broken"); d != 0 {
+		t.Errorf("PresumedAveragesDurations()[Broken] should be dropped, got %v", d)
+	}
+}
+
+// lookupCI looks up a key in a duration map case-insensitively, returning
+// zero if not found. Viper lowercases map keys, so config tests must use a
+// case-insensitive lookup to validate user-facing key names.
+func lookupCI(m map[string]time.Duration, key string) time.Duration {
+	for k, v := range m {
+		if strings.EqualFold(k, key) {
+			return v
+		}
+	}
+	return 0
 }

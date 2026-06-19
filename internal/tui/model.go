@@ -79,10 +79,17 @@ type Model struct {
 	// historyFetchCompleted is true after at least one discovery cycle
 	// has finished (all pending workflow fetches resolved).
 	historyFetchCompleted bool
+
+	// Presumed historical averages for external GitHub App checks (e.g. DCO)
+	// that can never have real Actions history. Injected into jobAverages by
+	// handleChecksUpdate on each refresh so the HistAvg column shows a value
+	// (e.g. "1s") instead of blank. Configured via config.yaml's
+	// presumed_averages map.
+	presumedAverages map[string]time.Duration
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool) Model {
+func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool, presumedAverages map[string]time.Duration) Model {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	return Model{
@@ -106,6 +113,7 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 		pendingWorkflowFetch:    make(map[int64]bool),
 		dispatchedWorkflowFetch: make(map[int64]bool),
 		seenCheckKeys:          make(map[string]bool),
+		presumedAverages:        presumedAverages,
 	}
 }
 

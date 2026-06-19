@@ -269,6 +269,12 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	m.lastUpdate = time.Now()
 	m.err = nil
 
+	// Inject presumed historical durations for external GitHub App checks
+	// (e.g. DCO) that have no Actions workflow run to fetch history for. This
+	// is idempotent — it only writes when the job name is absent from
+	// m.jobAverages, so real history fetched later always wins.
+	ghclient.ApplyPresumedAverages(m.jobAverages, m.checkRuns, m.presumedAverages)
+
 	if len(msg.CheckRuns) > m.peakCheckCount {
 		m.peakCheckCount = len(msg.CheckRuns)
 	}

@@ -1138,3 +1138,77 @@ func TestAdvSecAliasOnRediscovery(t *testing.T) {
 		}
 	})
 }
+
+func TestPresumedAverages(t *testing.T) {
+	dco := ghclient.CheckRunInfo{
+		Name:       "DCO",
+		AppName:    "DCO",
+		Status:     "completed",
+		Conclusion: "success",
+		DetailsURL: "https://probot.github.io/apps/dco/",
+	}
+	build := ghclient.CheckRunInfo{
+		Name:          "build",
+		WorkflowRunID: 100,
+		WorkflowID:    200,
+		Status:        "in_progress",
+		DetailsURL:    "https://github.com/o/r/actions/runs/100/job/1",
+	}
+
+	t.Run("handleChecksUpdate injects presumed DCO average", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		m.firstCheckSeenAt = time.Now().Add(-15 * time.Second)
+		m.presumedAverages = map[string]time.Duration{"DCO": 1 * time.Second}
+
+		msg := ChecksUpdateMsg{
+			CheckRuns:          []ghclient.CheckRunInfo{dco, build},
+			RateLimitRemaining: 5000,
+		}
+		model, _ := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if result.jobAverages["DCO"] != 1*time.Second {
+			t.Errorf("jobAverages[DCO] = %v, want 1s", result.jobAverages["DCO"])
+		}
+		if _, present := result.jobAverages["build"]; present {
+			t.Errorf("jobAverages[build] should not be presumed-set, got %v", result.jobAverages["build"])
+		}
+	})
+
+	t.Run("handleChecksUpdate does not overwrite real history", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		m.firstCheckSeenAt = time.Now().Add(-15 * time.Second)
+		m.presumedAverages = map[string]time.Duration{"DCO": 1 * time.Second}
+		m.jobAverages = map[string]time.Duration{"DCO": 5 * time.Second}
+
+		msg := ChecksUpdateMsg{
+			CheckRuns:          []ghclient.CheckRunInfo{dco},
+			RateLimitRemaining: 5000,
+		}
+		model, _ := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if result.jobAverages["DCO"] != 5*time.Second {
+			t.Errorf("jobAverages[DCO] = %v, want 5s (real history should win)", result.jobAverages["DCO"])
+		}
+	})
+
+	t.Run("handleChecksUpdate no-op when presumedAverages is nil", func(t *testing.T) {
+		m := makeModel()
+		m.rateLimitRemaining = 5000
+		m.firstCheckSeenAt = time.Now().Add(-15 * time.Second)
+
+		msg := ChecksUpdateMsg{
+			CheckRuns:          []ghclient.CheckRunInfo{dco},
+			RateLimitRemaining: 5000,
+		}
+		model, _ := m.handleChecksUpdate(msg)
+		result := model.(*Model)
+
+		if _, present := result.jobAverages["DCO"]; present {
+			t.Errorf("jobAverages[DCO] should not be set with nil presumedAverages, got %v", result.jobAverages["DCO"])
+		}
+	})
+}

@@ -70,10 +70,15 @@ type RunModel struct {
 	// historyFetchCompleted is true after at least one discovery cycle
 	// has finished (all pending workflow fetches resolved).
 	historyFetchCompleted bool
+
+	// Presumed historical averages for external GitHub App checks (e.g. DCO).
+	// See Model.presumedAverages for the full rationale. Run mode rarely has
+	// external app checks, but we apply the same logic for consistency.
+	presumedAverages map[string]time.Duration
 }
 
 // NewRunModel creates a new TUI model for watching a workflow run.
-func NewRunModel(ctx context.Context, token, owner, repo string, runID int64, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool) RunModel {
+func NewRunModel(ctx context.Context, token, owner, repo string, runID int64, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool, presumedAverages map[string]time.Duration) RunModel {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	client, _ := ghclient.NewClientFromToken(token)
@@ -99,6 +104,7 @@ func NewRunModel(ctx context.Context, token, owner, repo string, runID int64, re
 		pendingWorkflowFetch:    make(map[int64]bool),
 		dispatchedWorkflowFetch: make(map[int64]bool),
 		seenJobKeys:             make(map[string]bool),
+		presumedAverages:        presumedAverages,
 	}
 }
 
