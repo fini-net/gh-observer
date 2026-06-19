@@ -664,6 +664,14 @@ func TestApplyPresumedAverages(t *testing.T) {
 		AppName:    "GitHub Advanced Security",
 		DetailsURL: "https://github.com/owner/repo/runs/73263098935",
 	}
+	// external-but-not-in-map uses an off-site URL so IsExternalAppCheck
+	// classifies it as external (GitHub-hosted /runs/ URLs are non-external
+	// after the githubHostedURLRegexp fix).
+	externalNotInMap := CheckRunInfo{
+		Name:       "Worfload Bot",
+		AppName:    "Worfload",
+		DetailsURL: "https://example.com/worfload/status",
+	}
 
 	t.Run("injects presumed average for DCO", func(t *testing.T) {
 		jobAverages := map[string]time.Duration{}
@@ -689,10 +697,10 @@ func TestApplyPresumedAverages(t *testing.T) {
 	t.Run("skips check names not in presumed map", func(t *testing.T) {
 		jobAverages := map[string]time.Duration{}
 		presumed := map[string]time.Duration{"DCO": 1 * time.Second}
-		// CodeQL is an external app check but not in the presumed map
-		ApplyPresumedAverages(jobAverages, []CheckRunInfo{codeQLAdvSec}, presumed)
-		if _, present := jobAverages["CodeQL"]; present {
-			t.Errorf("jobAverages[CodeQL] should not be set, got %v", jobAverages["CodeQL"])
+		// externalNotInMap is external but not in the presumed map
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{externalNotInMap}, presumed)
+		if _, present := jobAverages["Worfload Bot"]; present {
+			t.Errorf("jobAverages[Worfload Bot] should not be set, got %v", jobAverages["Worfload Bot"])
 		}
 	})
 
@@ -716,6 +724,18 @@ func TestApplyPresumedAverages(t *testing.T) {
 		ApplyPresumedAverages(jobAverages, []CheckRunInfo{build}, presumed)
 		if len(jobAverages) != 0 {
 			t.Errorf("jobAverages should be empty, got %v", jobAverages)
+		}
+	})
+
+	t.Run("AdvSec /runs/ URL is not external, presumed average does not apply", func(t *testing.T) {
+		jobAverages := map[string]time.Duration{}
+		// A presumed average for "CodeQL" must not be injected because the
+		// AdvSec /runs/ URL is GitHub-hosted and should be handled by AdvSec
+		// aliasing instead, not presumed averages.
+		presumed := map[string]time.Duration{"CodeQL": 30 * time.Second}
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{codeQLAdvSec}, presumed)
+		if _, present := jobAverages["CodeQL"]; present {
+			t.Errorf("jobAverages[CodeQL] should not be set for AdvSec /runs/ URL, got %v", jobAverages["CodeQL"])
 		}
 	})
 }

@@ -18,12 +18,12 @@ type ColorConfig struct {
 }
 
 type Config struct {
-	RefreshInterval     time.Duration    `mapstructure:"refresh_interval"`
-	RepoRefreshInterval time.Duration    `mapstructure:"repo_refresh_interval"`
-	FadeSuccess         time.Duration    `mapstructure:"fade_success"`
-	FadeFailure         time.Duration    `mapstructure:"fade_failure"`
-	Colors              ColorConfig      `mapstructure:"colors"`
-	EnableLinks         bool            `mapstructure:"enable_links"`
+	RefreshInterval     time.Duration     `mapstructure:"refresh_interval"`
+	RepoRefreshInterval time.Duration     `mapstructure:"repo_refresh_interval"`
+	FadeSuccess         time.Duration     `mapstructure:"fade_success"`
+	FadeFailure         time.Duration     `mapstructure:"fade_failure"`
+	Colors              ColorConfig       `mapstructure:"colors"`
+	EnableLinks         bool              `mapstructure:"enable_links"`
 	PresumedAverages    map[string]string `mapstructure:"presumed_averages"`
 }
 
@@ -70,7 +70,8 @@ func Load() (*Config, error) {
 // are silently dropped (matching the lenient approach used elsewhere in the
 // config system). The returned map is never nil when cfg.PresumedAverages is
 // populated. The default DCO entry is included automatically via viper
-// defaults, so callers can always look up "DCO" in the result.
+// defaults; note that viper lowercases map keys, so the default key is "dco"
+// and lookups should be case-insensitive (as ApplyPresumedAverages does).
 func (c *Config) PresumedAveragesDurations() map[string]time.Duration {
 	if len(c.PresumedAverages) == 0 {
 		return nil
