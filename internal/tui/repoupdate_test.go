@@ -953,10 +953,12 @@ func TestRepoRunsDedupNoPRsSkipsDedup(t *testing.T) {
 	}
 }
 
-// TestRepoRunsDedupCompletedEmptyRunDropped verifies that a completed run whose
-// jobs are all duplicates (so it ends up with zero jobs after dedup) is dropped
-// from the standalone section rather than rendering an empty header.
-func TestRepoRunsDedupCompletedEmptyRunDropped(t *testing.T) {
+// TestRepoRunsDedupMatchingPRRunAllJobsDuped verifies that a run whose commit
+// matches a tracked PR is dropped from the standalone section entirely — even
+// when all its jobs are duplicates (so no extras attach) and the run is
+// completed. The run is dropped via the prByHeadSHA branch, NOT the standalone
+// "zero leftover" branch; the dedicated test below covers that path.
+func TestRepoRunsDedupMatchingPRRunAllJobsDuped(t *testing.T) {
 	const sharedSHA = "sha-ddd"
 	now := time.Now()
 	recentStart := now.Add(-5 * time.Minute)
@@ -987,7 +989,7 @@ func TestRepoRunsDedupCompletedEmptyRunDropped(t *testing.T) {
 				Event:        "push",
 				RunStartedAt: recentStart,
 				Jobs: []ghclient.CheckRunInfo{
-					makeDedupBranchJob("CI", "build"), // duplicate -> dropped, run becomes empty
+					makeDedupBranchJob("CI", "build"), // duplicate -> nothing attaches
 				},
 			},
 		},
@@ -998,11 +1000,74 @@ func TestRepoRunsDedupCompletedEmptyRunDropped(t *testing.T) {
 	rm := newModel.(*RepoModel)
 
 	if len(rm.standaloneRuns) != 0 {
-		t.Errorf("standaloneRuns = %d, want 0 (completed empty run dropped)", len(rm.standaloneRuns))
+		t.Errorf("standaloneRuns = %d, want 0 (run matches PR #1, dropped)", len(rm.standaloneRuns))
 	}
 	// PR unchanged — no extras to attach.
 	if len(rm.prs[1].CheckRuns) != 1 {
 		t.Errorf("PR #1 CheckRuns = %d, want 1", len(rm.prs[1].CheckRuns))
+	}
+	if len(rm.prs[1].ExtraCheckRuns) != 0 {
+		t.Errorf("PR #1 ExtraCheckRuns = %d, want 0 (all jobs were dupes)", len(rm.prs[1].ExtraCheckRuns))
+	}
+}
+
+// TestRepoRunsDedupStandaloneCompletedRunAllJobsDupedDropped verifies the
+// standalone-with-zero-leftover branch of dedupeAndAttachExtraJobs: a
+// completed run whose SHA matches NO tracked PR but whose only job duplicates
+// a job already present in some PR's CheckRuns is dropped from the standalone
+// section (rather than rendered as an empty header). This exercises the
+// `len(leftover) == 0 && !isActiveBranchRun(run.Status)` path, distinct from
+// the matching-PR path tested above.
+func TestRepoRunsDedupStandaloneCompletedRunAllJobsDupedDropped(t *testing.T) {
+	const prSHA = "sha-pr1"
+	const runSHA = "sha-run-other" // does NOT match the PR
+
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			1: {
+				Title: "PR",
+				CheckRuns: []ghclient.CheckRunInfo{
+					// PR carries a build job on its own SHA, so the dedup key
+					// (prSHA, "CI", "build") is in the seen set.
+					makeDedupPRCheck("CI", "build"),
+				},
+				HeadSHA: prSHA,
+			},
+		},
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	msg := RepoRunsUpdateMsg{
+		Runs: []ghclient.BranchRunData{
+			{
+				// HeadSHA differs from prSHA, so prByHeadSHA does NOT match
+				// and the run falls through to the standalone branch. A run
+				// that doesn't share a PR's SHA can never have its jobs
+				// deduped against a PR (the SHA scopes the dedup key), so the
+				// realistic trigger for this branch is a run with zero jobs
+				// at all — e.g. a trigger that produced no job steps. Test it.
+				RunID:      401,
+				HeadBranch: "other-branch",
+				HeadSHA:    runSHA,
+				Status:     "completed",
+				Conclusion: "success",
+				Event:      "push",
+				Jobs:       nil, // zero jobs -> leftover is empty, completed -> dropped
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	if len(rm.standaloneRuns) != 0 {
+		t.Errorf("standaloneRuns = %d, want 0 (completed run with zero jobs dropped)", len(rm.standaloneRuns))
+	}
+	if len(rm.prs[1].ExtraCheckRuns) != 0 {
+		t.Errorf("PR #1 ExtraCheckRuns = %d, want 0 (SHA mismatch, no attach)", len(rm.prs[1].ExtraCheckRuns))
 	}
 }
 
@@ -1209,15 +1274,21 @@ func TestRepoRunsDedupMultipleRunsSameSHA(t *testing.T) {
 	}
 }
 
-// TestJobDedupKey verifies the canonical key format and lowercasing.
+// TestJobDedupKey verifies the canonical key format (NUL-separated) and
+// lowercasing. NUL is used as the field delimiter so a workflow or job name
+// containing "|" can't collide with another key split across fields.
 func TestJobDedupKey(t *testing.T) {
+	const sep = "\x00"
 	tests := []struct {
 		headSHA, workflow, name string
 		want                    string
 	}{
-		{"abc", "CI", "Build", "abc|ci|build"},
-		{"", "", "lint", "||lint"},
-		{"DEF", "CI", "Build", "def|ci|build"},
+		{"abc", "CI", "Build", "abc" + sep + "ci" + sep + "build"},
+		{"", "", "lint", sep + sep + "lint"},
+		{"DEF", "CI", "Build", "def" + sep + "ci" + sep + "build"},
+		// A workflow name containing "|" must not collide with a name-only split.
+		{"abc", "CI|extra", "build", "abc" + sep + "ci|extra" + sep + "build"},
+		{"abc", "CI", "extra|build", "abc" + sep + "ci" + sep + "extra|build"},
 	}
 	for _, tt := range tests {
 		if got := jobDedupKey(tt.headSHA, tt.workflow, tt.name); got != tt.want {

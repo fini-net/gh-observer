@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -132,14 +131,16 @@ func (m RepoModel) fadeWindow() time.Duration {
 }
 
 // jobDedupKey returns the canonical dedup key for a check/job: lowercase
-// "headSHA|workflow|name". SHA scopes the match to the same commit, and
+// "headSHA\x00workflow\x00name". SHA scopes the match to the same commit, and
 // (workflow, name) identifies the job. Lowercasing guards against GitHub
 // returning case variants of the same workflow/job name across the GraphQL
-// and REST paths. An empty HeadSHA produces a key prefixed with "|", which
-// only matches other empty-SHA entries — so jobs missing a SHA never dedup
-// against PR checks that do have one (and vice versa).
+// and REST paths. A NUL byte separates the fields so a workflow or job name
+// containing "|" can't collide with another split across fields. An empty
+// HeadSHA produces a key prefixed with "\x00", which only matches other
+// empty-SHA entries — so jobs missing a SHA never dedup against PR checks
+// that do have one (and vice versa).
 func jobDedupKey(headSHA, workflowName, name string) string {
-	return strings.ToLower(fmt.Sprintf("%s|%s|%s", headSHA, workflowName, name))
+	return strings.ToLower(strings.Join([]string{headSHA, workflowName, name}, "\x00"))
 }
 
 // prCheckKeySet builds a set of dedup keys for the GraphQL-sourced CheckRuns
