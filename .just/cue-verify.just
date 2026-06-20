@@ -135,14 +135,36 @@ cue-sync-from-github:
 
     echo "{{BLUE}}Syncing description and topics from GitHub...{{NORMAL}}"
 
-    # Extract org and repo name from .repo.toml
-    ORG_NAME=$(cue export .repo.toml | jq -r '.urls.web_url // ""' | sed -E 's|https://github.com/([^/]+)/.*|\1|')
-    REPO_NAME=$(cue export .repo.toml | jq -r '.urls.web_url // ""' | sed -E 's|.*/([^/]+)/?$|\1|')
+    REPO_TOML_EXISTS=false
+    if [[ -f .repo.toml ]]; then
+        REPO_TOML_EXISTS=true
+    fi
 
-    if [[ -z "$ORG_NAME" || -z "$REPO_NAME" ]]; then
-        echo "{{RED}}Error: Cannot extract org/repo name from .repo.toml{{NORMAL}}"
+    # Extract org and repo name
+    if $REPO_TOML_EXISTS; then
+        ORG_NAME=$(cue export .repo.toml | jq -r '.urls.web_url // ""' | sed -E 's|https://github.com/([^/]+)/.*|\1|')
+        REPO_NAME=$(cue export .repo.toml | jq -r '.urls.web_url // ""' | sed -E 's|.*/([^/]+)/?$|\1|')
+    fi
+
+    # Fall back to git remote if .repo.toml is missing or parsing failed
+    if [[ -z "${ORG_NAME:-}" || -z "${REPO_NAME:-}" ]]; then
+        REMOTE_URL=$(git remote get-url origin 2>/dev/null || true)
+        if [[ -n "$REMOTE_URL" ]]; then
+            # Handle SSH (git@github.com:org/repo.git) and HTTPS URLs
+            REMOTE_URL="${REMOTE_URL%.git}"
+            REMOTE_URL="${REMOTE_URL#git@github.com:}"
+            REMOTE_URL="${REMOTE_URL#https://github.com/}"
+            ORG_NAME=$(echo "$REMOTE_URL" | cut -d/ -f1)
+            REPO_NAME=$(echo "$REMOTE_URL" | cut -d/ -f2)
+        fi
+    fi
+
+    if [[ -z "${ORG_NAME:-}" || -z "${REPO_NAME:-}" ]]; then
+        echo "{{RED}}Error: Cannot determine org/repo name from .repo.toml or git remote{{NORMAL}}"
         exit 1
     fi
+
+    echo "{{BLUE}}Org: $ORG_NAME, Repo: $REPO_NAME{{NORMAL}}"
 
     # Fetch metadata from GitHub API
     if ! GH_DATA=$(gh api "repos/$ORG_NAME/$REPO_NAME" 2>/dev/null); then
@@ -161,36 +183,68 @@ cue-sync-from-github:
     echo "  Description: $GH_DESC"
     echo "  Topics: [$TOPICS_TOML]"
 
-    # Create backup
-    cp .repo.toml .repo.toml.backup
-    echo "{{YELLOW}}Created backup: .repo.toml.backup{{NORMAL}}"
+    if $REPO_TOML_EXISTS; then
+        # Create backup
+        cp .repo.toml .repo.toml.backup
+        echo "{{YELLOW}}Created backup: .repo.toml.backup{{NORMAL}}"
 
-    # Update .repo.toml using awk (portable across macOS and Linux)
-    # NOTE: Assumes single-line TOML format for description and topics
-    # NOTE: Escapes double quotes but not all special chars (backslashes, backticks)
-    # Escape special characters for awk (use bash parameter expansion)
-    GH_DESC_ESCAPED="${GH_DESC//\"/\\\"}"
+        # Update .repo.toml using awk (portable across macOS and Linux)
+        GH_DESC_ESCAPED="${GH_DESC//\"/\\\"}"
 
-    # Use state-aware awk that only matches within [about] section
-    awk -v desc="$GH_DESC_ESCAPED" -v topics="[$TOPICS_TOML]" '
-        /^\[about\]/ { in_about=1 }
-        /^\[/ && !/^\[about\]/ { in_about=0 }
-        in_about && /^description = / { print "description = \"" desc "\""; next }
-        in_about && /^topics = / { print "topics = " topics; next }
-        { print }
-    ' .repo.toml > .repo.toml.tmp && mv .repo.toml.tmp .repo.toml
+        # Use state-aware awk that only matches within [about] section
+        awk -v desc="$GH_DESC_ESCAPED" -v topics="[$TOPICS_TOML]" '
+            /^\[about\]/ { in_about=1 }
+            /^\[/ && !/^\[about\]/ { in_about=0 }
+            in_about && /^description = / { print "description = \"" desc "\""; next }
+            in_about && /^topics = / { print "topics = " topics; next }
+            { print }
+        ' .repo.toml > .repo.toml.tmp && mv .repo.toml.tmp .repo.toml
 
-    # Validate the TOML is still valid after modification
-    echo "{{BLUE}}Validating modified TOML...{{NORMAL}}"
-    if cue vet .repo.toml docs/repo-toml.cue; then
-        # Validation passed - safe to remove backup
-        rm .repo.toml.backup
-        echo "{{GREEN}}Successfully synced from GitHub to .repo.toml{{NORMAL}}"
+        # Validate the TOML is still valid after modification
+        echo "{{BLUE}}Validating modified TOML...{{NORMAL}}"
+        if cue vet .repo.toml docs/repo-toml.cue; then
+            # Validation passed - safe to remove backup
+            rm .repo.toml.backup
+            echo "{{GREEN}}Successfully synced from GitHub to .repo.toml{{NORMAL}}"
+        else
+            # Validation failed - restore from backup
+            mv .repo.toml.backup .repo.toml
+            echo "{{RED}}Sync failed - TOML validation error. Restored from backup.{{NORMAL}}"
+            exit 1
+        fi
     else
-        # Validation failed - restore from backup
-        mv .repo.toml.backup .repo.toml
-        echo "{{RED}}Sync failed - TOML validation error. Restored from backup.{{NORMAL}}"
-        exit 1
+        echo "{{YELLOW}}.repo.toml not found - creating from GitHub metadata{{NORMAL}}"
+
+        GIT_SSH="git@github.com:$ORG_NAME/$REPO_NAME.git"
+        WEB_URL="https://github.com/$ORG_NAME/$REPO_NAME"
+
+        printf '%s\n' \
+            "# .repo.toml" \
+            "" \
+            "[about]" \
+            "description = \"$GH_DESC\"" \
+            "topics = [$TOPICS_TOML]" \
+            "" \
+            "[urls]" \
+            "git_ssh = \"$GIT_SSH\"" \
+            "web_url = \"$WEB_URL\"" \
+            "" \
+            "[flags]" \
+            "claude = false" \
+            "claude-review = false" \
+            "copilot-review = false" \
+            "standard-release = true" \
+            > .repo.toml
+
+        # Validate the new TOML
+        echo "{{BLUE}}Validating new TOML...{{NORMAL}}"
+        if cue vet .repo.toml docs/repo-toml.cue; then
+            echo "{{GREEN}}Created .repo.toml from GitHub metadata{{NORMAL}}"
+        else
+            rm .repo.toml
+            echo "{{RED}}Failed to create valid .repo.toml{{NORMAL}}"
+            exit 1
+        fi
     fi
 
     # Run full verification to confirm sync worked
