@@ -140,12 +140,19 @@ func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, 
 		if len(visible) == 0 {
 			continue
 		}
-		activePRs[prNum] = PRViewData{
+		view := PRViewData{
 			Title:          prData.Title,
 			CheckRuns:      visible,
 			HeadCommitTime: prData.HeadCommitTime,
 			HeadSHA:        prData.HeadSHA,
 		}
+		// Preserve extras carried over from the last runs-poll so they
+		// don't flicker out between runs ticks. dedupeAndAttachExtraJobs
+		// will refresh them on the next RepoRunsUpdateMsg.
+		if prev, ok := m.prs[prNum]; ok {
+			view.ExtraCheckRuns = prev.ExtraCheckRuns
+		}
+		activePRs[prNum] = view
 	}
 
 	m.prs = activePRs

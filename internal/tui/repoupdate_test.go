@@ -816,8 +816,8 @@ func TestRepoRunsDedupAgainstPRs(t *testing.T) {
 				Status:     "in_progress",
 				Event:      "push",
 				Jobs: []ghclient.CheckRunInfo{
-					makeDedupBranchJob("CI", "build"), // duplicate -> dropped
-					makeDedupBranchJob("CI", "lint"),  // duplicate -> dropped
+					makeDedupBranchJob("CI", "build"),             // duplicate -> dropped
+					makeDedupBranchJob("CI", "lint"),              // duplicate -> dropped
 					makeDedupBranchJob("Copilot", "coding-agent"), // extra -> attached to PR
 				},
 			},
@@ -838,12 +838,20 @@ func TestRepoRunsDedupAgainstPRs(t *testing.T) {
 	}
 
 	// PR #7 should now carry the Copilot extra in addition to its own checks.
+	// Extras land in ExtraCheckRuns (separate from CheckRuns) so the next
+	// PR-checks poll can replace CheckRuns without wiping the extras.
 	pr := rm.prs[7]
-	if len(pr.CheckRuns) != 3 {
-		t.Fatalf("PR #7 CheckRuns = %d, want 3 (2 original + 1 Copilot extra)", len(pr.CheckRuns))
+	if len(pr.CheckRuns) != 2 {
+		t.Fatalf("PR #7 CheckRuns = %d, want 2 (original GraphQL checks untouched)", len(pr.CheckRuns))
+	}
+	if len(pr.ExtraCheckRuns) != 1 {
+		t.Fatalf("PR #7 ExtraCheckRuns = %d, want 1 (Copilot extra attached here)", len(pr.ExtraCheckRuns))
 	}
 	names := map[string]bool{}
 	for _, cr := range pr.CheckRuns {
+		names[cr.WorkflowName+"/"+cr.Name] = true
+	}
+	for _, cr := range pr.ExtraCheckRuns {
 		names[cr.WorkflowName+"/"+cr.Name] = true
 	}
 	if !names["Copilot/coding-agent"] {
@@ -1047,8 +1055,11 @@ func TestRepoRunsDedupActiveRunMatchesPRKeepsExtrasAttached(t *testing.T) {
 	if len(rm.standaloneRuns) != 0 {
 		t.Errorf("standaloneRuns = %d, want 0 (run's commit matches PR #5)", len(rm.standaloneRuns))
 	}
-	if len(rm.prs[5].CheckRuns) != 2 {
-		t.Fatalf("PR #5 CheckRuns = %d, want 2 (original + Copilot extra)", len(rm.prs[5].CheckRuns))
+	if len(rm.prs[5].CheckRuns) != 1 {
+		t.Fatalf("PR #5 CheckRuns = %d, want 1 (original untouched)", len(rm.prs[5].CheckRuns))
+	}
+	if len(rm.prs[5].ExtraCheckRuns) != 1 {
+		t.Errorf("PR #5 ExtraCheckRuns = %d, want 1 (Copilot extra)", len(rm.prs[5].ExtraCheckRuns))
 	}
 }
 
@@ -1078,7 +1089,7 @@ func TestRepoRunsDedupMultipleRunsSameSHA(t *testing.T) {
 				HeadSHA: sharedSHA,
 				Status:  "in_progress",
 				Jobs: []ghclient.CheckRunInfo{
-					makeDedupBranchJob("CI", "build"),       // duplicate
+					makeDedupBranchJob("CI", "build"),      // duplicate
 					makeDedupBranchJob("Copilot", "agent"), // extra
 				},
 			},
@@ -1087,7 +1098,7 @@ func TestRepoRunsDedupMultipleRunsSameSHA(t *testing.T) {
 				HeadSHA: sharedSHA,
 				Status:  "in_progress",
 				Jobs: []ghclient.CheckRunInfo{
-					makeDedupBranchJob("CI", "build"),       // duplicate
+					makeDedupBranchJob("CI", "build"),      // duplicate
 					makeDedupBranchJob("Copilot", "agent"), // same extra — should NOT attach twice
 				},
 			},
@@ -1101,8 +1112,11 @@ func TestRepoRunsDedupMultipleRunsSameSHA(t *testing.T) {
 	if len(rm.standaloneRuns) != 0 {
 		t.Errorf("standaloneRuns = %d, want 0", len(rm.standaloneRuns))
 	}
-	if len(rm.prs[9].CheckRuns) != 2 {
-		t.Fatalf("PR #9 CheckRuns = %d, want 2 (original + one Copilot extra, not duplicated)", len(rm.prs[9].CheckRuns))
+	if len(rm.prs[9].CheckRuns) != 1 {
+		t.Fatalf("PR #9 CheckRuns = %d, want 1 (original untouched)", len(rm.prs[9].CheckRuns))
+	}
+	if len(rm.prs[9].ExtraCheckRuns) != 1 {
+		t.Fatalf("PR #9 ExtraCheckRuns = %d, want 1 (one Copilot extra, not duplicated)", len(rm.prs[9].ExtraCheckRuns))
 	}
 }
 
@@ -1110,7 +1124,7 @@ func TestRepoRunsDedupMultipleRunsSameSHA(t *testing.T) {
 func TestJobDedupKey(t *testing.T) {
 	tests := []struct {
 		headSHA, workflow, name string
-		want                     string
+		want                    string
 	}{
 		{"abc", "CI", "Build", "abc|ci|build"},
 		{"", "", "lint", "||lint"},
@@ -1139,5 +1153,108 @@ func TestPRByHeadSHA(t *testing.T) {
 	}
 	if got := m.prByHeadSHA(""); got != 0 {
 		t.Errorf("prByHeadSHA(empty) = %d, want 0 (empty SHA never matches)", got)
+	}
+}
+
+// TestRepoChecksUpdatePreservesExtras verifies the flicker fix: a
+// RepoChecksUpdateMsg replaces m.prs wholesale, but extras attached by the
+// last runs-poll must survive so Copilot-style jobs don't vanish between runs
+// ticks. The PR-checks poll must carry forward ExtraCheckRuns from the prior
+// PRViewData for the same PR number.
+func TestRepoChecksUpdatePreservesExtras(t *testing.T) {
+	const sharedSHA = "sha-preserve"
+	copilot := makeDedupBranchJob("Copilot", "coding-agent")
+
+	// Seed: PR #7 with GraphQL checks and a previously-attached Copilot extra.
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			7: {
+				Title:          "Add feature",
+				CheckRuns:      []ghclient.CheckRunInfo{makeDedupPRCheck("CI", "build")},
+				ExtraCheckRuns: []ghclient.CheckRunInfo{copilot},
+				HeadSHA:        sharedSHA,
+			},
+		},
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	// A new PR-checks poll arrives with the same PR (still active) but the
+	// fresh CheckRuns slice does not include Copilot (GraphQL misses it).
+	msg := RepoChecksUpdateMsg{
+		PRData: map[int]ghclient.PRCheckData{
+			7: {
+				Number: 7,
+				Title:  "Add feature",
+				CheckRuns: []ghclient.CheckRunInfo{
+					makeDedupPRCheck("CI", "build"),
+					makeDedupPRCheck("CI", "lint"),
+				},
+				HeadSHA: sharedSHA,
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	pr := rm.prs[7]
+	if len(pr.CheckRuns) != 2 {
+		t.Errorf("CheckRuns = %d, want 2 (fresh GraphQL checks)", len(pr.CheckRuns))
+	}
+	// The core assertion: the Copilot extra must survive the PR-checks poll.
+	if len(pr.ExtraCheckRuns) != 1 {
+		t.Fatalf("ExtraCheckRuns = %d, want 1 (Copilot extra must survive PR-checks poll)", len(pr.ExtraCheckRuns))
+	}
+	if pr.ExtraCheckRuns[0].Name != "coding-agent" {
+		t.Errorf("ExtraCheckRuns[0].Name = %q, want %q", pr.ExtraCheckRuns[0].Name, "coding-agent")
+	}
+}
+
+// TestRepoChecksUpdateDropsExtrasWhenPRFades verifies that when a PR falls
+// out of the active set (all checks faded), its extras are dropped too — we
+// don't want orphaned extras lingering for a PR that no longer renders.
+func TestRepoChecksUpdateDropsExtrasWhenPRFades(t *testing.T) {
+	now := time.Now()
+	fadedCompletedAt := now.Add(-45 * time.Minute)
+	fadeSuccess := 15 * time.Minute
+	fadeFailure := 30 * time.Minute
+
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			7: {
+				Title:          "Add feature",
+				CheckRuns:      []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success", Name: "build", CompletedAt: &fadedCompletedAt}},
+				ExtraCheckRuns: []ghclient.CheckRunInfo{makeDedupBranchJob("Copilot", "coding-agent")},
+				HeadSHA:        "sha-fade",
+			},
+		},
+		fadeSuccess:   fadeSuccess,
+		fadeFailure:   fadeFailure,
+		fetchReceived: true,
+	}
+
+	// PR-checks poll reports only the already-faded build check -> PR drops.
+	msg := RepoChecksUpdateMsg{
+		PRData: map[int]ghclient.PRCheckData{
+			7: {
+				Number: 7,
+				Title:  "Add feature",
+				CheckRuns: []ghclient.CheckRunInfo{
+					{Status: "completed", Conclusion: "success", Name: "build", CompletedAt: &fadedCompletedAt},
+				},
+				HeadSHA: "sha-fade",
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	if _, ok := rm.prs[7]; ok {
+		t.Error("PR #7 should have been dropped (all checks faded)")
 	}
 }

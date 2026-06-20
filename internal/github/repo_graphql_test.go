@@ -100,8 +100,8 @@ func TestRepoContextNodesToCheckRuns(t *testing.T) {
 		wantAnnotations   int // all entries should have this many annotations (always 0 for repo mode)
 	}{
 		{
-			name:  "empty nodes returns nil",
-			nodes: []repoContextNode{},
+			name:    "empty nodes returns nil",
+			nodes:   []repoContextNode{},
 			wantLen: 0,
 		},
 		{
@@ -270,9 +270,9 @@ func makeRepoPRQuery(prNumber int, title, headSHA, checkName, workflowName strin
 		Commits struct {
 			Nodes []struct {
 				Commit struct {
-					PushedDate    githubv4.DateTime `graphql:"pushedDate"`
-					CommittedDate githubv4.DateTime `graphql:"committedDate"`
-					OID           githubv4.String  `graphql:"oid"`
+					PushedDate        githubv4.DateTime `graphql:"pushedDate"`
+					CommittedDate     githubv4.DateTime `graphql:"committedDate"`
+					OID               githubv4.String   `graphql:"oid"`
 					StatusCheckRollup struct {
 						Contexts struct {
 							Nodes    []repoContextNode
@@ -291,9 +291,9 @@ func makeRepoPRQuery(prNumber int, title, headSHA, checkName, workflowName strin
 	}
 	pr.Commits.Nodes = append(pr.Commits.Nodes, struct {
 		Commit struct {
-			PushedDate    githubv4.DateTime `graphql:"pushedDate"`
-			CommittedDate githubv4.DateTime `graphql:"committedDate"`
-			OID           githubv4.String  `graphql:"oid"`
+			PushedDate        githubv4.DateTime `graphql:"pushedDate"`
+			CommittedDate     githubv4.DateTime `graphql:"committedDate"`
+			OID               githubv4.String   `graphql:"oid"`
 			StatusCheckRollup struct {
 				Contexts struct {
 					Nodes    []repoContextNode
@@ -306,9 +306,9 @@ func makeRepoPRQuery(prNumber int, title, headSHA, checkName, workflowName strin
 		}
 	}{
 		Commit: struct {
-			PushedDate    githubv4.DateTime `graphql:"pushedDate"`
-			CommittedDate githubv4.DateTime `graphql:"committedDate"`
-			OID           githubv4.String  `graphql:"oid"`
+			PushedDate        githubv4.DateTime `graphql:"pushedDate"`
+			CommittedDate     githubv4.DateTime `graphql:"committedDate"`
+			OID               githubv4.String   `graphql:"oid"`
 			StatusCheckRollup struct {
 				Contexts struct {
 					Nodes    []repoContextNode

@@ -14,9 +14,17 @@ import (
 // PRViewData is the per-PR view state held by RepoModel after fade-out
 // filtering. HeadSHA carries the PR head commit OID so the runs handler can
 // match standalone runs to a PR and dedupe/attach their jobs.
+//
+// CheckRuns holds the GraphQL-sourced checks and is replaced wholesale on
+// every RepoChecksUpdateMsg. ExtraCheckRuns holds "extra" jobs (e.g. Copilot)
+// that the PR GraphQL query misses but the REST branch-runs path surfaces;
+// it is populated by dedupeAndAttachExtraJobs and preserved across PR-checks
+// polls so extras don't flicker out between runs ticks. The view layer merges
+// the two for rendering.
 type PRViewData struct {
 	Title          string
 	CheckRuns      []ghclient.CheckRunInfo
+	ExtraCheckRuns []ghclient.CheckRunInfo
 	HeadCommitTime time.Time
 	HeadSHA        string
 }
@@ -136,12 +144,16 @@ func jobDedupKey(headSHA, workflowName, name string) string {
 }
 
 // prJobKeySet builds a set of dedup keys for every check run across all
-// currently-tracked PRs. Used to suppress duplicate jobs arriving via the
-// standalone branch-runs path (see dedupeAndAttachExtraJobs).
+// currently-tracked PRs, including both GraphQL-sourced CheckRuns and the
+// REST-sourced ExtraCheckRuns. Used to suppress duplicate jobs arriving via
+// the standalone branch-runs path (see dedupeAndAttachExtraJobs).
 func (m RepoModel) prJobKeySet() map[string]bool {
 	seen := make(map[string]bool)
 	for _, pr := range m.prs {
 		for _, cr := range pr.CheckRuns {
+			seen[jobDedupKey(pr.HeadSHA, cr.WorkflowName, cr.Name)] = true
+		}
+		for _, cr := range pr.ExtraCheckRuns {
 			seen[jobDedupKey(pr.HeadSHA, cr.WorkflowName, cr.Name)] = true
 		}
 	}
@@ -163,10 +175,13 @@ func (m RepoModel) prByHeadSHA(sha string) int {
 // the PR section to remove redundant jobs (issue #331). For each visible run it:
 //
 //  1. Drops any job whose (HeadSHA, WorkflowName, Name) already appears in a
-//     tracked PR's CheckRuns — the PR section is authoritative for those.
+//     tracked PR's CheckRuns or ExtraCheckRuns — the PR section is
+//     authoritative for those.
 //  2. If the run's HeadSHA matches a tracked PR, attaches the leftover ("extra")
-//     jobs (e.g. Copilot) under that PR's CheckRuns so they render in the PR
-//     group rather than a separate branch section.
+//     jobs (e.g. Copilot) under that PR's ExtraCheckRuns so they render in the
+//     PR group rather than a separate branch section. Extras are stored
+//     separately from CheckRuns so the next PR-checks poll (which replaces
+//     CheckRuns wholesale) does not wipe them; the view merges the two slices.
 //  3. If the run's HeadSHA matches no PR (truly standalone commit), keeps the
 //     run (with all its jobs) in the returned slice for the branch section.
 //
@@ -183,9 +198,10 @@ func (m *RepoModel) dedupeAndAttachExtraJobs(visible []ghclient.BranchRunData) [
 	}
 
 	seen := m.prJobKeySet()
-	// Attach extras to a copy of the matching PR's CheckRuns slice so we don't
-	// alias the map value's backing array across appends. Collect attachments
-	// and apply after the loop to keep the dedup key set stable during iteration.
+	// Collect attachments and apply after the loop to keep the dedup key set
+	// stable during iteration. Extras append into ExtraCheckRuns (a separate
+	// slice from CheckRuns) so the next PR-checks poll can replace CheckRuns
+	// without wiping the extras we attach here.
 	type attachment struct {
 		prNum int
 		jobs  []ghclient.CheckRunInfo
@@ -229,7 +245,7 @@ func (m *RepoModel) dedupeAndAttachExtraJobs(visible []ghclient.BranchRunData) [
 
 	for _, a := range attachments {
 		pr := m.prs[a.prNum]
-		pr.CheckRuns = append(pr.CheckRuns, a.jobs...)
+		pr.ExtraCheckRuns = append(pr.ExtraCheckRuns, a.jobs...)
 		m.prs[a.prNum] = pr
 	}
 

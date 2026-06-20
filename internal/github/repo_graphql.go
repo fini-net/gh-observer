@@ -81,10 +81,10 @@ type repoPRQuery struct {
 				Title   string
 				Commits struct {
 					Nodes []struct {
-					Commit struct {
-						PushedDate    githubv4.DateTime `graphql:"pushedDate"`
-						CommittedDate githubv4.DateTime `graphql:"committedDate"`
-						OID           githubv4.String  `graphql:"oid"`
+						Commit struct {
+							PushedDate        githubv4.DateTime `graphql:"pushedDate"`
+							CommittedDate     githubv4.DateTime `graphql:"committedDate"`
+							OID               githubv4.String   `graphql:"oid"`
 							StatusCheckRollup struct {
 								Contexts struct {
 									Nodes    []repoContextNode
