@@ -764,3 +764,679 @@ func TestTruncateFetchError(t *testing.T) {
 		})
 	}
 }
+
+// makeDedupPRCheck builds a CheckRunInfo with the given workflow and job name,
+// status in_progress so fade-out keeps it visible without a CompletedAt.
+func makeDedupPRCheck(workflow, name string) ghclient.CheckRunInfo {
+	return ghclient.CheckRunInfo{
+		Name:         name,
+		WorkflowName: workflow,
+		Status:       "in_progress",
+	}
+}
+
+// makeDedupBranchJob builds a CheckRunInfo suitable for a branch-run Jobs
+// slice. Identical to makeDedupPRCheck; aliased for test readability.
+var makeDedupBranchJob = makeDedupPRCheck
+
+// TestRepoRunsDedupAgainstPRs verifies issue #331: a standalone branch run whose
+// HeadSHA matches a tracked PR drops jobs that already appear in the PR's
+// CheckRuns, keeps "extra" jobs the PR GraphQL query missed (e.g. Copilot),
+// attaches those extras under the matching PR, and does NOT leave the run in
+// the standalone section.
+func TestRepoRunsDedupAgainstPRs(t *testing.T) {
+	const sharedSHA = "abc123"
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			7: {
+				Title: "Add feature",
+				CheckRuns: []ghclient.CheckRunInfo{
+					makeDedupPRCheck("CI", "build"),
+					makeDedupPRCheck("CI", "lint"),
+				},
+				HeadSHA: sharedSHA,
+			},
+		},
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	msg := RepoRunsUpdateMsg{
+		Runs: []ghclient.BranchRunData{
+			{
+				RunID:      100,
+				HeadBranch: "feature-branch",
+				HeadSHA:    sharedSHA,
+				Status:     "in_progress",
+				Event:      "push",
+				Jobs: []ghclient.CheckRunInfo{
+					makeDedupBranchJob("CI", "build"),             // duplicate -> dropped
+					makeDedupBranchJob("CI", "lint"),              // duplicate -> dropped
+					makeDedupBranchJob("Copilot", "coding-agent"), // extra -> attached to PR
+				},
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	// The run shares a commit with PR #7 and should be removed from the
+	// standalone section entirely (its extras attach under the PR).
+	if len(rm.standaloneRuns) != 0 {
+		t.Errorf("standaloneRuns = %d, want 0 (run's commit matches PR #7)", len(rm.standaloneRuns))
+		for _, r := range rm.standaloneRuns {
+			t.Logf("  leftover standalone: RunID=%d HeadSHA=%q jobs=%d", r.RunID, r.HeadSHA, len(r.Jobs))
+		}
+	}
+
+	// PR #7 should now carry the Copilot extra in addition to its own checks.
+	// Extras land in ExtraCheckRuns (separate from CheckRuns) so the next
+	// PR-checks poll can replace CheckRuns without wiping the extras.
+	pr := rm.prs[7]
+	if len(pr.CheckRuns) != 2 {
+		t.Fatalf("PR #7 CheckRuns = %d, want 2 (original GraphQL checks untouched)", len(pr.CheckRuns))
+	}
+	if len(pr.ExtraCheckRuns) != 1 {
+		t.Fatalf("PR #7 ExtraCheckRuns = %d, want 1 (Copilot extra attached here)", len(pr.ExtraCheckRuns))
+	}
+	names := map[string]bool{}
+	for _, cr := range pr.CheckRuns {
+		names[cr.WorkflowName+"/"+cr.Name] = true
+	}
+	for _, cr := range pr.ExtraCheckRuns {
+		names[cr.WorkflowName+"/"+cr.Name] = true
+	}
+	if !names["Copilot/coding-agent"] {
+		t.Error("PR #7 missing attached Copilot/coding-agent extra", names)
+	}
+	if !names["CI/build"] {
+		t.Error("PR #7 missing original CI/build check")
+	}
+	if !names["CI/lint"] {
+		t.Error("PR #7 missing original CI/lint check")
+	}
+}
+
+// TestRepoRunsDedupStandaloneNoMatchingPR verifies that a run whose HeadSHA
+// matches no tracked PR stays in the standalone section with all its jobs.
+func TestRepoRunsDedupStandaloneNoMatchingPR(t *testing.T) {
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			7: {
+				Title: "Add feature",
+				CheckRuns: []ghclient.CheckRunInfo{
+					makeDedupPRCheck("CI", "build"),
+				},
+				HeadSHA: "pr-sha-aaa",
+			},
+		},
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	msg := RepoRunsUpdateMsg{
+		Runs: []ghclient.BranchRunData{
+			{
+				RunID:      200,
+				HeadBranch: "main",
+				HeadSHA:    "standalone-sha-bbb", // different commit
+				Status:     "in_progress",
+				Event:      "schedule",
+				Jobs: []ghclient.CheckRunInfo{
+					makeDedupBranchJob("Nightly", "test"),
+					makeDedupBranchJob("Nightly", "deploy"),
+				},
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	if len(rm.standaloneRuns) != 1 {
+		t.Fatalf("standaloneRuns = %d, want 1 (no matching PR)", len(rm.standaloneRuns))
+	}
+	run := rm.standaloneRuns[0]
+	if run.RunID != 200 {
+		t.Errorf("standaloneRuns[0].RunID = %d, want 200", run.RunID)
+	}
+	if len(run.Jobs) != 2 {
+		t.Errorf("standaloneRuns[0].Jobs = %d, want 2 (no dedup against unmatched PR)", len(run.Jobs))
+	}
+	// PR #7 must be unchanged: no extras attached.
+	if len(rm.prs[7].CheckRuns) != 1 {
+		t.Errorf("PR #7 CheckRuns = %d, want 1 (unchanged)", len(rm.prs[7].CheckRuns))
+	}
+}
+
+// TestRepoRunsDedupNoPRsSkipsDedup verifies that when m.prs is empty (PR data
+// not yet arrived), dedupeAndAttachExtraJobs is a no-op and all runs stay
+// standalone. This covers the ordering case where RepoRunsUpdateMsg arrives
+// before RepoChecksUpdateMsg.
+func TestRepoRunsDedupNoPRsSkipsDedup(t *testing.T) {
+	m := RepoModel{
+		prs:           make(map[int]PRViewData),
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	msg := RepoRunsUpdateMsg{
+		Runs: []ghclient.BranchRunData{
+			{
+				RunID:      300,
+				HeadBranch: "main",
+				HeadSHA:    "sha-ccc",
+				Status:     "in_progress",
+				Event:      "push",
+				Jobs: []ghclient.CheckRunInfo{
+					makeDedupBranchJob("CI", "build"),
+				},
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	if len(rm.standaloneRuns) != 1 {
+		t.Fatalf("standaloneRuns = %d, want 1 (no PRs to dedup against)", len(rm.standaloneRuns))
+	}
+	if len(rm.standaloneRuns[0].Jobs) != 1 {
+		t.Errorf("Jobs = %d, want 1 (unchanged)", len(rm.standaloneRuns[0].Jobs))
+	}
+}
+
+// TestRepoRunsDedupMatchingPRRunAllJobsDuped verifies that a run whose commit
+// matches a tracked PR is dropped from the standalone section entirely — even
+// when all its jobs are duplicates (so no extras attach) and the run is
+// completed. The run is dropped via the prByHeadSHA branch, NOT the standalone
+// "zero leftover" branch; the dedicated test below covers that path.
+func TestRepoRunsDedupMatchingPRRunAllJobsDuped(t *testing.T) {
+	const sharedSHA = "sha-ddd"
+	now := time.Now()
+	recentStart := now.Add(-5 * time.Minute)
+
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			1: {
+				Title: "PR",
+				CheckRuns: []ghclient.CheckRunInfo{
+					makeDedupPRCheck("CI", "build"),
+				},
+				HeadSHA: sharedSHA,
+			},
+		},
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	msg := RepoRunsUpdateMsg{
+		Runs: []ghclient.BranchRunData{
+			{
+				RunID:        400,
+				HeadBranch:   "feature",
+				HeadSHA:      sharedSHA,
+				Status:       "completed",
+				Conclusion:   "success",
+				Event:        "push",
+				RunStartedAt: recentStart,
+				Jobs: []ghclient.CheckRunInfo{
+					makeDedupBranchJob("CI", "build"), // duplicate -> nothing attaches
+				},
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	if len(rm.standaloneRuns) != 0 {
+		t.Errorf("standaloneRuns = %d, want 0 (run matches PR #1, dropped)", len(rm.standaloneRuns))
+	}
+	// PR unchanged — no extras to attach.
+	if len(rm.prs[1].CheckRuns) != 1 {
+		t.Errorf("PR #1 CheckRuns = %d, want 1", len(rm.prs[1].CheckRuns))
+	}
+	if len(rm.prs[1].ExtraCheckRuns) != 0 {
+		t.Errorf("PR #1 ExtraCheckRuns = %d, want 0 (all jobs were dupes)", len(rm.prs[1].ExtraCheckRuns))
+	}
+}
+
+// TestRepoRunsDedupStandaloneCompletedRunAllJobsDupedDropped verifies the
+// standalone-with-zero-leftover branch of dedupeAndAttachExtraJobs: a
+// completed run whose SHA matches NO tracked PR but whose only job duplicates
+// a job already present in some PR's CheckRuns is dropped from the standalone
+// section (rather than rendered as an empty header). This exercises the
+// `len(leftover) == 0 && !isActiveBranchRun(run.Status)` path, distinct from
+// the matching-PR path tested above.
+func TestRepoRunsDedupStandaloneCompletedRunAllJobsDupedDropped(t *testing.T) {
+	const prSHA = "sha-pr1"
+	const runSHA = "sha-run-other" // does NOT match the PR
+
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			1: {
+				Title: "PR",
+				CheckRuns: []ghclient.CheckRunInfo{
+					// PR carries a build job on its own SHA, so the dedup key
+					// (prSHA, "CI", "build") is in the seen set.
+					makeDedupPRCheck("CI", "build"),
+				},
+				HeadSHA: prSHA,
+			},
+		},
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	msg := RepoRunsUpdateMsg{
+		Runs: []ghclient.BranchRunData{
+			{
+				// HeadSHA differs from prSHA, so prByHeadSHA does NOT match
+				// and the run falls through to the standalone branch. A run
+				// that doesn't share a PR's SHA can never have its jobs
+				// deduped against a PR (the SHA scopes the dedup key), so the
+				// realistic trigger for this branch is a run with zero jobs
+				// at all — e.g. a trigger that produced no job steps. Test it.
+				RunID:      401,
+				HeadBranch: "other-branch",
+				HeadSHA:    runSHA,
+				Status:     "completed",
+				Conclusion: "success",
+				Event:      "push",
+				Jobs:       nil, // zero jobs -> leftover is empty, completed -> dropped
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	if len(rm.standaloneRuns) != 0 {
+		t.Errorf("standaloneRuns = %d, want 0 (completed run with zero jobs dropped)", len(rm.standaloneRuns))
+	}
+	if len(rm.prs[1].ExtraCheckRuns) != 0 {
+		t.Errorf("PR #1 ExtraCheckRuns = %d, want 0 (SHA mismatch, no attach)", len(rm.prs[1].ExtraCheckRuns))
+	}
+}
+
+// TestRepoRunsDedupActiveRunMatchesPRKeepsExtrasAttached verifies that an
+// in_progress run whose commit matches a PR is still removed from the
+// standalone section (per issue: extras surface under the PR, not a branch
+// group), but any non-duplicate jobs it carries attach to the PR.
+func TestRepoRunsDedupActiveRunMatchesPRKeepsExtrasAttached(t *testing.T) {
+	const sharedSHA = "sha-eee"
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			5: {
+				Title: "PR",
+				CheckRuns: []ghclient.CheckRunInfo{
+					makeDedupPRCheck("CI", "build"),
+				},
+				HeadSHA: sharedSHA,
+			},
+		},
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	msg := RepoRunsUpdateMsg{
+		Runs: []ghclient.BranchRunData{
+			{
+				RunID:      500,
+				HeadBranch: "feature",
+				HeadSHA:    sharedSHA,
+				Status:     "in_progress",
+				Event:      "push",
+				Jobs: []ghclient.CheckRunInfo{
+					makeDedupBranchJob("CI", "build"), // duplicate
+					makeDedupBranchJob("Copilot", "coding-agent"),
+				},
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	if len(rm.standaloneRuns) != 0 {
+		t.Errorf("standaloneRuns = %d, want 0 (run's commit matches PR #5)", len(rm.standaloneRuns))
+	}
+	if len(rm.prs[5].CheckRuns) != 1 {
+		t.Fatalf("PR #5 CheckRuns = %d, want 1 (original untouched)", len(rm.prs[5].CheckRuns))
+	}
+	if len(rm.prs[5].ExtraCheckRuns) != 1 {
+		t.Errorf("PR #5 ExtraCheckRuns = %d, want 1 (Copilot extra)", len(rm.prs[5].ExtraCheckRuns))
+	}
+}
+
+// TestRepoRunsDedupDropsStaleExtras verifies that ExtraCheckRuns is rebuilt
+// (not appended to) every runs tick: when a Copilot run that previously
+// attached an extra fades out of the visible window, the next runs poll —
+// which no longer reports it — must drop the stale extra rather than letting
+// it linger under the PR indefinitely.
+func TestRepoRunsDedupDropsStaleExtras(t *testing.T) {
+	const sharedSHA = "sha-stale"
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			5: {
+				Title: "PR",
+				CheckRuns: []ghclient.CheckRunInfo{
+					makeDedupPRCheck("CI", "build"),
+				},
+				// Previously-attached extra from a Copilot run that has now
+				// faded out of the visible runs window.
+				ExtraCheckRuns: []ghclient.CheckRunInfo{makeDedupBranchJob("Copilot", "coding-agent")},
+				HeadSHA:        sharedSHA,
+			},
+		},
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	// New runs poll reports no runs at all for this SHA — the Copilot run
+	// has faded. The stale extra must be dropped, not carried forward.
+	msg := RepoRunsUpdateMsg{
+		Runs:             []ghclient.BranchRunData{},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	if len(rm.prs[5].CheckRuns) != 1 {
+		t.Fatalf("PR #5 CheckRuns = %d, want 1 (untouched)", len(rm.prs[5].CheckRuns))
+	}
+	if len(rm.prs[5].ExtraCheckRuns) != 0 {
+		t.Errorf("PR #5 ExtraCheckRuns = %d, want 0 (stale Copilot extra must be dropped when its run fades)",
+			len(rm.prs[5].ExtraCheckRuns))
+	}
+}
+
+// TestRepoRunsDedupReattachesStillVisibleExtra verifies that when an extra's
+// run is still in the visible window, the extra is re-attached on the next
+// tick (rebuilt, not lost) — i.e. the rebuild doesn't drop extras whose run
+// is still being reported.
+func TestRepoRunsDedupReattachesStillVisibleExtra(t *testing.T) {
+	const sharedSHA = "sha-reattach"
+	copilot := makeDedupBranchJob("Copilot", "coding-agent")
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			5: {
+				Title: "PR",
+				CheckRuns: []ghclient.CheckRunInfo{
+					makeDedupPRCheck("CI", "build"),
+				},
+				ExtraCheckRuns: []ghclient.CheckRunInfo{copilot},
+				HeadSHA:        sharedSHA,
+			},
+		},
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	msg := RepoRunsUpdateMsg{
+		Runs: []ghclient.BranchRunData{
+			{
+				RunID:   700,
+				HeadSHA: sharedSHA,
+				Status:  "in_progress",
+				Jobs: []ghclient.CheckRunInfo{
+					makeDedupBranchJob("CI", "build"), // duplicate
+					copilot, // still present, should re-attach
+				},
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	if len(rm.prs[5].ExtraCheckRuns) != 1 {
+		t.Fatalf("PR #5 ExtraCheckRuns = %d, want 1 (still-visible extra must re-attach)",
+			len(rm.prs[5].ExtraCheckRuns))
+	}
+	if rm.prs[5].ExtraCheckRuns[0].Name != "coding-agent" {
+		t.Errorf("ExtraCheckRuns[0].Name = %q, want %q", rm.prs[5].ExtraCheckRuns[0].Name, "coding-agent")
+	}
+}
+
+// TestRepoRunsDedupMultipleRunsSameSHA verifies that when two runs share a PR's
+// head SHA, both are deduped/attached and the same extra job isn't attached twice.
+func TestRepoRunsDedupMultipleRunsSameSHA(t *testing.T) {
+	const sharedSHA = "sha-fff"
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			9: {
+				Title: "PR",
+				CheckRuns: []ghclient.CheckRunInfo{
+					makeDedupPRCheck("CI", "build"),
+				},
+				HeadSHA: sharedSHA,
+			},
+		},
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	msg := RepoRunsUpdateMsg{
+		Runs: []ghclient.BranchRunData{
+			{
+				RunID:   600,
+				HeadSHA: sharedSHA,
+				Status:  "in_progress",
+				Jobs: []ghclient.CheckRunInfo{
+					makeDedupBranchJob("CI", "build"),      // duplicate
+					makeDedupBranchJob("Copilot", "agent"), // extra
+				},
+			},
+			{
+				RunID:   601,
+				HeadSHA: sharedSHA,
+				Status:  "in_progress",
+				Jobs: []ghclient.CheckRunInfo{
+					makeDedupBranchJob("CI", "build"),      // duplicate
+					makeDedupBranchJob("Copilot", "agent"), // same extra — should NOT attach twice
+				},
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	if len(rm.standaloneRuns) != 0 {
+		t.Errorf("standaloneRuns = %d, want 0", len(rm.standaloneRuns))
+	}
+	if len(rm.prs[9].CheckRuns) != 1 {
+		t.Fatalf("PR #9 CheckRuns = %d, want 1 (original untouched)", len(rm.prs[9].CheckRuns))
+	}
+	if len(rm.prs[9].ExtraCheckRuns) != 1 {
+		t.Fatalf("PR #9 ExtraCheckRuns = %d, want 1 (one Copilot extra, not duplicated)", len(rm.prs[9].ExtraCheckRuns))
+	}
+}
+
+// TestJobDedupKey verifies the canonical key format (NUL-separated) and
+// lowercasing. NUL is used as the field delimiter so a workflow or job name
+// containing "|" can't collide with another key split across fields.
+func TestJobDedupKey(t *testing.T) {
+	const sep = "\x00"
+	tests := []struct {
+		headSHA, workflow, name string
+		want                    string
+	}{
+		{"abc", "CI", "Build", "abc" + sep + "ci" + sep + "build"},
+		{"", "", "lint", sep + sep + "lint"},
+		{"DEF", "CI", "Build", "def" + sep + "ci" + sep + "build"},
+		// A workflow name containing "|" must not collide with a name-only split.
+		{"abc", "CI|extra", "build", "abc" + sep + "ci|extra" + sep + "build"},
+		{"abc", "CI", "extra|build", "abc" + sep + "ci" + sep + "extra|build"},
+	}
+	for _, tt := range tests {
+		if got := jobDedupKey(tt.headSHA, tt.workflow, tt.name); got != tt.want {
+			t.Errorf("jobDedupKey(%q,%q,%q) = %q, want %q", tt.headSHA, tt.workflow, tt.name, got, tt.want)
+		}
+	}
+}
+
+// TestPRByHeadSHA verifies PR lookup by head SHA.
+func TestPRByHeadSHA(t *testing.T) {
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			1: {HeadSHA: "aaa"},
+			2: {HeadSHA: "bbb"},
+		},
+	}
+	if got := m.prByHeadSHA("bbb"); got != 2 {
+		t.Errorf("prByHeadSHA(bbb) = %d, want 2", got)
+	}
+	if got := m.prByHeadSHA("zzz"); got != 0 {
+		t.Errorf("prByHeadSHA(zzz) = %d, want 0", got)
+	}
+	if got := m.prByHeadSHA(""); got != 0 {
+		t.Errorf("prByHeadSHA(empty) = %d, want 0 (empty SHA never matches)", got)
+	}
+}
+
+// TestPRByHeadSHADeterministic verifies that when multiple PRs share the same
+// HeadSHA, prByHeadSHA returns the lowest PR number deterministically rather
+// than whichever entry Go's map iteration happens to yield first.
+func TestPRByHeadSHADeterministic(t *testing.T) {
+	const sharedSHA = "deadbeef"
+	// Insert in reverse order to ensure the result isn't just "first inserted".
+	// Use enough entries to make map-iteration nondeterminism likely to surface
+	// across runs, and run the lookup many times to catch any ordering drift.
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			42: {HeadSHA: sharedSHA},
+			7:  {HeadSHA: sharedSHA},
+			99: {HeadSHA: sharedSHA},
+		},
+	}
+	for i := 0; i < 50; i++ {
+		if got := m.prByHeadSHA(sharedSHA); got != 7 {
+			t.Fatalf("iteration %d: prByHeadSHA(%q) = %d, want 7 (lowest matching PR number)", i, sharedSHA, got)
+		}
+	}
+}
+
+// TestRepoChecksUpdatePreservesExtras verifies the flicker fix: a
+// RepoChecksUpdateMsg replaces m.prs wholesale, but extras attached by the
+// last runs-poll must survive so Copilot-style jobs don't vanish between runs
+// ticks. The PR-checks poll must carry forward ExtraCheckRuns from the prior
+// PRViewData for the same PR number.
+func TestRepoChecksUpdatePreservesExtras(t *testing.T) {
+	const sharedSHA = "sha-preserve"
+	copilot := makeDedupBranchJob("Copilot", "coding-agent")
+
+	// Seed: PR #7 with GraphQL checks and a previously-attached Copilot extra.
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			7: {
+				Title:          "Add feature",
+				CheckRuns:      []ghclient.CheckRunInfo{makeDedupPRCheck("CI", "build")},
+				ExtraCheckRuns: []ghclient.CheckRunInfo{copilot},
+				HeadSHA:        sharedSHA,
+			},
+		},
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	// A new PR-checks poll arrives with the same PR (still active) but the
+	// fresh CheckRuns slice does not include Copilot (GraphQL misses it).
+	msg := RepoChecksUpdateMsg{
+		PRData: map[int]ghclient.PRCheckData{
+			7: {
+				Number: 7,
+				Title:  "Add feature",
+				CheckRuns: []ghclient.CheckRunInfo{
+					makeDedupPRCheck("CI", "build"),
+					makeDedupPRCheck("CI", "lint"),
+				},
+				HeadSHA: sharedSHA,
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	pr := rm.prs[7]
+	if len(pr.CheckRuns) != 2 {
+		t.Errorf("CheckRuns = %d, want 2 (fresh GraphQL checks)", len(pr.CheckRuns))
+	}
+	// The core assertion: the Copilot extra must survive the PR-checks poll.
+	if len(pr.ExtraCheckRuns) != 1 {
+		t.Fatalf("ExtraCheckRuns = %d, want 1 (Copilot extra must survive PR-checks poll)", len(pr.ExtraCheckRuns))
+	}
+	if pr.ExtraCheckRuns[0].Name != "coding-agent" {
+		t.Errorf("ExtraCheckRuns[0].Name = %q, want %q", pr.ExtraCheckRuns[0].Name, "coding-agent")
+	}
+}
+
+// TestRepoChecksUpdateDropsExtrasWhenPRFades verifies that when a PR falls
+// out of the active set (all checks faded), its extras are dropped too — we
+// don't want orphaned extras lingering for a PR that no longer renders.
+func TestRepoChecksUpdateDropsExtrasWhenPRFades(t *testing.T) {
+	now := time.Now()
+	fadedCompletedAt := now.Add(-45 * time.Minute)
+	fadeSuccess := 15 * time.Minute
+	fadeFailure := 30 * time.Minute
+
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			7: {
+				Title:          "Add feature",
+				CheckRuns:      []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success", Name: "build", CompletedAt: &fadedCompletedAt}},
+				ExtraCheckRuns: []ghclient.CheckRunInfo{makeDedupBranchJob("Copilot", "coding-agent")},
+				HeadSHA:        "sha-fade",
+			},
+		},
+		fadeSuccess:   fadeSuccess,
+		fadeFailure:   fadeFailure,
+		fetchReceived: true,
+	}
+
+	// PR-checks poll reports only the already-faded build check -> PR drops.
+	msg := RepoChecksUpdateMsg{
+		PRData: map[int]ghclient.PRCheckData{
+			7: {
+				Number: 7,
+				Title:  "Add feature",
+				CheckRuns: []ghclient.CheckRunInfo{
+					{Status: "completed", Conclusion: "success", Name: "build", CompletedAt: &fadedCompletedAt},
+				},
+				HeadSHA: "sha-fade",
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	if _, ok := rm.prs[7]; ok {
+		t.Error("PR #7 should have been dropped (all checks faded)")
+	}
+}

@@ -32,16 +32,16 @@ func TestFetchRepoRunPageSinglePage(t *testing.T) {
 		for i := 0; i < count; i++ {
 			id := int64(n)*1000 + int64(i)
 			runs = append(runs, map[string]any{
-				"id":           id,
-				"name":         "run",
-				"head_branch":  "main",
-				"head_sha":     "abc",
-				"event":        "push",
-				"status":       "completed",
-				"conclusion":   "success",
-				"workflow_id":  42,
-				"created_at":   "2026-06-18T00:00:00Z",
-				"updated_at":   "2026-06-18T00:01:00Z",
+				"id":             id,
+				"name":           "run",
+				"head_branch":    "main",
+				"head_sha":       "abc",
+				"event":          "push",
+				"status":         "completed",
+				"conclusion":     "success",
+				"workflow_id":    42,
+				"created_at":     "2026-06-18T00:00:00Z",
+				"updated_at":     "2026-06-18T00:01:00Z",
 				"run_started_at": "2026-06-18T00:00:00Z",
 			})
 		}
@@ -75,6 +75,12 @@ func TestFetchRepoRunPageSinglePage(t *testing.T) {
 	}
 	if len(runs) != 100 {
 		t.Errorf("runs returned = %d, want 100 (first page only)", len(runs))
+	}
+
+	// Issue #331: convertBranchRun must copy head_sha from the REST payload
+	// so repo-mode dedup can key standalone runs by commit SHA.
+	if len(runs) > 0 && runs[0].HeadSHA != "abc" {
+		t.Errorf("runs[0].HeadSHA = %q, want %q (convertBranchRun must copy head_sha)", runs[0].HeadSHA, "abc")
 	}
 }
 

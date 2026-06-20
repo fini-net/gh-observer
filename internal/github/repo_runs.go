@@ -13,10 +13,14 @@ import (
 // BranchRunData holds a standalone (non-PR) workflow run and its jobs.
 // Used by repo mode to show post-merge, scheduled, and workflow_dispatch runs
 // grouped by branch separately from PR check rolls.
+// HeadSHA carries the run's head commit SHA (from the REST head_sha field),
+// used by RepoModel.dedupeAndAttachExtraJobs to suppress jobs that already
+// appear in the PR section for the same commit.
 type BranchRunData struct {
 	RunID        int64
 	DisplayTitle string
 	HeadBranch   string
+	HeadSHA      string
 	Event        string
 	WorkflowName string
 	WorkflowID   int64
@@ -120,6 +124,7 @@ func convertBranchRun(run *github.WorkflowRun) BranchRunData {
 	data := BranchRunData{
 		RunID:      run.GetID(),
 		HeadBranch: run.GetHeadBranch(),
+		HeadSHA:    run.GetHeadSHA(),
 		Event:      run.GetEvent(),
 		WorkflowID: run.GetWorkflowID(),
 		Status:     strings.ToLower(run.GetStatus()),

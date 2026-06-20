@@ -112,19 +112,26 @@ func truncateFetchError(s string, maxWidth int) string {
 }
 
 // renderPRGroup renders a single PR's header and its (already fade-filtered) checks.
+// CheckRuns (GraphQL-sourced) and ExtraCheckRuns (REST-sourced extras like
+// Copilot, attached by dedupeAndAttachExtraJobs) are merged for display. Extras
+// are fade-filtered at the runs-poll, so no second fade pass is needed here.
 func (m RepoModel) renderPRGroup(b *strings.Builder, prNum int, prData PRViewData) {
 	prHeader := m.styles.Header.Render(fmt.Sprintf("PR #%d: %s", prNum, prData.Title))
 	b.WriteString(prHeader)
 	b.WriteString("\n")
 
-	if len(prData.CheckRuns) == 0 {
+	merged := make([]ghclient.CheckRunInfo, 0, len(prData.CheckRuns)+len(prData.ExtraCheckRuns))
+	merged = append(merged, prData.CheckRuns...)
+	merged = append(merged, prData.ExtraCheckRuns...)
+	if len(merged) == 0 {
 		b.WriteString("  No checks\n\n")
 		return
 	}
 
-	widths := CalculateColumnWidths(prData.CheckRuns, prData.HeadCommitTime, nil)
+	SortCheckRuns(merged)
+	widths := CalculateColumnWidths(merged, prData.HeadCommitTime, nil)
 
-	for _, check := range prData.CheckRuns {
+	for _, check := range merged {
 		line := m.renderRepoCheckRun(check, prData.HeadCommitTime, widths)
 		b.WriteString(line)
 	}
