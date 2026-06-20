@@ -160,10 +160,15 @@ func (m RepoModel) prJobKeySet() map[string]bool {
 	return seen
 }
 
-// prByHeadSHA returns the PR number whose HeadSHA matches, or 0 if none.
-// Used to attach leftover branch-run jobs under their matching PR.
+// prByHeadSHA returns the lowest PR number whose HeadSHA matches, or 0 if
+// none. Iterating in ascending PR-number order makes the selection
+// deterministic when multiple PRs share a HeadSHA (e.g. a PR and its
+// backport pointing at the same commit). SHAs from GitHub's GraphQL oid
+// and REST head_sha fields are lowercase hex, so a direct comparison is
+// sufficient; jobDedupKey additionally lowercases for the dedup path.
 func (m RepoModel) prByHeadSHA(sha string) int {
-	for prNum, pr := range m.prs {
+	for _, prNum := range m.sortedPRNumbers() {
+		pr := m.prs[prNum]
 		if pr.HeadSHA != "" && pr.HeadSHA == sha {
 			return prNum
 		}

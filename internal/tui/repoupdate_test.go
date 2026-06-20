@@ -1156,6 +1156,28 @@ func TestPRByHeadSHA(t *testing.T) {
 	}
 }
 
+// TestPRByHeadSHADeterministic verifies that when multiple PRs share the same
+// HeadSHA, prByHeadSHA returns the lowest PR number deterministically rather
+// than whichever entry Go's map iteration happens to yield first.
+func TestPRByHeadSHADeterministic(t *testing.T) {
+	const sharedSHA = "deadbeef"
+	// Insert in reverse order to ensure the result isn't just "first inserted".
+	// Use enough entries to make map-iteration nondeterminism likely to surface
+	// across runs, and run the lookup many times to catch any ordering drift.
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			42: {HeadSHA: sharedSHA},
+			7:  {HeadSHA: sharedSHA},
+			99: {HeadSHA: sharedSHA},
+		},
+	}
+	for i := 0; i < 50; i++ {
+		if got := m.prByHeadSHA(sharedSHA); got != 7 {
+			t.Fatalf("iteration %d: prByHeadSHA(%q) = %d, want 7 (lowest matching PR number)", i, sharedSHA, got)
+		}
+	}
+}
+
 // TestRepoChecksUpdatePreservesExtras verifies the flicker fix: a
 // RepoChecksUpdateMsg replaces m.prs wholesale, but extras attached by the
 // last runs-poll must survive so Copilot-style jobs don't vanish between runs
