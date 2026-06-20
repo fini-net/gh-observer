@@ -20,11 +20,14 @@ import (
 const maxPRsPerQuery = 10
 
 // PRCheckData holds check run data for a single PR in repo mode.
+// HeadSHA is the PR head commit OID, used to dedupe standalone branch runs
+// (see RepoModel.dedupeAndAttachExtraJobs) against the PR section.
 type PRCheckData struct {
 	Number         int
 	Title          string
 	CheckRuns      []CheckRunInfo
 	HeadCommitTime time.Time
+	HeadSHA        string
 }
 
 // repoContextNode is the union type for StatusCheckRollup contexts in the
@@ -78,9 +81,10 @@ type repoPRQuery struct {
 				Title   string
 				Commits struct {
 					Nodes []struct {
-						Commit struct {
-							PushedDate    githubv4.DateTime `graphql:"pushedDate"`
-							CommittedDate githubv4.DateTime `graphql:"committedDate"`
+					Commit struct {
+						PushedDate    githubv4.DateTime `graphql:"pushedDate"`
+						CommittedDate githubv4.DateTime `graphql:"committedDate"`
+						OID           githubv4.String  `graphql:"oid"`
 							StatusCheckRollup struct {
 								Contexts struct {
 									Nodes    []repoContextNode
@@ -165,6 +169,7 @@ func fetchRepoCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner
 			Title:          pr.Title,
 			CheckRuns:      checkRuns,
 			HeadCommitTime: headCommitTime,
+			HeadSHA:        string(commit.OID),
 		}
 	}
 

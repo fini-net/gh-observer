@@ -76,6 +76,12 @@ func TestFetchRepoRunPageSinglePage(t *testing.T) {
 	if len(runs) != 100 {
 		t.Errorf("runs returned = %d, want 100 (first page only)", len(runs))
 	}
+
+	// Issue #331: convertBranchRun must copy head_sha from the REST payload
+	// so repo-mode dedup can key standalone runs by commit SHA.
+	if len(runs) > 0 && runs[0].HeadSHA != "abc" {
+		t.Errorf("runs[0].HeadSHA = %q, want %q (convertBranchRun must copy head_sha)", runs[0].HeadSHA, "abc")
+	}
 }
 
 func TestFetchRepoWorkflowRunsCreatedFilterFormat(t *testing.T) {

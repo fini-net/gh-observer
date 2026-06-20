@@ -144,6 +144,7 @@ func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, 
 			Title:          prData.Title,
 			CheckRuns:      visible,
 			HeadCommitTime: prData.HeadCommitTime,
+			HeadSHA:        prData.HeadSHA,
 		}
 	}
 
@@ -158,6 +159,13 @@ func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, 
 // handleRepoRunsUpdate applies the same fade-out logic to standalone runs and
 // stores the survivors in m.standaloneRuns. Active runs are always kept;
 // completed runs are kept if RunStartedAt is within the fade window.
+//
+// After fade-out, dedupeAndAttachExtraJobs reconciles the runs against the PR
+// section (issue #331): jobs whose (HeadSHA, WorkflowName, Name) already appear
+// in a tracked PR's CheckRuns are dropped from the standalone view, and any
+// leftover "extra" jobs (e.g. Copilot) the PR GraphQL query missed are attached
+// under their matching PR so they render in the PR group instead of a separate
+// branch section. Runs whose commit matches no tracked PR stay standalone.
 //
 // Transient fetch errors are non-fatal: the last good m.standaloneRuns is
 // preserved, the error is surfaced via m.fetchErrRuns, and polling continues.
@@ -202,9 +210,10 @@ func (m *RepoModel) handleRepoRunsUpdate(msg RepoRunsUpdateMsg) (tea.Model, tea.
 		}
 	}
 
-	m.standaloneRuns = visible
+	m.standaloneRuns = m.dedupeAndAttachExtraJobs(visible)
 
 	debug.Log("repo runs update", "total", len(msg.Runs), "visible", len(visible),
+		"standalone", len(m.standaloneRuns),
 		"rate_limit_remaining", msg.RateLimitRemaining)
 
 	return m, nil
