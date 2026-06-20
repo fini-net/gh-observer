@@ -775,14 +775,9 @@ func makeDedupPRCheck(workflow, name string) ghclient.CheckRunInfo {
 	}
 }
 
-// makeDedupBranchJob builds a CheckRunInfo suitable for a branch-run Jobs slice.
-func makeDedupBranchJob(workflow, name string) ghclient.CheckRunInfo {
-	return ghclient.CheckRunInfo{
-		Name:         name,
-		WorkflowName: workflow,
-		Status:       "in_progress",
-	}
-}
+// makeDedupBranchJob builds a CheckRunInfo suitable for a branch-run Jobs
+// slice. Identical to makeDedupPRCheck; aliased for test readability.
+var makeDedupBranchJob = makeDedupPRCheck
 
 // TestRepoRunsDedupAgainstPRs verifies issue #331: a standalone branch run whose
 // HeadSHA matches a tracked PR drops jobs that already appear in the PR's
@@ -1060,6 +1055,100 @@ func TestRepoRunsDedupActiveRunMatchesPRKeepsExtrasAttached(t *testing.T) {
 	}
 	if len(rm.prs[5].ExtraCheckRuns) != 1 {
 		t.Errorf("PR #5 ExtraCheckRuns = %d, want 1 (Copilot extra)", len(rm.prs[5].ExtraCheckRuns))
+	}
+}
+
+// TestRepoRunsDedupDropsStaleExtras verifies that ExtraCheckRuns is rebuilt
+// (not appended to) every runs tick: when a Copilot run that previously
+// attached an extra fades out of the visible window, the next runs poll —
+// which no longer reports it — must drop the stale extra rather than letting
+// it linger under the PR indefinitely.
+func TestRepoRunsDedupDropsStaleExtras(t *testing.T) {
+	const sharedSHA = "sha-stale"
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			5: {
+				Title: "PR",
+				CheckRuns: []ghclient.CheckRunInfo{
+					makeDedupPRCheck("CI", "build"),
+				},
+				// Previously-attached extra from a Copilot run that has now
+				// faded out of the visible runs window.
+				ExtraCheckRuns: []ghclient.CheckRunInfo{makeDedupBranchJob("Copilot", "coding-agent")},
+				HeadSHA:        sharedSHA,
+			},
+		},
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	// New runs poll reports no runs at all for this SHA — the Copilot run
+	// has faded. The stale extra must be dropped, not carried forward.
+	msg := RepoRunsUpdateMsg{
+		Runs:             []ghclient.BranchRunData{},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	if len(rm.prs[5].CheckRuns) != 1 {
+		t.Fatalf("PR #5 CheckRuns = %d, want 1 (untouched)", len(rm.prs[5].CheckRuns))
+	}
+	if len(rm.prs[5].ExtraCheckRuns) != 0 {
+		t.Errorf("PR #5 ExtraCheckRuns = %d, want 0 (stale Copilot extra must be dropped when its run fades)",
+			len(rm.prs[5].ExtraCheckRuns))
+	}
+}
+
+// TestRepoRunsDedupReattachesStillVisibleExtra verifies that when an extra's
+// run is still in the visible window, the extra is re-attached on the next
+// tick (rebuilt, not lost) — i.e. the rebuild doesn't drop extras whose run
+// is still being reported.
+func TestRepoRunsDedupReattachesStillVisibleExtra(t *testing.T) {
+	const sharedSHA = "sha-reattach"
+	copilot := makeDedupBranchJob("Copilot", "coding-agent")
+	m := RepoModel{
+		prs: map[int]PRViewData{
+			5: {
+				Title: "PR",
+				CheckRuns: []ghclient.CheckRunInfo{
+					makeDedupPRCheck("CI", "build"),
+				},
+				ExtraCheckRuns: []ghclient.CheckRunInfo{copilot},
+				HeadSHA:        sharedSHA,
+			},
+		},
+		fadeSuccess:   15 * time.Minute,
+		fadeFailure:   30 * time.Minute,
+		fetchReceived: true,
+	}
+
+	msg := RepoRunsUpdateMsg{
+		Runs: []ghclient.BranchRunData{
+			{
+				RunID:   700,
+				HeadSHA: sharedSHA,
+				Status:  "in_progress",
+				Jobs: []ghclient.CheckRunInfo{
+					makeDedupBranchJob("CI", "build"), // duplicate
+					copilot, // still present, should re-attach
+				},
+			},
+		},
+		RateLimitRemaining: 5000,
+	}
+
+	newModel, _ := m.Update(msg)
+	rm := newModel.(*RepoModel)
+
+	if len(rm.prs[5].ExtraCheckRuns) != 1 {
+		t.Fatalf("PR #5 ExtraCheckRuns = %d, want 1 (still-visible extra must re-attach)",
+			len(rm.prs[5].ExtraCheckRuns))
+	}
+	if rm.prs[5].ExtraCheckRuns[0].Name != "coding-agent" {
+		t.Errorf("ExtraCheckRuns[0].Name = %q, want %q", rm.prs[5].ExtraCheckRuns[0].Name, "coding-agent")
 	}
 }
 
