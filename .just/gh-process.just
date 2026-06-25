@@ -13,7 +13,7 @@ sync:
     git pull
     git status --porcelain # stp
 
-# PR create v6.7
+# PR create v7.0
 [group('Process')]
 pr: _has_commits && pr_checks
     #!/usr/bin/env bash
