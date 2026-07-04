@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.7
-	charm.land/lipgloss/v2 v2.0.4
+	charm.land/lipgloss/v2 v2.0.5
 	github.com/google/go-github/v88 v88.0.0
 	github.com/mattn/go-runewidth v0.0.24
 	github.com/muesli/termenv v0.16.0
