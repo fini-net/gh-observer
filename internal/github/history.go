@@ -14,6 +14,13 @@ import (
 
 var runIDRegexp = regexp.MustCompile(`/actions/runs/(\d+)/job/`)
 
+// historyDecayFactor weights recent runs more heavily than older ones in
+// weightedAverage. Each run i (0 = newest) contributes historyDecayFactor^i
+// of the average. 0.7 gives the newest run ~42% of a 10-run average and the
+// oldest ~1%, so a slow run from two weeks ago no longer drags the ETA above
+// where the next run actually lands.
+const historyDecayFactor = 0.7
+
 // ParseRunIDFromURL extracts the workflow run ID from a GitHub Actions details URL.
 func ParseRunIDFromURL(detailsURL string) (int64, error) {
 	matches := runIDRegexp.FindStringSubmatch(detailsURL)
@@ -180,16 +187,38 @@ func averageJobDurations(
 		return nil
 	}
 
+	// durations slices are newest-first: runIDs come from ListWorkflowRunsByID
+	// (which returns runs newest-first when Status="completed"), and each run's
+	// jobs are appended together via ListWorkflowJobs. weightedAverage relies on
+	// this ordering to give the most recent run the largest weight, so any
+	// future refactor that re-shuffles runIDs or durations must preserve it.
 	averages := make(map[string]time.Duration, len(jobDurations))
 	for name, durations := range jobDurations {
-		var total time.Duration
-		for _, d := range durations {
-			total += d
-		}
-		averages[name] = total / time.Duration(len(durations))
+		averages[name] = weightedAverage(durations)
 	}
 
 	return averages
+}
+
+// weightedAverage computes an exponentially decayed weighted average of
+// durations, treating index 0 as the newest (most weight) and later indices as
+// progressively older. With a single duration it returns that duration
+// unchanged; with an empty slice it returns 0. See historyDecayFactor for the
+// decay constant.
+//
+// Ordering invariant: durations MUST be newest-first. averageJobDurations
+// preserves this ordering (see its comment), and the weighting depends on it.
+func weightedAverage(durations []time.Duration) time.Duration {
+	if len(durations) == 0 {
+		return 0
+	}
+	var weightedSum, weightSum, weight float64 = 0, 0, 1
+	for _, d := range durations {
+		weightedSum += weight * float64(d)
+		weightSum += weight
+		weight *= historyDecayFactor
+	}
+	return time.Duration(weightedSum / weightSum)
 }
 
 // DiscoverWorkflows resolves run IDs to workflow IDs.
