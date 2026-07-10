@@ -14,6 +14,20 @@ func ptrTo(s string) *string {
 	return &s
 }
 
+// weightedBuild2Run is the exponentially decayed weighted average for the
+// "fetches and averages job durations across runs" case: build durations are
+// 2min (newest, run 1) and 4min (oldest, run 2). With decay=0.7 that is
+// (2min*1 + 4min*0.7)/(1+0.7) = 169411764705ns (~2m49.4s), well below the flat
+// mean of 3min.
+const weightedBuild2Run = 169411764705 * time.Nanosecond
+
+// weightedBuild3RunNewShort is the weighted average for the
+// "newer shorter run pulls average below flat mean" case: build durations are
+// 2min (newest), 6min, 6min. With decay=0.7 that is
+// (2min*1 + 6min*0.7 + 6min*0.49)/(1+0.7+0.49) = 250410958904ns (~4m10.4s),
+// below the flat mean of 4m40s but above the newest 2min.
+const weightedBuild3RunNewShort = 250410958904 * time.Nanosecond
+
 func TestParseRunIDFromURL(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -62,6 +76,50 @@ func TestParseRunIDFromURL(t *testing.T) {
 	}
 }
 
+func TestWeightedAverage(t *testing.T) {
+	tests := []struct {
+		name      string
+		durations []time.Duration
+		want      time.Duration
+	}{
+		{name: "empty returns zero", durations: nil, want: 0},
+		{name: "single returns itself", durations: []time.Duration{5 * time.Minute}, want: 5 * time.Minute},
+		{name: "two equal collapse to that value", durations: []time.Duration{4 * time.Minute, 4 * time.Minute}, want: 4 * time.Minute},
+		{
+			name:      "newest dominates two-run average",
+			durations: []time.Duration{2 * time.Minute, 4 * time.Minute},
+			want:      weightedBuild2Run,
+		},
+		{
+			name:      "newer shorter run below flat mean above newest",
+			durations: []time.Duration{2 * time.Minute, 6 * time.Minute, 6 * time.Minute},
+			want:      weightedBuild3RunNewShort,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := weightedAverage(tt.durations)
+			if got != tt.want {
+				t.Errorf("weightedAverage(%v) = %v, want %v", tt.durations, got, tt.want)
+			}
+		})
+	}
+
+	// Sanity bounds for the new-shorter-run case: the weighted average must
+	// sit strictly below the flat mean (4m40s) and strictly above the newest
+	// run (2min), demonstrating that recency weighting pulled the estimate
+	// toward the recent (shorter) runs.
+	flatMean := (2*time.Minute + 6*time.Minute + 6*time.Minute) / 3
+	got := weightedAverage([]time.Duration{2 * time.Minute, 6 * time.Minute, 6 * time.Minute})
+	if got >= flatMean {
+		t.Errorf("weightedAverage should be below flat mean %v, got %v", flatMean, got)
+	}
+	if got <= 2*time.Minute {
+		t.Errorf("weightedAverage should stay above newest run %v, got %v", 2*time.Minute, got)
+	}
+}
+
 func TestAverageJobDurations(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -94,7 +152,7 @@ func TestAverageJobDurations(t *testing.T) {
 				}
 			},
 			wantAverages: map[string]time.Duration{
-				"build": 3 * time.Minute,
+				"build": weightedBuild2Run,
 				"test":  3 * time.Minute,
 			},
 		},
@@ -112,6 +170,33 @@ func TestAverageJobDurations(t *testing.T) {
 			},
 			wantAverages: map[string]time.Duration{
 				"build": time.Minute,
+			},
+		},
+		{
+			name:   "newer shorter run pulls weighted average below flat mean",
+			runIDs: []int64{1, 2, 3},
+			mockHandler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/repos/owner/repo/actions/runs/1/jobs":
+					// newest run: 2min
+					w.Write([]byte(`{"jobs":[
+						{"name":"build","started_at":"2024-01-01T00:00:00Z","completed_at":"2024-01-01T00:02:00Z"}
+					]}`))
+				case "/repos/owner/repo/actions/runs/2/jobs":
+					// older run: 6min
+					w.Write([]byte(`{"jobs":[
+						{"name":"build","started_at":"2024-01-01T00:00:00Z","completed_at":"2024-01-01T00:06:00Z"}
+					]}`))
+				case "/repos/owner/repo/actions/runs/3/jobs":
+					// oldest run: 6min
+					w.Write([]byte(`{"jobs":[
+						{"name":"build","started_at":"2024-01-01T00:00:00Z","completed_at":"2024-01-01T00:06:00Z"}
+					]}`))
+				}
+			},
+			wantAverages: map[string]time.Duration{
+				"build": weightedBuild3RunNewShort,
 			},
 		},
 		{
