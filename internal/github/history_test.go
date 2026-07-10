@@ -81,34 +81,25 @@ func TestWeightedAverage(t *testing.T) {
 		name      string
 		durations []time.Duration
 		want      time.Duration
-		wantExact bool
 	}{
-		{name: "empty returns zero", durations: nil, want: 0, wantExact: true},
-		{name: "single returns itself", durations: []time.Duration{5 * time.Minute}, want: 5 * time.Minute, wantExact: true},
-		{name: "two equal collapse to that value", durations: []time.Duration{4 * time.Minute, 4 * time.Minute}, want: 4 * time.Minute, wantExact: true},
+		{name: "empty returns zero", durations: nil, want: 0},
+		{name: "single returns itself", durations: []time.Duration{5 * time.Minute}, want: 5 * time.Minute},
+		{name: "two equal collapse to that value", durations: []time.Duration{4 * time.Minute, 4 * time.Minute}, want: 4 * time.Minute},
 		{
 			name:      "newest dominates two-run average",
 			durations: []time.Duration{2 * time.Minute, 4 * time.Minute},
 			want:      weightedBuild2Run,
-			wantExact: true,
 		},
 		{
 			name:      "newer shorter run below flat mean above newest",
 			durations: []time.Duration{2 * time.Minute, 6 * time.Minute, 6 * time.Minute},
 			want:      weightedBuild3RunNewShort,
-			wantExact: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := weightedAverage(tt.durations)
-			if tt.wantExact {
-				if got != tt.want {
-					t.Errorf("weightedAverage(%v) = %v, want %v", tt.durations, got, tt.want)
-				}
-				return
-			}
 			if got != tt.want {
 				t.Errorf("weightedAverage(%v) = %v, want %v", tt.durations, got, tt.want)
 			}

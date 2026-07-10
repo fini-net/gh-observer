@@ -16,9 +16,10 @@ var runIDRegexp = regexp.MustCompile(`/actions/runs/(\d+)/job/`)
 
 // historyDecayFactor weights recent runs more heavily than older ones in
 // weightedAverage. Each run i (0 = newest) contributes historyDecayFactor^i
-// of the average. 0.7 gives the newest run ~42% of a 10-run average and the
-// oldest ~1%, so a slow run from two weeks ago no longer drags the ETA above
-// where the next run actually lands.
+// of the average. With decay=0.7 the geometric series Σ(0.7^i, i=0..9) ≈ 3.239,
+// so the newest run is ~31% of a 10-run average and the oldest ~1%, meaning a
+// slow run from two weeks ago no longer drags the ETA above where the next run
+// actually lands.
 const historyDecayFactor = 0.7
 
 // ParseRunIDFromURL extracts the workflow run ID from a GitHub Actions details URL.
@@ -192,6 +193,21 @@ func averageJobDurations(
 	// jobs are appended together via ListWorkflowJobs. weightedAverage relies on
 	// this ordering to give the most recent run the largest weight, so any
 	// future refactor that re-shuffles runIDs or durations must preserve it.
+	//
+	// Known limitation: this invariant holds for the FetchWorkflowHistory call
+	// site (one workflow at a time, so runIDs are strictly newest-first), but
+	// NOT for the legacy FetchJobAverages snapshot-mode path, which builds
+	// historicalRunIDs by concatenating each workflow's newest-first runs while
+	// ranging over workflowIDsToFetch (a map, non-deterministic order). When two
+	// workflows in the same PR share a bare job name (e.g. "build", "test"), the
+	// merged per-name slice is "whichever workflow iterated first, newest-first
+	// within that workflow, then the other workflow's runs appended" — not true
+	// chronological newest-first. The decay then biases toward an arbitrary
+	// workflow, nondeterministically across runs. The TUI path is unaffected
+	// because it calls averageJobDurations once per workflow. Sorting runs by
+	// actual timestamp across workflows before weighting would close this gap
+	// (the run timestamp is already available on WorkflowRun, no new API call),
+	// but that is deferred as a follow-up.
 	averages := make(map[string]time.Duration, len(jobDurations))
 	for name, durations := range jobDurations {
 		averages[name] = weightedAverage(durations)
