@@ -6,7 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
-	"github.com/google/go-github/v88/github"
+	"github.com/google/go-github/v89/github"
 )
 
 // RunModel holds the application state for watching a workflow run.

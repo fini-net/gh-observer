@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/fini-net/gh-observer/internal/debug"
-	"github.com/google/go-github/v88/github"
+	"github.com/google/go-github/v89/github"
 )
 
 // GetToken retrieves the GitHub token from GITHUB_TOKEN env var or gh CLI
