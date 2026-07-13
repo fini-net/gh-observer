@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/fini-net/gh-observer/internal/debug"
-	"github.com/google/go-github/v88/github"
+	"github.com/google/go-github/v89/github"
 )
 
 // WorkflowJobInfo contains status data for a single job within a workflow run.
