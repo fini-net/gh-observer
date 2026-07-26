@@ -10,7 +10,7 @@ on:
 permissions: {}
 
 jobs:
-  verify:
+  cue-verify:
     runs-on: ubuntu-latest
     permissions:
       contents: read
