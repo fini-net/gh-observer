@@ -9,7 +9,7 @@ on:
 permissions: {}
 
 jobs:
-  test:
+  go-test:
     runs-on: ubuntu-latest
     permissions:
       contents: read
