@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/fini-net/gh-observer/internal/debug"
-	"github.com/google/go-github/v89/github"
+	"github.com/google/go-github/v90/github"
 )
 
 var runIDRegexp = regexp.MustCompile(`/actions/runs/(\d+)/job/`)
