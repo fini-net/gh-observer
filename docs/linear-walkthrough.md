@@ -295,7 +295,7 @@ func NewClient(ctx context.Context) (*github.Client, error) {
 }
 ```
 
-Uses `google/go-github/v85` library with OAuth2 token authentication.
+Uses `google/go-github/v90` library with OAuth2 token authentication.
 
 ### GraphQL Client Creation (`internal/github/graphql.go`)
 
