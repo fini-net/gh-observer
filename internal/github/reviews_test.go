@@ -231,6 +231,47 @@ func TestFetchCopilotReview(t *testing.T) {
 			wantRateLimit:    4996,
 		},
 		{
+			// Bug #3 from review: a fresh review request (copilotRequested)
+			// combined with a stale review from a previous commit and no
+			// HEAD review yet must report Pending=true and Stale=false.
+			// Previously the trailing sawStale block also set Stale=true,
+			// masking the in-progress review and satisfying the gate.
+			name: "requested with stale review present - pending wins, not stale",
+			query: makeReviewQuery(
+				[]struct {
+					RequestedReviewer struct {
+						Typename string `graphql:"__typename"`
+						Bot      struct {
+							Login string
+						} `graphql:"... on Bot"`
+						User struct {
+							Login string
+						} `graphql:"... on User"`
+					}
+				}{
+					makeRequestNode("copilot-pull-request-reviewer"),
+				},
+				[]struct {
+					Author struct {
+						Login string
+					}
+					State       string
+					SubmittedAt githubv4.DateTime
+					Commit      struct {
+						OID string
+					}
+					Body string
+				}{
+					makeReviewNode("copilot-pull-request-reviewer", "APPROVED", "oldsha789", ""),
+				},
+				4990,
+			),
+			wantPending:   true,
+			wantState:     "pending",
+			wantStale:     false,
+			wantRateLimit: 4990,
+		},
+		{
 			name: "in progress - requested but no review",
 			query: makeReviewQuery(
 				[]struct {

@@ -65,7 +65,7 @@ type copilotReviewQuery struct {
 					}
 					Body string
 				}
-			} `graphql:"reviews(first: 25)"`
+			} `graphql:"reviews(first: 25, orderBy: {field: UPDATED_AT, direction: DESC})"`
 		} `graphql:"pullRequest(number: $prNumber)"`
 	} `graphql:"repository(owner: $owner, name: $repo)"`
 	RateLimit struct {
@@ -150,7 +150,9 @@ func parseCopilotReview(query *copilotReviewQuery, headSHA string) CopilotReview
 			continue
 		}
 
-		// Latest review targeting HEAD (reviews are first:25, newest first)
+		// Latest review targeting HEAD. Reviews are ordered
+		// UPDATED_AT DESC via the GraphQL orderBy argument, so the first
+		// HEAD-matching node is the most recent one on that commit.
 		if headReview == nil {
 			headReview = node
 		}
@@ -169,23 +171,19 @@ func parseCopilotReview(query *copilotReviewQuery, headSHA string) CopilotReview
 			review.Pending = true
 		}
 	case copilotRequested:
-		// Review requested but no submitted review on HEAD yet
+		// Review requested but no submitted review on HEAD yet. A fresh
+		// review is actively pending, so do NOT set Stale even if older
+		// reviews from previous commits are present — the pending review
+		// takes precedence over the stale record.
 		review.Pending = true
 		review.State = "pending"
 	case sawStale:
-		// No HEAD review, but a stale one exists — mark stale so the caller
-		// can warn the user to re-request.
+		// No HEAD review and no pending request, but a stale one exists —
+		// mark stale so the caller can warn the user to re-request.
 		review.Stale = true
 		review.NotRequested = true
 	default:
 		review.NotRequested = true
-	}
-
-	// If we found a HEAD review but also saw stale ones, the stale flag
-	// still matters for the warning. But if HEAD review is complete,
-	// staleness is informational only — set it but don't block.
-	if sawStale && headReview == nil {
-		review.Stale = true
 	}
 
 	return review
