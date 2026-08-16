@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/shurcooL/githubv4"
 )
@@ -43,6 +44,12 @@ func makeReviewNode(authorLogin, state, commitOID, submittedAt string) struct {
 	}
 	Body string
 } {
+	var submittedAtTime time.Time
+	if submittedAt != "" {
+		if t, err := time.Parse(time.RFC3339, submittedAt); err == nil {
+			submittedAtTime = t
+		}
+	}
 	return struct {
 		Author struct {
 			Login string
@@ -56,7 +63,7 @@ func makeReviewNode(authorLogin, state, commitOID, submittedAt string) struct {
 	}{
 		Author:      struct{ Login string }{Login: authorLogin},
 		State:       state,
-		SubmittedAt: githubv4.DateTime{},
+		SubmittedAt: githubv4.DateTime{Time: submittedAtTime},
 		Commit:      struct{ OID string }{OID: commitOID},
 	}
 }
