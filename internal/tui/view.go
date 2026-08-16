@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
+	"github.com/mattn/go-runewidth"
 )
 
 // View renders the current state
@@ -52,6 +53,12 @@ func (m Model) View() tea.View {
 
 		fmt.Fprintf(&b, "%s %s\n", prInfo, utcTime)
 		fmt.Fprintf(&b, "%s\n", updatedLine)
+
+		// Copilot review status line (issue #409)
+		if m.waitForCopilot {
+			b.WriteString(m.renderCopilotStatusLine())
+		}
+
 		b.WriteString("\n")
 	}
 
@@ -76,6 +83,13 @@ func (m Model) View() tea.View {
 		if (check.Conclusion == "failure" || check.Conclusion == "timed_out") && len(check.Annotations) > 0 {
 			b.WriteString(m.renderErrorBox(check, widths))
 		}
+	}
+
+	// Copilot review row (issue #409) — no queue/duration/avg columns since
+	// reviews have no startedAt/completedAt timestamps. Rendered as a simple
+	// icon + label line aligned under the check table's icon column.
+	if m.waitForCopilot && m.copilotReviewComplete && m.copilotState != "" {
+		b.WriteString(m.renderCopilotReviewRow(widths))
 	}
 
 	b.WriteString("\n")
@@ -219,6 +233,71 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 
 	// Assemble line: [queue][1 space][icon][1 space][name][2 spaces][duration][2 spaces][avg][newline]
 	return queueCol + " " + styledIcon + " " + styledName + "  " + styledDuration + "  " + styledAvg + "\n"
+}
+
+// renderCopilotStatusLine renders the Copilot review status under the PR
+// header: a spinner + elapsed line while pending, or a yellow stale warning
+// (issue #409).
+func (m Model) renderCopilotStatusLine() string {
+	if m.copilotPending && !m.copilotStale {
+		remaining := time.Until(m.copilotPollStartTime)
+		if remaining > 0 {
+			// Still inside the initial-delay window (copilotPollStartTime is
+			// set to PRInfoMsg-time + copilotInitialDelay). Polling hasn't
+			// started yet, so show a countdown rather than "0s elapsed".
+			return fmt.Sprintf("%s %s\n", m.spinner.View(),
+				m.styles.Running.Render(fmt.Sprintf("Copilot review queued, polling in %s…", timing.FormatDuration(remaining))))
+		}
+		elapsed := time.Since(m.copilotPollStartTime)
+		return fmt.Sprintf("%s %s\n", m.spinner.View(),
+			m.styles.Running.Render(fmt.Sprintf("Copilot review in progress… (%s elapsed)", timing.FormatDuration(elapsed))))
+	}
+	if m.copilotStale {
+		shortHead := m.headSHA
+		if len(shortHead) > 7 {
+			shortHead = shortHead[:7]
+		}
+		return m.styles.Running.Render(
+			fmt.Sprintf("⚠ Copilot review is stale (HEAD is %s) — refresh or re-request\n", shortHead))
+	}
+	return ""
+}
+
+// renderCopilotReviewRow renders the completed Copilot review as a row in the
+// check table with an icon by state, but no queue-latency or runtime columns
+// (reviews have no startedAt/completedAt — issue #409).
+func (m Model) renderCopilotReviewRow(widths ColumnWidths) string {
+	icon := GetCopilotReviewIcon(m.copilotState)
+
+	var style = m.styles.Queued
+	switch m.copilotState {
+	case "approved":
+		style = m.styles.Success
+	case "changes_requested":
+		style = m.styles.Failure
+	case "commented":
+		style = m.styles.Info
+	case "dismissed":
+		style = m.styles.Queued
+	}
+
+	// Pad the queue column with spaces (reviews have no queue latency) and
+	// render the name as "Copilot / <state>" to match the Workflow/Job format.
+	queueCol := strings.Repeat(" ", widths.QueueWidth)
+	nameCol := fmt.Sprintf("Copilot / %s", m.copilotState)
+
+	// Apply same width-based truncation as check names
+	if runewidth.StringWidth(nameCol) > widths.NameWidth {
+		nameCol = runewidth.Truncate(nameCol, widths.NameWidth, "…")
+	}
+	namePadding := max(widths.NameWidth-runewidth.StringWidth(nameCol), 0)
+	paddedName := nameCol + strings.Repeat(" ", namePadding)
+
+	// No duration or avg columns — pad with spaces to align with the table
+	durPad := strings.Repeat(" ", widths.DurationWidth)
+	avgPad := strings.Repeat(" ", widths.AvgWidth)
+
+	return queueCol + " " + style.Render(icon) + " " + style.Render(paddedName) + "  " + durPad + "  " + avgPad + "\n"
 }
 
 // renderStartupPhase shows helpful message during GitHub Actions startup delay

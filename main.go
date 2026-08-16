@@ -245,11 +245,11 @@ func runPRMode(ctx context.Context, token string, parsed runArgs, cfg *config.Co
 
 	// Check if running in a terminal
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		return runSnapshot(ctx, token, owner, repo, prNumber, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations())
+		return runSnapshot(ctx, token, owner, repo, prNumber, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations(), cfg.WaitForCopilot)
 	}
 
 	// Create model
-	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations())
+	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations(), cfg.WaitForCopilot, cfg.CopilotMaxWait, cfg.CopilotPollInterval, cfg.CopilotInitialDelay)
 
 	// Run TUI
 	p := tea.NewProgram(model)
@@ -329,7 +329,7 @@ func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, own
 }
 
 // runSnapshot prints a one-time snapshot of PR check status (non-interactive mode)
-func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, enableLinks bool, quick bool, presumedAverages map[string]time.Duration) int {
+func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, enableLinks bool, quick bool, presumedAverages map[string]time.Duration, waitForCopilot bool) int {
 	client, err := ghclient.NewClient(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create GitHub client: %v\n", err)
@@ -398,6 +398,25 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 
 		if check.Status == "completed" {
 			if ghclient.FailureConclusion(check.Conclusion) {
+				exitCode = 1
+			}
+		}
+	}
+
+	// Copilot review snapshot (issue #409)
+	if waitForCopilot {
+		review, _, copilotErr := ghclient.FetchCopilotReview(ctx, token, owner, repo, prNumber, prInfo.HeadSHA)
+		if copilotErr != nil {
+			fmt.Printf("Copilot: unavailable (%v)\n", copilotErr)
+		} else if review.NotRequested && !review.Stale {
+			fmt.Println("Copilot: not requested")
+		} else if review.Stale {
+			fmt.Println("Copilot: stale (review targets old commit)")
+		} else if review.Pending {
+			fmt.Println("Copilot: in progress")
+		} else {
+			fmt.Printf("Copilot: %s\n", review.State)
+			if ghclient.CopilotReviewFails(review.State) {
 				exitCode = 1
 			}
 		}

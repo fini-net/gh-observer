@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
@@ -17,12 +18,12 @@ func makeModel() *Model {
 		rateLimitRemaining:      5000,
 		jobAverages:             make(map[string]time.Duration),
 		workflowAverages:        make(map[int64]map[string]time.Duration),
-		advSecMatchWorkflow:    make(map[string]int64),
+		advSecMatchWorkflow:     make(map[string]int64),
 		runIDToWorkflowID:       make(map[int64]int64),
 		fetchedWorkflowIDs:      make(map[int64]bool),
 		pendingWorkflowFetch:    make(map[int64]bool),
 		dispatchedWorkflowFetch: make(map[int64]bool),
-		seenCheckKeys:          make(map[string]bool),
+		seenCheckKeys:           make(map[string]bool),
 	}
 }
 
@@ -172,7 +173,7 @@ func TestDetermineExitCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := determineExitCode(tt.checks)
+			got := determineExitCode(tt.checks, "", false)
 			if got != tt.want {
 				t.Errorf("determineExitCode() = %v, want %v", got, tt.want)
 			}
@@ -192,19 +193,19 @@ func TestHandleChecksUpdate(t *testing.T) {
 		wantChecksStored   bool
 	}{
 		{
-			name:               "error in message stores error and returns nil cmd",
-			msg:                ChecksUpdateMsg{Err: context.Canceled},
-			wantErr:            true,
-			wantExitCode:       0,
-			wantQuitting:       false,
-			wantChecksStored:   false,
+			name:             "error in message stores error and returns nil cmd",
+			msg:              ChecksUpdateMsg{Err: context.Canceled},
+			wantErr:          true,
+			wantExitCode:     0,
+			wantQuitting:     false,
+			wantChecksStored: false,
 		},
 		{
-			name:               "successful update stores check runs",
-			msg:                ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress", Conclusion: ""}}, RateLimitRemaining: 5000},
-			rateLimit:          5000,
-			wantErr:            false,
-			wantChecksStored:   true,
+			name:             "successful update stores check runs",
+			msg:              ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress", Conclusion: ""}}, RateLimitRemaining: 5000},
+			rateLimit:        5000,
+			wantErr:          false,
+			wantChecksStored: true,
 		},
 		{
 			name:               "all checks complete sets exit code 0 on success",
@@ -897,12 +898,12 @@ func TestRediscoveryOnNewJobs(t *testing.T) {
 		m.jobAverages = map[string]time.Duration{"build": time.Minute}
 
 		initialCheck := ghclient.CheckRunInfo{
-			Name:           "build",
-			Status:         "completed",
-			Conclusion:     "success",
-			WorkflowRunID:  100,
-			WorkflowID:     200,
-			DetailsURL:     "https://github.com/test/test/actions/runs/100/job/1",
+			Name:          "build",
+			Status:        "completed",
+			Conclusion:    "success",
+			WorkflowRunID: 100,
+			WorkflowID:    200,
+			DetailsURL:    "https://github.com/test/test/actions/runs/100/job/1",
 		}
 		key := checkKey(initialCheck)
 		m.seenCheckKeys[key] = true
@@ -911,10 +912,10 @@ func TestRediscoveryOnNewJobs(t *testing.T) {
 		m.pendingWorkflowFetch = map[int64]bool{}
 
 		newCheck := ghclient.CheckRunInfo{
-			Name:           "test",
-			Status:         "in_progress",
-			WorkflowRunID:  300,
-			DetailsURL:     "https://github.com/test/test/actions/runs/300/job/2",
+			Name:          "test",
+			Status:        "in_progress",
+			WorkflowRunID: 300,
+			DetailsURL:    "https://github.com/test/test/actions/runs/300/job/2",
 		}
 
 		msg := ChecksUpdateMsg{
@@ -941,12 +942,12 @@ func TestRediscoveryOnNewJobs(t *testing.T) {
 		m.pendingWorkflowFetch = map[int64]bool{}
 
 		existingCheck := ghclient.CheckRunInfo{
-			Name:           "build",
-			Status:         "completed",
-			Conclusion:     "success",
-			WorkflowRunID:  100,
-			WorkflowID:     200,
-			DetailsURL:     "https://github.com/test/test/actions/runs/100/job/1",
+			Name:          "build",
+			Status:        "completed",
+			Conclusion:    "success",
+			WorkflowRunID: 100,
+			WorkflowID:    200,
+			DetailsURL:    "https://github.com/test/test/actions/runs/100/job/1",
 		}
 		key := checkKey(existingCheck)
 		m.seenCheckKeys[key] = true
@@ -1119,7 +1120,7 @@ func TestAdvSecAliasOnRediscovery(t *testing.T) {
 		}
 		m.jobAverages = map[string]time.Duration{
 			"Analyze (go)": 2 * time.Minute,
-			"CodeQL":        3 * time.Minute,
+			"CodeQL":       3 * time.Minute,
 		}
 		m.checkRuns = []ghclient.CheckRunInfo{
 			{Name: "Analyze (go)", WorkflowRunID: 100, WorkflowID: 789, WorkflowName: "CodeQL", DetailsURL: "https://github.com/test/test/actions/runs/100/job/1"},
@@ -1211,4 +1212,310 @@ func TestPresumedAverages(t *testing.T) {
 			t.Errorf("jobAverages[DCO] should not be set with nil presumedAverages, got %v", result.jobAverages["DCO"])
 		}
 	})
+}
+
+func TestCopilotGateSatisfied(t *testing.T) {
+	tests := []struct {
+		name           string
+		waitForCopilot bool
+		pending        bool
+		stale          bool
+		maxWaitElapsed bool
+		want           bool
+	}{
+		{name: "disabled", waitForCopilot: false, want: true},
+		{name: "not pending", waitForCopilot: true, pending: false, want: true},
+		{name: "pending and not stale", waitForCopilot: true, pending: true, stale: false, want: false},
+		{name: "pending but stale", waitForCopilot: true, pending: true, stale: true, want: true},
+		{name: "pending max wait elapsed", waitForCopilot: true, pending: true, maxWaitElapsed: true, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Model{
+				waitForCopilot: tt.waitForCopilot,
+				copilotPending: tt.pending,
+				copilotStale:   tt.stale,
+			}
+			if tt.maxWaitElapsed {
+				m.copilotWaitStartTime = time.Now().Add(-200 * time.Second)
+				m.copilotMaxWait = 180 * time.Second
+			} else if tt.pending {
+				m.copilotWaitStartTime = time.Now()
+				m.copilotMaxWait = 180 * time.Second
+			}
+			if got := copilotGateSatisfied(m); got != tt.want {
+				t.Errorf("copilotGateSatisfied() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandleCopilotReview(t *testing.T) {
+	completedChecks := []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}
+
+	t.Run("approved review completes and can quit", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.checksComplete = true
+		m.checkRuns = completedChecks
+
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			State: "approved",
+		})
+		result := model.(*Model)
+		if result.copilotPending {
+			t.Error("copilotPending should be false after approved review")
+		}
+		if !result.copilotReviewComplete {
+			t.Error("copilotReviewComplete should be true after approved review")
+		}
+		if !result.quitting {
+			t.Error("should quit when checks complete and copilot approved")
+		}
+		if result.exitCode != 0 {
+			t.Errorf("exitCode = %d, want 0", result.exitCode)
+		}
+	})
+
+	t.Run("changes_requested sets exit code 1", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.checksComplete = true
+		m.checkRuns = completedChecks
+
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			State: "changes_requested",
+		})
+		result := model.(*Model)
+		if result.exitCode != 1 {
+			t.Errorf("exitCode = %d, want 1 for changes_requested", result.exitCode)
+		}
+		if !result.quitting {
+			t.Error("should quit when checks complete and copilot changes_requested")
+		}
+	})
+
+	t.Run("pending review stays pending", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			State:   "pending",
+			Pending: true,
+		})
+		result := model.(*Model)
+		if !result.copilotPending {
+			t.Error("copilotPending should remain true")
+		}
+		if result.quitting {
+			t.Error("should not quit while copilot pending")
+		}
+	})
+
+	t.Run("stale review does not block", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.checksComplete = true
+		m.checkRuns = completedChecks
+
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			Stale:        true,
+			NotRequested: true,
+		})
+		result := model.(*Model)
+		if result.copilotPending {
+			t.Error("copilotPending should be false after stale")
+		}
+		if !result.quitting {
+			t.Error("should quit with stale review when checks complete")
+		}
+	})
+
+	t.Run("not requested requires two consecutive", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+
+		// First not-requested: should stay pending
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			NotRequested: true,
+		})
+		result := model.(*Model)
+		if !result.copilotPending {
+			t.Error("should stay pending after first not-requested")
+		}
+		if result.copilotNotReqStreak != 1 {
+			t.Errorf("streak = %d, want 1", result.copilotNotReqStreak)
+		}
+
+		// Second not-requested: should complete
+		model, _ = result.handleCopilotReview(CopilotReviewMsg{
+			NotRequested: true,
+		})
+		result = model.(*Model)
+		if result.copilotPending {
+			t.Error("should not be pending after two consecutive not-requested")
+		}
+		if !result.copilotReviewComplete {
+			t.Error("copilotReviewComplete should be true")
+		}
+	})
+
+	t.Run("error stores error and stays pending", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			Err: context.Canceled,
+		})
+		result := model.(*Model)
+		if result.err == nil {
+			t.Error("should store error")
+		}
+		if !result.copilotPending {
+			t.Error("should stay pending on error")
+		}
+	})
+
+	t.Run("cold start: PRInfoMsg arms gate, TickMsg fires first poll after initial delay", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotInitialDelay = 50 * time.Millisecond
+		m.copilotPollInterval = 10 * time.Millisecond
+		m.copilotMaxWait = 5 * time.Second
+		m.prNumber = 42
+		m.headSHA = "abc123"
+
+		// PRInfoMsg should arm the gate (copilotPending=true), set
+		// copilotWaitStartTime to now (max-wait measured from PR-info time),
+		// and copilotPollStartTime to now + initialDelay, but NOT dispatch a
+		// fetch. The gate must remain unsatisfied while pending and within
+		// max-wait.
+		model, _ := m.Update(PRInfoMsg{
+			Number:         42,
+			Title:          "test",
+			HeadSHA:        "abc123",
+			HeadCommitTime: time.Now(),
+		})
+		result := model.(Model)
+		if !result.copilotPending {
+			t.Fatal("copilotPending should be true after PRInfoMsg (gate armed)")
+		}
+		if result.copilotWaitStartTime.IsZero() {
+			t.Fatal("copilotWaitStartTime should be set after PRInfoMsg")
+		}
+		if result.copilotPollStartTime.IsZero() {
+			t.Fatal("copilotPollStartTime should be set after PRInfoMsg")
+		}
+		if !result.copilotPollStartTime.After(result.copilotWaitStartTime) {
+			t.Error("copilotPollStartTime should be after copilotWaitStartTime (now + initialDelay vs now)")
+		}
+		if copilotGateSatisfied(&result) {
+			t.Error("gate should not be satisfied while pending and within max-wait")
+		}
+
+		// Wait for the initial-delay window to elapse, then drive a TickMsg.
+		// The tick should batch a copilot fetch in addition to the two
+		// baseline cmds (fetchCheckRuns + tick). Margin is 150ms to avoid
+		// flakes on loaded CI runners (10ms was too tight).
+		time.Sleep(200 * time.Millisecond)
+		_, cmd := result.Update(TickMsg(time.Now()))
+		if n := countBatchedCmds(cmd); n < 3 {
+			t.Errorf("TickMsg after initial delay should dispatch copilot fetch; got %d cmds (want >=3)", n)
+		}
+	})
+
+	t.Run("cold start: TickMsg before initial delay does not poll copilot", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotInitialDelay = 1 * time.Hour // far in the future
+		m.copilotPollInterval = 10 * time.Millisecond
+		m.copilotMaxWait = 5 * time.Second
+		m.prNumber = 42
+		m.headSHA = "abc123"
+
+		model, _ := m.Update(PRInfoMsg{
+			Number:         42,
+			Title:          "test",
+			HeadSHA:        "abc123",
+			HeadCommitTime: time.Now(),
+		})
+		result := model.(Model)
+		if !result.copilotPending {
+			t.Fatal("copilotPending should be true after PRInfoMsg")
+		}
+
+		// TickMsg immediately after PRInfoMsg: initial-delay window not
+		// elapsed, so only the 2 baseline cmds (fetchCheckRuns + tick).
+		_, cmd := result.Update(TickMsg(time.Now()))
+		if n := countBatchedCmds(cmd); n != 2 {
+			t.Errorf("TickMsg before initial delay should not poll copilot; got %d cmds (want 2)", n)
+		}
+	})
+}
+
+// countBatchedCmds executes a tea.Cmd and, if it returns a tea.BatchMsg,
+// returns the number of batched commands. Returns 1 for a single (non-batch)
+// command and 0 for nil.
+func countBatchedCmds(cmd tea.Cmd) int {
+	if cmd == nil {
+		return 0
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		return len(batch)
+	}
+	return 1
+}
+
+func TestDetermineExitCode_Copilot(t *testing.T) {
+	tests := []struct {
+		name           string
+		checks         []ghclient.CheckRunInfo
+		copilotState   string
+		waitForCopilot bool
+		want           int
+	}{
+		{
+			name:           "copilot changes_requested fails",
+			checks:         []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}},
+			copilotState:   "changes_requested",
+			waitForCopilot: true,
+			want:           1,
+		},
+		{
+			name:           "copilot approved does not fail",
+			checks:         []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}},
+			copilotState:   "approved",
+			waitForCopilot: true,
+			want:           0,
+		},
+		{
+			name:           "copilot disabled ignores state",
+			checks:         []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}},
+			copilotState:   "changes_requested",
+			waitForCopilot: false,
+			want:           0,
+		},
+		{
+			name:           "check failure takes precedence",
+			checks:         []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure"}},
+			copilotState:   "approved",
+			waitForCopilot: true,
+			want:           1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := determineExitCode(tt.checks, tt.copilotState, tt.waitForCopilot)
+			if got != tt.want {
+				t.Errorf("determineExitCode() = %d, want %d", got, tt.want)
+			}
+		})
+	}
 }

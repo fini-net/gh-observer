@@ -41,16 +41,16 @@ type Annotation struct {
 
 // CheckRunInfo contains enriched check run data with workflow name
 type CheckRunInfo struct {
-	Name         string
-	WorkflowName string
-	AppName      string
-	Summary      string
-	Status       string
-	Conclusion   string
-	StartedAt    *time.Time
-	CompletedAt  *time.Time
-	DetailsURL   string
-	Annotations  []Annotation
+	Name          string
+	WorkflowName  string
+	AppName       string
+	Summary       string
+	Status        string
+	Conclusion    string
+	StartedAt     *time.Time
+	CompletedAt   *time.Time
+	DetailsURL    string
+	Annotations   []Annotation
 	WorkflowRunID int64
 	WorkflowID    int64
 }
@@ -79,19 +79,19 @@ type contextNode struct {
 				} `graphql:"location"`
 			}
 		} `graphql:"annotations(first: 5)"`
-	CheckSuite struct {
-		WorkflowRun struct {
-			DatabaseID BigInt `graphql:"databaseId"`
-			Workflow   struct {
+		CheckSuite struct {
+			WorkflowRun struct {
 				DatabaseID BigInt `graphql:"databaseId"`
-				Name       string
+				Workflow   struct {
+					DatabaseID BigInt `graphql:"databaseId"`
+					Name       string
+				}
+			}
+			App struct {
+				Name string
+				Slug string
 			}
 		}
-		App struct {
-			Name string
-			Slug string
-		}
-	}
 	} `graphql:"... on CheckRun"`
 	StatusContext struct {
 		Context     string
@@ -230,12 +230,17 @@ func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, re
 	var cursor *githubv4.String
 	rateLimitRemaining := 5000
 
+	prNum, err := safeGraphQLInt(prNumber)
+	if err != nil {
+		return nil, rateLimitRemaining, err
+	}
+
 	for {
 		var query pullRequestQuery
 		variables := map[string]any{
 			"owner":    githubv4.String(owner),
 			"repo":     githubv4.String(repo),
-			"prNumber": githubv4.Int(prNumber),
+			"prNumber": prNum,
 		}
 		if cursor != nil {
 			variables["contextsCursor"] = *cursor
