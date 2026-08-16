@@ -411,7 +411,7 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 		} else if review.NotRequested && !review.Stale {
 			fmt.Println("Copilot: not requested")
 		} else if review.Stale {
-			fmt.Println("Copilot: in progress (stale)")
+			fmt.Println("Copilot: stale (review targets old commit)")
 		} else if review.Pending {
 			fmt.Println("Copilot: in progress")
 		} else {
