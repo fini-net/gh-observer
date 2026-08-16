@@ -1391,9 +1391,11 @@ func TestHandleCopilotReview(t *testing.T) {
 		m.prNumber = 42
 		m.headSHA = "abc123"
 
-		// PRInfoMsg should arm the gate (copilotPending=true) and set
-		// copilotWaitStartTime to now + initialDelay, but NOT dispatch a
-		// fetch. The gate must remain unsatisfied while pending.
+		// PRInfoMsg should arm the gate (copilotPending=true), set
+		// copilotWaitStartTime to now (max-wait measured from PR-info time),
+		// and copilotPollStartTime to now + initialDelay, but NOT dispatch a
+		// fetch. The gate must remain unsatisfied while pending and within
+		// max-wait.
 		model, _ := m.Update(PRInfoMsg{
 			Number:         42,
 			Title:          "test",
@@ -1407,14 +1409,21 @@ func TestHandleCopilotReview(t *testing.T) {
 		if result.copilotWaitStartTime.IsZero() {
 			t.Fatal("copilotWaitStartTime should be set after PRInfoMsg")
 		}
+		if result.copilotPollStartTime.IsZero() {
+			t.Fatal("copilotPollStartTime should be set after PRInfoMsg")
+		}
+		if !result.copilotPollStartTime.After(result.copilotWaitStartTime) {
+			t.Error("copilotPollStartTime should be after copilotWaitStartTime (now + initialDelay vs now)")
+		}
 		if copilotGateSatisfied(&result) {
 			t.Error("gate should not be satisfied while pending and within max-wait")
 		}
 
 		// Wait for the initial-delay window to elapse, then drive a TickMsg.
 		// The tick should batch a copilot fetch in addition to the two
-		// baseline cmds (fetchCheckRuns + tick).
-		time.Sleep(60 * time.Millisecond)
+		// baseline cmds (fetchCheckRuns + tick). Margin is 150ms to avoid
+		// flakes on loaded CI runners (10ms was too tight).
+		time.Sleep(200 * time.Millisecond)
 		_, cmd := result.Update(TickMsg(time.Now()))
 		if n := countBatchedCmds(cmd); n < 3 {
 			t.Errorf("TickMsg after initial delay should dispatch copilot fetch; got %d cmds (want >=3)", n)

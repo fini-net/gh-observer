@@ -100,10 +100,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Poll Copilot review on its own cadence, gated on rate limit and
-		// the initial delay window (issue #409).
+		// the initial delay window (issue #409). copilotPollStartTime is
+		// PRInfoMsg-time + copilotInitialDelay; the first poll may fire only
+		// after that instant so GitHub has time to create the review request.
 		if m.waitForCopilot && m.copilotPending && !m.quitting &&
 			m.rateLimitRemaining >= minRateLimitForFetch &&
-			!m.copilotWaitStartTime.IsZero() && time.Now().After(m.copilotWaitStartTime) &&
+			!m.copilotPollStartTime.IsZero() && time.Now().After(m.copilotPollStartTime) &&
 			(m.copilotLastPoll.IsZero() || time.Since(m.copilotLastPoll) >= m.copilotPollInterval) {
 			cmds = append(cmds, fetchCopilotReview(m.ctx, m.token, m.owner, m.repo, m.prNumber, m.headSHA))
 		}
@@ -147,16 +149,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if shaChanged {
 				m.copilotState = ""
 				m.copilotStale = false
-				m.copilotSubmittedAt = time.Time{}
 				m.copilotReviewComplete = false
 				m.copilotNotReqStreak = 0
 				debug.Log("copilot state reset on head SHA change", "old", oldSHA, "new", msg.HeadSHA)
 			}
 			m.copilotPending = true
 			m.copilotReviewComplete = false
-			m.copilotWaitStartTime = time.Now().Add(m.copilotInitialDelay)
-			debug.Log("copilot gate armed, first poll after initial delay",
-				"delay", m.copilotInitialDelay, "wait_start", m.copilotWaitStartTime)
+			// copilotWaitStartTime bounds the total wall-clock wait for a
+			// Copilot review (copilot_max_wait), measured from PR-info time so
+			// the config knob means what it says. copilotPollStartTime is the
+			// initial-delay gate: the first poll may fire only after this
+			// instant, giving GitHub time to create the review request after a
+			// push. See copilotGateSatisfied and the TickMsg poll gate below.
+			m.copilotWaitStartTime = time.Now()
+			m.copilotPollStartTime = time.Now().Add(m.copilotInitialDelay)
+			debug.Log("copilot gate armed",
+				"wait_start", m.copilotWaitStartTime,
+				"poll_start", m.copilotPollStartTime,
+				"max_wait", m.copilotMaxWait,
+				"initial_delay", m.copilotInitialDelay)
 		}
 
 		return m, tea.Batch(cmds...)
@@ -434,7 +445,9 @@ func copilotGateSatisfied(m *Model) bool {
 	if m.copilotStale {
 		return true
 	}
-	// Max wait elapsed — stop waiting and proceed.
+	// Max wait elapsed (total wall-clock since PRInfoMsg) — stop waiting and
+	// proceed. copilot_max_wait measures from PR-info time, so this includes
+	// the initial-delay window (issue #409).
 	if !m.copilotWaitStartTime.IsZero() && time.Since(m.copilotWaitStartTime) >= m.copilotMaxWait {
 		debug.Log("copilot max wait elapsed, proceeding", "max_wait", m.copilotMaxWait)
 		return true
@@ -476,7 +489,6 @@ func (m *Model) handleCopilotReview(msg CopilotReviewMsg) (tea.Model, tea.Cmd) {
 
 	m.copilotState = msg.State
 	m.copilotStale = msg.Stale
-	m.copilotSubmittedAt = msg.SubmittedAt
 
 	if msg.Pending {
 		m.copilotPending = true
@@ -602,8 +614,6 @@ func fetchCopilotReview(ctx context.Context, token, owner, repo string, prNumber
 		}
 		return CopilotReviewMsg{
 			State:              review.State,
-			SubmittedAt:        review.SubmittedAt,
-			CommitOID:          review.CommitOID,
 			Stale:              review.Stale,
 			Pending:            review.Pending,
 			NotRequested:       review.NotRequested,

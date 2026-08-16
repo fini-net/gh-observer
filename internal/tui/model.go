@@ -89,21 +89,23 @@ type Model struct {
 
 	// Copilot code review detection (issue #409). PR mode only — run mode
 	// has no reviews object to query. copilotPending gates exit; copilotStale
-	// surfaces a warning. copilotWaitStartTime is set to now + initial delay
-	// on PRInfoMsg, and copilotMaxWait bounds how long we wait before
-	// timing out and proceeding.
-	waitForCopilot        bool
-	copilotMaxWait        time.Duration
-	copilotPollInterval   time.Duration
-	copilotInitialDelay   time.Duration
-	copilotState          string
-	copilotStale          bool
-	copilotSubmittedAt    time.Time
-	copilotPending        bool
-	copilotWaitStartTime  time.Time
-	copilotLastPoll       time.Time
-	copilotNotReqStreak   int
-	copilotReviewComplete bool
+	// surfaces a warning. copilotWaitStartTime is set to PRInfoMsg time and
+	// copilotMaxWait bounds the total wall-clock wait before timing out and
+	// proceeding. copilotPollStartTime is set to now + initialDelay and gates
+	// when the first Copilot review poll may fire (gives GitHub time to create
+	// the review request after a push).
+	waitForCopilot         bool
+	copilotMaxWait         time.Duration
+	copilotPollInterval    time.Duration
+	copilotInitialDelay    time.Duration
+	copilotState           string
+	copilotStale           bool
+	copilotPending         bool
+	copilotWaitStartTime   time.Time
+	copilotPollStartTime   time.Time
+	copilotLastPoll        time.Time
+	copilotNotReqStreak    int
+	copilotReviewComplete  bool
 }
 
 // NewModel creates a new TUI model

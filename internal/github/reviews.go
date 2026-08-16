@@ -3,7 +3,6 @@ package github
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/fini-net/gh-observer/internal/debug"
 	"github.com/shurcooL/githubv4"
@@ -17,12 +16,11 @@ const copilotReviewerLogin = "copilot-pull-request-reviewer"
 // Unlike CheckRunInfo, reviews have no startedAt/completedAt timestamps, so
 // they must not participate in timing calculations.
 type CopilotReview struct {
-	State        string    // lowercase review state: approved, changes_requested, commented, dismissed, pending
-	SubmittedAt  time.Time // zero if pending or no review found
-	CommitOID    string    // the commit the review targets (empty if no review)
-	Stale        bool      // true if a review exists but targets a different commit than headSHA
-	Pending      bool      // true if Copilot review is requested but not yet submitted
-	NotRequested bool      // true if no Copilot review request and no review found
+	State        string // lowercase review state: approved, changes_requested, commented, dismissed, pending
+	CommitOID    string // the commit the review targets (empty if no review)
+	Stale        bool   // true if a review exists but targets a different commit than headSHA
+	Pending      bool   // true if Copilot review is requested but not yet submitted
+	NotRequested bool   // true if no Copilot review request and no review found
 }
 
 // CopilotReviewFails returns true if the review state indicates the PR should
@@ -171,9 +169,6 @@ func parseCopilotReview(query *copilotReviewQuery, headSHA string) CopilotReview
 	case headReview != nil:
 		review.State = strings.ToLower(headReview.State)
 		review.CommitOID = headReview.Commit.OID
-		if !headReview.SubmittedAt.IsZero() {
-			review.SubmittedAt = headReview.SubmittedAt.Time
-		}
 		// Complete (state is APPROVED/CHANGES_REQUESTED/COMMENTED/DISMISSED),
 		// not PENDING — a PENDING review on HEAD means it's still in progress.
 		if review.State == "pending" {

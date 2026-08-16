@@ -51,8 +51,6 @@ type JobAveragesPartialMsg struct {
 // their own message type (issue #409).
 type CopilotReviewMsg struct {
 	State              string
-	SubmittedAt        time.Time
-	CommitOID          string
 	Stale              bool
 	Pending            bool
 	NotRequested       bool

@@ -240,15 +240,15 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 // (issue #409).
 func (m Model) renderCopilotStatusLine() string {
 	if m.copilotPending && !m.copilotStale {
-		elapsed := time.Since(m.copilotWaitStartTime)
-		if elapsed < 0 {
-			// Still inside the initial-delay window (copilotWaitStartTime is
-			// set to now + copilotInitialDelay). Polling hasn't started yet, so
-			// show a distinct message rather than clamping to "0s elapsed".
-			remaining := -elapsed
+		remaining := time.Until(m.copilotPollStartTime)
+		if remaining > 0 {
+			// Still inside the initial-delay window (copilotPollStartTime is
+			// set to PRInfoMsg-time + copilotInitialDelay). Polling hasn't
+			// started yet, so show a countdown rather than "0s elapsed".
 			return fmt.Sprintf("%s %s\n", m.spinner.View(),
 				m.styles.Running.Render(fmt.Sprintf("Copilot review queued, polling in %s…", timing.FormatDuration(remaining))))
 		}
+		elapsed := time.Since(m.copilotPollStartTime)
 		return fmt.Sprintf("%s %s\n", m.spinner.View(),
 			m.styles.Running.Render(fmt.Sprintf("Copilot review in progress… (%s elapsed)", timing.FormatDuration(elapsed))))
 	}

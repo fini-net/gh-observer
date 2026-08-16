@@ -36,7 +36,10 @@ presumed_averages:
 # Set wait_for_copilot: false for repos that don't use Copilot.
 wait_for_copilot: true
 
-# Maximum time to wait for a Copilot review before timing out and proceeding.
+# Maximum total wall-clock time to wait for a Copilot review before timing out
+# and proceeding. Measured from PR-info time (when the head SHA is known), so
+# it includes the initial_delay window below. copilot_max_wait does NOT add to
+# copilot_initial_delay — it bounds the whole wait.
 copilot_max_wait: 180s
 
 # Polling interval for the Copilot review state query (separate from
@@ -44,5 +47,6 @@ copilot_max_wait: 180s
 copilot_poll_interval: 10s
 
 # Initial delay before the first Copilot review poll, giving GitHub time to
-# create the review request after a push.
+# create the review request after a push. Bounded by copilot_max_wait above
+# (the delay counts toward the total wait, it does not add to it).
 copilot_initial_delay: 15s
