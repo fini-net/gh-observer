@@ -469,6 +469,55 @@ func TestFetchCopilotReview(t *testing.T) {
 	}
 }
 
+// TestFetchCopilotReview_BeyondFirstPage is a regression test for the
+// `reviews(first: 25)` bug (issue #409 review). On a heavily-reviewed PR with
+// more than 25 total reviews across all reviewers, `first: 25` returned the
+// oldest 25 of the ascending reviews connection, dropping the newest Copilot
+// review on HEAD entirely — so headReview stayed nil and the gate fell
+// through to "not requested", silently passing a changes_requested review.
+// With `reviews(last: 25)` the most recent 25 are returned and the newest
+// Copilot review on HEAD is found. Here 25 non-Copilot reviews precede a
+// Copilot CHANGES_REQUESTED on HEAD; the fetch must surface that state.
+func TestFetchCopilotReview_BeyondFirstPage(t *testing.T) {
+	headSHA := "abc123def456"
+
+	var reviews []struct {
+		Author struct {
+			Login string
+		}
+		State       string
+		SubmittedAt githubv4.DateTime
+		Commit      struct {
+			OID string
+		}
+		Body string
+	}
+	// 25 non-Copilot reviews fill the first page under the old `first: 25`
+	// semantics, pushing the Copilot review out of the returned window.
+	for i := 0; i < 25; i++ {
+		reviews = append(reviews, makeReviewNode("some-user", "COMMENTED", headSHA, ""))
+	}
+	// Newest Copilot review on HEAD — the one that must win.
+	reviews = append(reviews, makeReviewNode("copilot-pull-request-reviewer", "CHANGES_REQUESTED", headSHA, "2025-01-02T00:00:00Z"))
+
+	query := makeReviewQuery(nil, reviews, 4980)
+	mock := &mockReviewQuerier{responses: []mockReviewResponse{{query: query}}}
+
+	review, rateLimit, err := fetchCopilotReview(context.Background(), mock, "owner", "repo", 42, headSHA)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if review.State != "changes_requested" {
+		t.Errorf("State = %q, want %q (newest Copilot review on HEAD must be found, not dropped)", review.State, "changes_requested")
+	}
+	if review.NotRequested {
+		t.Error("NotRequested = true, want false (must not fall through to not-requested when a HEAD review exists beyond the old first:25 window)")
+	}
+	if rateLimit != 4980 {
+		t.Errorf("rateLimit = %d, want 4980", rateLimit)
+	}
+}
+
 func TestCopilotReviewFails(t *testing.T) {
 	tests := []struct {
 		state string

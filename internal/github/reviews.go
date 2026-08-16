@@ -65,7 +65,7 @@ type copilotReviewQuery struct {
 					}
 					Body string
 				}
-			} `graphql:"reviews(first: 25)"`
+			} `graphql:"reviews(last: 25)"`
 		} `graphql:"pullRequest(number: $prNumber)"`
 	} `graphql:"repository(owner: $owner, name: $repo)"`
 	RateLimit struct {
@@ -143,8 +143,11 @@ func parseCopilotReview(query *copilotReviewQuery, headSHA string) CopilotReview
 
 	sawStale := false
 	// The reviews connection returns nodes in chronological (ascending)
-	// submission order — oldest first, newest last. Iterate in reverse so
-	// the first HEAD-matching node encountered is the most recent review.
+	// submission order — oldest first, newest last — whether fetched via
+	// `reviews(first: N)` or `reviews(last: N)`. We query `last: 25` so the
+	// most recent 25 reviews (across all reviewers) are returned; iterate in
+	// reverse so the first HEAD-matching node encountered is the most recent
+	// review on that commit.
 	for i := len(query.Repository.PullRequest.Reviews.Nodes) - 1; i >= 0; i-- {
 		node := &query.Repository.PullRequest.Reviews.Nodes[i]
 		if !strings.EqualFold(node.Author.Login, copilotReviewerLogin) {
