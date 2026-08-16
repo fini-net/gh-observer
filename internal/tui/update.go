@@ -94,11 +94,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tick(m.refreshInterval * 3)
 		}
 
-		// Only poll if we have the PR number
-		return m, tea.Batch(
+		cmds := []tea.Cmd{
 			fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber),
 			tick(m.refreshInterval),
-		)
+		}
+
+		// Poll Copilot review on its own cadence, gated on rate limit and
+		// the initial delay window (issue #409).
+		if m.waitForCopilot && m.copilotPending && !m.quitting &&
+			m.rateLimitRemaining >= minRateLimitForFetch &&
+			!m.copilotWaitStartTime.IsZero() && time.Now().After(m.copilotWaitStartTime) &&
+			(m.copilotLastPoll.IsZero() || time.Since(m.copilotLastPoll) >= m.copilotPollInterval) {
+			cmds = append(cmds, fetchCopilotReview(m.ctx, m.token, m.owner, m.repo, m.prNumber, m.headSHA))
+		}
+
+		return m, tea.Batch(cmds...)
 
 	case PRInfoMsg:
 		if msg.Err != nil {
@@ -106,16 +116,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		shaChanged := m.headSHA != "" && m.headSHA != msg.HeadSHA
+
 		m.prTitle = msg.Title
 		m.headSHA = msg.HeadSHA
 		m.prCreatedAt = msg.CreatedAt
 		m.headCommitTime = msg.HeadCommitTime
 
-		// Start polling checks now that we have the PR info
-		return m, fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber)
+		cmds := []tea.Cmd{
+			fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber),
+		}
+
+		// Start Copilot review polling once headSHA is known (issue #409).
+		// If the head SHA changed (new push), reset copilot state so a stale
+		// review from the old commit doesn't gate or falsely complete.
+		if m.waitForCopilot {
+			if shaChanged {
+				m.copilotState = ""
+				m.copilotStale = false
+				m.copilotSubmittedAt = time.Time{}
+				m.copilotPending = false
+				m.copilotReviewComplete = false
+				m.copilotNotReqStreak = 0
+				debug.Log("copilot state reset on head SHA change", "old", m.headSHA, "new", msg.HeadSHA)
+			}
+			m.copilotWaitStartTime = time.Now().Add(m.copilotInitialDelay)
+			cmds = append(cmds, fetchCopilotReview(m.ctx, m.token, m.owner, m.repo, m.prNumber, m.headSHA))
+		}
+
+		return m, tea.Batch(cmds...)
 
 	case ChecksUpdateMsg:
 		return m.handleChecksUpdate(msg)
+
+	case CopilotReviewMsg:
+		return m.handleCopilotReview(msg)
 
 	case WorkflowsDiscoveredMsg:
 		if msg.Err != nil {
@@ -356,8 +391,8 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if allChecksComplete(m.checkRuns) && canTrustCompletion(m) {
-		m.exitCode = determineExitCode(m.checkRuns)
+	if allChecksComplete(m.checkRuns) && canTrustCompletion(m) && copilotGateSatisfied(m) {
+		m.exitCode = determineExitCode(m.checkRuns, m.copilotState, m.waitForCopilot)
 		m.checksComplete = true
 		if !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 {
 			m.quitting = true
@@ -367,6 +402,87 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+// copilotGateSatisfied returns true when the Copilot review is not blocking
+// exit — either because the feature is disabled, the review is complete, the
+// review is stale (self-limiting; next poll re-evaluates), or the max wait
+// has elapsed (issue #409).
+func copilotGateSatisfied(m *Model) bool {
+	if !m.waitForCopilot {
+		return true
+	}
+	if !m.copilotPending {
+		return true
+	}
+	// A stale review doesn't block — it's informational and self-corrects.
+	if m.copilotStale {
+		return true
+	}
+	// Max wait elapsed — stop waiting and proceed.
+	if !m.copilotWaitStartTime.IsZero() && time.Since(m.copilotWaitStartTime) >= m.copilotMaxWait {
+		debug.Log("copilot max wait elapsed, proceeding", "max_wait", m.copilotMaxWait)
+		return true
+	}
+	return false
+}
+
+// handleCopilotReview processes Copilot review state updates (issue #409).
+func (m *Model) handleCopilotReview(msg CopilotReviewMsg) (tea.Model, tea.Cmd) {
+	m.copilotLastPoll = time.Now()
+
+	if msg.Err != nil {
+		debug.Log("copilot review fetch error", "err", msg.Err)
+		m.err = msg.Err
+		return m, nil
+	}
+
+	if msg.RateLimitRemaining > 0 && msg.RateLimitRemaining < m.rateLimitRemaining {
+		m.rateLimitRemaining = msg.RateLimitRemaining
+	}
+
+	// Two-consecutive-not-found rule: require two consecutive "not requested
+	// and no HEAD review" polls before declaring Copilot not requested. This
+	// absorbs GraphQL read lag after a REST POST that requested the review.
+	if msg.NotRequested && !msg.Stale {
+		m.copilotNotReqStreak++
+		if m.copilotNotReqStreak < 2 {
+			debug.Log("copilot not requested (streak incomplete)", "streak", m.copilotNotReqStreak)
+			return m, nil
+		}
+		// Two consecutive not-requested: Copilot isn't on this PR.
+		m.copilotPending = false
+		m.copilotReviewComplete = true
+		m.copilotState = ""
+		debug.Log("copilot not requested (confirmed)")
+		return m, nil
+	}
+	m.copilotNotReqStreak = 0
+
+	m.copilotState = msg.State
+	m.copilotStale = msg.Stale
+	m.copilotSubmittedAt = msg.SubmittedAt
+
+	if msg.Pending {
+		m.copilotPending = true
+		m.copilotReviewComplete = false
+		debug.Log("copilot review in progress")
+		return m, nil
+	}
+
+	// Review complete (or stale with no pending) — stop blocking.
+	m.copilotPending = false
+	m.copilotReviewComplete = true
+	debug.Log("copilot review complete", "state", msg.State, "stale", msg.Stale)
+
+	// If checks are already done and averages fetched, quit now.
+	if m.checksComplete && !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 {
+		m.exitCode = determineExitCode(m.checkRuns, m.copilotState, m.waitForCopilot)
+		m.quitting = true
+		return m, tea.Quit
+	}
+
+	return m, nil
 }
 
 // tick creates a command that sends a TickMsg after duration d
@@ -460,6 +576,27 @@ func fetchCheckRuns(ctx context.Context, token, owner, repo string, prNumber int
 	}
 }
 
+// fetchCopilotReview fetches the Copilot code review state via GraphQL
+// (issue #409). This is a second query path alongside fetchCheckRuns, hitting
+// PullRequest.reviews instead of StatusCheckRollup.Contexts.
+func fetchCopilotReview(ctx context.Context, token, owner, repo string, prNumber int, headSHA string) tea.Cmd {
+	return func() tea.Msg {
+		review, rateLimit, err := ghclient.FetchCopilotReview(ctx, token, owner, repo, prNumber, headSHA)
+		if err != nil {
+			return CopilotReviewMsg{Err: err, RateLimitRemaining: rateLimit}
+		}
+		return CopilotReviewMsg{
+			State:              review.State,
+			SubmittedAt:        review.SubmittedAt,
+			CommitOID:          review.CommitOID,
+			Stale:              review.Stale,
+			Pending:            review.Pending,
+			NotRequested:       review.NotRequested,
+			RateLimitRemaining: rateLimit,
+		}
+	}
+}
+
 // allChecksComplete returns true if all checks have finished
 func allChecksComplete(checks []ghclient.CheckRunInfo) bool {
 	if len(checks) == 0 {
@@ -475,12 +612,17 @@ func allChecksComplete(checks []ghclient.CheckRunInfo) bool {
 	return true
 }
 
-// determineExitCode returns 1 if any check failed, 0 otherwise
-func determineExitCode(checks []ghclient.CheckRunInfo) int {
+// determineExitCode returns 1 if any check failed or the Copilot review
+// requested changes, 0 otherwise. The copilotState and waitForCopilot params
+// are only meaningful in PR mode (issue #409); run mode passes "" and false.
+func determineExitCode(checks []ghclient.CheckRunInfo, copilotState string, waitForCopilot bool) int {
 	for _, check := range checks {
 		if ghclient.FailureConclusion(check.Conclusion) {
 			return 1
 		}
+	}
+	if waitForCopilot && ghclient.CopilotReviewFails(copilotState) {
+		return 1
 	}
 	return 0
 }

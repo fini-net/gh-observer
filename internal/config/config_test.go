@@ -339,3 +339,64 @@ func lookupCI(m map[string]time.Duration, key string) time.Duration {
 	}
 	return 0
 }
+
+func TestLoad_CopilotDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	if !cfg.WaitForCopilot {
+		t.Errorf("WaitForCopilot = %v, want true", cfg.WaitForCopilot)
+	}
+	if cfg.CopilotMaxWait != 180*time.Second {
+		t.Errorf("CopilotMaxWait = %v, want 180s", cfg.CopilotMaxWait)
+	}
+	if cfg.CopilotPollInterval != 10*time.Second {
+		t.Errorf("CopilotPollInterval = %v, want 10s", cfg.CopilotPollInterval)
+	}
+	if cfg.CopilotInitialDelay != 15*time.Second {
+		t.Errorf("CopilotInitialDelay = %v, want 15s", cfg.CopilotInitialDelay)
+	}
+}
+
+func TestLoad_CopilotCustom(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, ".config", "gh-observer")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("failed to create config dir: %v", err)
+	}
+
+	configContent := `wait_for_copilot: false
+copilot_max_wait: 300s
+copilot_poll_interval: 5s
+copilot_initial_delay: 30s
+`
+	configPath := filepath.Join(configDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	if cfg.WaitForCopilot {
+		t.Errorf("WaitForCopilot = %v, want false", cfg.WaitForCopilot)
+	}
+	if cfg.CopilotMaxWait != 300*time.Second {
+		t.Errorf("CopilotMaxWait = %v, want 300s", cfg.CopilotMaxWait)
+	}
+	if cfg.CopilotPollInterval != 5*time.Second {
+		t.Errorf("CopilotPollInterval = %v, want 5s", cfg.CopilotPollInterval)
+	}
+	if cfg.CopilotInitialDelay != 30*time.Second {
+		t.Errorf("CopilotInitialDelay = %v, want 30s", cfg.CopilotInitialDelay)
+	}
+}

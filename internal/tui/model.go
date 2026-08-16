@@ -86,10 +86,28 @@ type Model struct {
 	// (e.g. "1s") instead of blank. Configured via config.yaml's
 	// presumed_averages map.
 	presumedAverages map[string]time.Duration
+
+	// Copilot code review detection (issue #409). PR mode only — run mode
+	// has no reviews object to query. copilotPending gates exit; copilotStale
+	// surfaces a warning. copilotWaitStartTime is set to now + initial delay
+	// on PRInfoMsg, and copilotMaxWait bounds how long we wait before
+	// timing out and proceeding.
+	waitForCopilot        bool
+	copilotMaxWait        time.Duration
+	copilotPollInterval   time.Duration
+	copilotInitialDelay   time.Duration
+	copilotState          string
+	copilotStale          bool
+	copilotSubmittedAt    time.Time
+	copilotPending        bool
+	copilotWaitStartTime  time.Time
+	copilotLastPoll       time.Time
+	copilotNotReqStreak   int
+	copilotReviewComplete bool
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool, presumedAverages map[string]time.Duration) Model {
+func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool, presumedAverages map[string]time.Duration, waitForCopilot bool, copilotMaxWait, copilotPollInterval, copilotInitialDelay time.Duration) Model {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	return Model{
@@ -114,6 +132,10 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 		dispatchedWorkflowFetch: make(map[int64]bool),
 		seenCheckKeys:          make(map[string]bool),
 		presumedAverages:        presumedAverages,
+		waitForCopilot:          waitForCopilot,
+		copilotMaxWait:          copilotMaxWait,
+		copilotPollInterval:     copilotPollInterval,
+		copilotInitialDelay:     copilotInitialDelay,
 	}
 }
 

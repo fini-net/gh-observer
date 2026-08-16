@@ -85,6 +85,26 @@ func GetCheckIcon(status, conclusion string) string {
 	}
 }
 
+// GetCopilotReviewIcon returns the icon for a Copilot review row, keyed on
+// review state (not check status/conclusion). Reviews are a distinct concept
+// from check runs, so this is separate from GetCheckIcon (issue #409).
+func GetCopilotReviewIcon(state string) string {
+	switch state {
+	case "approved":
+		return "✓"
+	case "changes_requested":
+		return "✗"
+	case "commented":
+		return "💬"
+	case "dismissed":
+		return "⊘"
+	case "pending":
+		return "◐"
+	default:
+		return "?"
+	}
+}
+
 // FormatCheckName formats the check name as "Workflow / Job", "App / Job", or just "Job"
 func FormatCheckName(check ghclient.CheckRunInfo) string {
 	if check.WorkflowName != "" {

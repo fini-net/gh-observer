@@ -172,7 +172,7 @@ func TestDetermineExitCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := determineExitCode(tt.checks)
+			got := determineExitCode(tt.checks, "", false)
 			if got != tt.want {
 				t.Errorf("determineExitCode() = %v, want %v", got, tt.want)
 			}
@@ -1211,4 +1211,220 @@ func TestPresumedAverages(t *testing.T) {
 			t.Errorf("jobAverages[DCO] should not be set with nil presumedAverages, got %v", result.jobAverages["DCO"])
 		}
 	})
+}
+
+func TestCopilotGateSatisfied(t *testing.T) {
+	tests := []struct {
+		name           string
+		waitForCopilot bool
+		pending        bool
+		stale          bool
+		maxWaitElapsed bool
+		want           bool
+	}{
+		{name: "disabled", waitForCopilot: false, want: true},
+		{name: "not pending", waitForCopilot: true, pending: false, want: true},
+		{name: "pending and not stale", waitForCopilot: true, pending: true, stale: false, want: false},
+		{name: "pending but stale", waitForCopilot: true, pending: true, stale: true, want: true},
+		{name: "pending max wait elapsed", waitForCopilot: true, pending: true, maxWaitElapsed: true, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Model{
+				waitForCopilot: tt.waitForCopilot,
+				copilotPending: tt.pending,
+				copilotStale:   tt.stale,
+			}
+			if tt.maxWaitElapsed {
+				m.copilotWaitStartTime = time.Now().Add(-200 * time.Second)
+				m.copilotMaxWait = 180 * time.Second
+			} else if tt.pending {
+				m.copilotWaitStartTime = time.Now()
+				m.copilotMaxWait = 180 * time.Second
+			}
+			if got := copilotGateSatisfied(m); got != tt.want {
+				t.Errorf("copilotGateSatisfied() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandleCopilotReview(t *testing.T) {
+	completedChecks := []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}
+
+	t.Run("approved review completes and can quit", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.checksComplete = true
+		m.checkRuns = completedChecks
+
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			State: "approved",
+		})
+		result := model.(*Model)
+		if result.copilotPending {
+			t.Error("copilotPending should be false after approved review")
+		}
+		if !result.copilotReviewComplete {
+			t.Error("copilotReviewComplete should be true after approved review")
+		}
+		if !result.quitting {
+			t.Error("should quit when checks complete and copilot approved")
+		}
+		if result.exitCode != 0 {
+			t.Errorf("exitCode = %d, want 0", result.exitCode)
+		}
+	})
+
+	t.Run("changes_requested sets exit code 1", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.checksComplete = true
+		m.checkRuns = completedChecks
+
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			State: "changes_requested",
+		})
+		result := model.(*Model)
+		if result.exitCode != 1 {
+			t.Errorf("exitCode = %d, want 1 for changes_requested", result.exitCode)
+		}
+		if !result.quitting {
+			t.Error("should quit when checks complete and copilot changes_requested")
+		}
+	})
+
+	t.Run("pending review stays pending", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			State:   "pending",
+			Pending: true,
+		})
+		result := model.(*Model)
+		if !result.copilotPending {
+			t.Error("copilotPending should remain true")
+		}
+		if result.quitting {
+			t.Error("should not quit while copilot pending")
+		}
+	})
+
+	t.Run("stale review does not block", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.checksComplete = true
+		m.checkRuns = completedChecks
+
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			Stale:         true,
+			NotRequested:  true,
+		})
+		result := model.(*Model)
+		if result.copilotPending {
+			t.Error("copilotPending should be false after stale")
+		}
+		if !result.quitting {
+			t.Error("should quit with stale review when checks complete")
+		}
+	})
+
+	t.Run("not requested requires two consecutive", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+
+		// First not-requested: should stay pending
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			NotRequested: true,
+		})
+		result := model.(*Model)
+		if !result.copilotPending {
+			t.Error("should stay pending after first not-requested")
+		}
+		if result.copilotNotReqStreak != 1 {
+			t.Errorf("streak = %d, want 1", result.copilotNotReqStreak)
+		}
+
+		// Second not-requested: should complete
+		model, _ = result.handleCopilotReview(CopilotReviewMsg{
+			NotRequested: true,
+		})
+		result = model.(*Model)
+		if result.copilotPending {
+			t.Error("should not be pending after two consecutive not-requested")
+		}
+		if !result.copilotReviewComplete {
+			t.Error("copilotReviewComplete should be true")
+		}
+	})
+
+	t.Run("error stores error and stays pending", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			Err: context.Canceled,
+		})
+		result := model.(*Model)
+		if result.err == nil {
+			t.Error("should store error")
+		}
+		if !result.copilotPending {
+			t.Error("should stay pending on error")
+		}
+	})
+}
+
+func TestDetermineExitCode_Copilot(t *testing.T) {
+	tests := []struct {
+		name           string
+		checks         []ghclient.CheckRunInfo
+		copilotState   string
+		waitForCopilot bool
+		want           int
+	}{
+		{
+			name:           "copilot changes_requested fails",
+			checks:         []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}},
+			copilotState:   "changes_requested",
+			waitForCopilot: true,
+			want:           1,
+		},
+		{
+			name:           "copilot approved does not fail",
+			checks:         []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}},
+			copilotState:   "approved",
+			waitForCopilot: true,
+			want:           0,
+		},
+		{
+			name:           "copilot disabled ignores state",
+			checks:         []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}},
+			copilotState:   "changes_requested",
+			waitForCopilot: false,
+			want:           0,
+		},
+		{
+			name:           "check failure takes precedence",
+			checks:         []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "failure"}},
+			copilotState:   "approved",
+			waitForCopilot: true,
+			want:           1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := determineExitCode(tt.checks, tt.copilotState, tt.waitForCopilot)
+			if got != tt.want {
+				t.Errorf("determineExitCode() = %d, want %d", got, tt.want)
+			}
+		})
+	}
 }

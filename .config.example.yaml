@@ -28,3 +28,21 @@ colors:
 # equivalent). Durations use Go time.ParseDuration syntax.
 presumed_averages:
   DCO: 1s
+
+# Copilot code review detection (issue #409). When enabled (default), the TUI
+# gates exit on Copilot review completion in PR mode, mirroring template-repo's
+# wait_for_copilot.sh. Copilot reviews don't appear in StatusCheckRollup, so
+# without this gh-observer would quit "green" while Copilot is still reviewing.
+# Set wait_for_copilot: false for repos that don't use Copilot.
+wait_for_copilot: true
+
+# Maximum time to wait for a Copilot review before timing out and proceeding.
+copilot_max_wait: 180s
+
+# Polling interval for the Copilot review state query (separate from
+# refresh_interval, which governs check-run polling).
+copilot_poll_interval: 10s
+
+# Initial delay before the first Copilot review poll, giving GitHub time to
+# create the review request after a push.
+copilot_initial_delay: 15s
