@@ -116,6 +116,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		oldSHA := m.headSHA
 		shaChanged := m.headSHA != "" && m.headSHA != msg.HeadSHA
 
 		m.prTitle = msg.Title
@@ -144,7 +145,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.copilotSubmittedAt = time.Time{}
 				m.copilotReviewComplete = false
 				m.copilotNotReqStreak = 0
-				debug.Log("copilot state reset on head SHA change", "old", m.headSHA, "new", msg.HeadSHA)
+				debug.Log("copilot state reset on head SHA change", "old", oldSHA, "new", msg.HeadSHA)
 			}
 			m.copilotPending = true
 			m.copilotReviewComplete = false
