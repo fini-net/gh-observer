@@ -85,10 +85,14 @@ func FetchCopilotReview(ctx context.Context, token, owner, repo string, prNumber
 
 func fetchCopilotReview(ctx context.Context, client graphqlQuerier, owner, repo string, prNumber int, headSHA string) (CopilotReview, int, error) {
 	var query copilotReviewQuery
+	prNum, err := safeGraphQLInt(prNumber)
+	if err != nil {
+		return CopilotReview{}, 5000, err
+	}
 	variables := map[string]any{
 		"owner":    githubv4.String(owner),
 		"repo":     githubv4.String(repo),
-		"prNumber": githubv4.Int(prNumber),
+		"prNumber": prNum,
 	}
 
 	if err := client.Query(ctx, &query, variables); err != nil {
