@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
@@ -17,12 +18,12 @@ func makeModel() *Model {
 		rateLimitRemaining:      5000,
 		jobAverages:             make(map[string]time.Duration),
 		workflowAverages:        make(map[int64]map[string]time.Duration),
-		advSecMatchWorkflow:    make(map[string]int64),
+		advSecMatchWorkflow:     make(map[string]int64),
 		runIDToWorkflowID:       make(map[int64]int64),
 		fetchedWorkflowIDs:      make(map[int64]bool),
 		pendingWorkflowFetch:    make(map[int64]bool),
 		dispatchedWorkflowFetch: make(map[int64]bool),
-		seenCheckKeys:          make(map[string]bool),
+		seenCheckKeys:           make(map[string]bool),
 	}
 }
 
@@ -192,19 +193,19 @@ func TestHandleChecksUpdate(t *testing.T) {
 		wantChecksStored   bool
 	}{
 		{
-			name:               "error in message stores error and returns nil cmd",
-			msg:                ChecksUpdateMsg{Err: context.Canceled},
-			wantErr:            true,
-			wantExitCode:       0,
-			wantQuitting:       false,
-			wantChecksStored:   false,
+			name:             "error in message stores error and returns nil cmd",
+			msg:              ChecksUpdateMsg{Err: context.Canceled},
+			wantErr:          true,
+			wantExitCode:     0,
+			wantQuitting:     false,
+			wantChecksStored: false,
 		},
 		{
-			name:               "successful update stores check runs",
-			msg:                ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress", Conclusion: ""}}, RateLimitRemaining: 5000},
-			rateLimit:          5000,
-			wantErr:            false,
-			wantChecksStored:   true,
+			name:             "successful update stores check runs",
+			msg:              ChecksUpdateMsg{CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress", Conclusion: ""}}, RateLimitRemaining: 5000},
+			rateLimit:        5000,
+			wantErr:          false,
+			wantChecksStored: true,
 		},
 		{
 			name:               "all checks complete sets exit code 0 on success",
@@ -897,12 +898,12 @@ func TestRediscoveryOnNewJobs(t *testing.T) {
 		m.jobAverages = map[string]time.Duration{"build": time.Minute}
 
 		initialCheck := ghclient.CheckRunInfo{
-			Name:           "build",
-			Status:         "completed",
-			Conclusion:     "success",
-			WorkflowRunID:  100,
-			WorkflowID:     200,
-			DetailsURL:     "https://github.com/test/test/actions/runs/100/job/1",
+			Name:          "build",
+			Status:        "completed",
+			Conclusion:    "success",
+			WorkflowRunID: 100,
+			WorkflowID:    200,
+			DetailsURL:    "https://github.com/test/test/actions/runs/100/job/1",
 		}
 		key := checkKey(initialCheck)
 		m.seenCheckKeys[key] = true
@@ -911,10 +912,10 @@ func TestRediscoveryOnNewJobs(t *testing.T) {
 		m.pendingWorkflowFetch = map[int64]bool{}
 
 		newCheck := ghclient.CheckRunInfo{
-			Name:           "test",
-			Status:         "in_progress",
-			WorkflowRunID:  300,
-			DetailsURL:     "https://github.com/test/test/actions/runs/300/job/2",
+			Name:          "test",
+			Status:        "in_progress",
+			WorkflowRunID: 300,
+			DetailsURL:    "https://github.com/test/test/actions/runs/300/job/2",
 		}
 
 		msg := ChecksUpdateMsg{
@@ -941,12 +942,12 @@ func TestRediscoveryOnNewJobs(t *testing.T) {
 		m.pendingWorkflowFetch = map[int64]bool{}
 
 		existingCheck := ghclient.CheckRunInfo{
-			Name:           "build",
-			Status:         "completed",
-			Conclusion:     "success",
-			WorkflowRunID:  100,
-			WorkflowID:     200,
-			DetailsURL:     "https://github.com/test/test/actions/runs/100/job/1",
+			Name:          "build",
+			Status:        "completed",
+			Conclusion:    "success",
+			WorkflowRunID: 100,
+			WorkflowID:    200,
+			DetailsURL:    "https://github.com/test/test/actions/runs/100/job/1",
 		}
 		key := checkKey(existingCheck)
 		m.seenCheckKeys[key] = true
@@ -1119,7 +1120,7 @@ func TestAdvSecAliasOnRediscovery(t *testing.T) {
 		}
 		m.jobAverages = map[string]time.Duration{
 			"Analyze (go)": 2 * time.Minute,
-			"CodeQL":        3 * time.Minute,
+			"CodeQL":       3 * time.Minute,
 		}
 		m.checkRuns = []ghclient.CheckRunInfo{
 			{Name: "Analyze (go)", WorkflowRunID: 100, WorkflowID: 789, WorkflowName: "CodeQL", DetailsURL: "https://github.com/test/test/actions/runs/100/job/1"},
@@ -1322,8 +1323,8 @@ func TestHandleCopilotReview(t *testing.T) {
 		m.checkRuns = completedChecks
 
 		model, _ := m.handleCopilotReview(CopilotReviewMsg{
-			Stale:         true,
-			NotRequested:  true,
+			Stale:        true,
+			NotRequested: true,
 		})
 		result := model.(*Model)
 		if result.copilotPending {
@@ -1380,6 +1381,87 @@ func TestHandleCopilotReview(t *testing.T) {
 			t.Error("should stay pending on error")
 		}
 	})
+
+	t.Run("cold start: PRInfoMsg arms gate, TickMsg fires first poll after initial delay", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotInitialDelay = 50 * time.Millisecond
+		m.copilotPollInterval = 10 * time.Millisecond
+		m.copilotMaxWait = 5 * time.Second
+		m.prNumber = 42
+		m.headSHA = "abc123"
+
+		// PRInfoMsg should arm the gate (copilotPending=true) and set
+		// copilotWaitStartTime to now + initialDelay, but NOT dispatch a
+		// fetch. The gate must remain unsatisfied while pending.
+		model, _ := m.Update(PRInfoMsg{
+			Number:         42,
+			Title:          "test",
+			HeadSHA:        "abc123",
+			HeadCommitTime: time.Now(),
+		})
+		result := model.(Model)
+		if !result.copilotPending {
+			t.Fatal("copilotPending should be true after PRInfoMsg (gate armed)")
+		}
+		if result.copilotWaitStartTime.IsZero() {
+			t.Fatal("copilotWaitStartTime should be set after PRInfoMsg")
+		}
+		if copilotGateSatisfied(&result) {
+			t.Error("gate should not be satisfied while pending and within max-wait")
+		}
+
+		// Wait for the initial-delay window to elapse, then drive a TickMsg.
+		// The tick should batch a copilot fetch in addition to the two
+		// baseline cmds (fetchCheckRuns + tick).
+		time.Sleep(60 * time.Millisecond)
+		_, cmd := result.Update(TickMsg(time.Now()))
+		if n := countBatchedCmds(cmd); n < 3 {
+			t.Errorf("TickMsg after initial delay should dispatch copilot fetch; got %d cmds (want >=3)", n)
+		}
+	})
+
+	t.Run("cold start: TickMsg before initial delay does not poll copilot", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotInitialDelay = 1 * time.Hour // far in the future
+		m.copilotPollInterval = 10 * time.Millisecond
+		m.copilotMaxWait = 5 * time.Second
+		m.prNumber = 42
+		m.headSHA = "abc123"
+
+		model, _ := m.Update(PRInfoMsg{
+			Number:         42,
+			Title:          "test",
+			HeadSHA:        "abc123",
+			HeadCommitTime: time.Now(),
+		})
+		result := model.(Model)
+		if !result.copilotPending {
+			t.Fatal("copilotPending should be true after PRInfoMsg")
+		}
+
+		// TickMsg immediately after PRInfoMsg: initial-delay window not
+		// elapsed, so only the 2 baseline cmds (fetchCheckRuns + tick).
+		_, cmd := result.Update(TickMsg(time.Now()))
+		if n := countBatchedCmds(cmd); n != 2 {
+			t.Errorf("TickMsg before initial delay should not poll copilot; got %d cmds (want 2)", n)
+		}
+	})
+}
+
+// countBatchedCmds executes a tea.Cmd and, if it returns a tea.BatchMsg,
+// returns the number of batched commands. Returns 1 for a single (non-batch)
+// command and 0 for nil.
+func countBatchedCmds(cmd tea.Cmd) int {
+	if cmd == nil {
+		return 0
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		return len(batch)
+	}
+	return 1
 }
 
 func TestDetermineExitCode_Copilot(t *testing.T) {

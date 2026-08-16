@@ -130,18 +130,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Start Copilot review polling once headSHA is known (issue #409).
 		// If the head SHA changed (new push), reset copilot state so a stale
 		// review from the old commit doesn't gate or falsely complete.
+		//
+		// The first poll is NOT dispatched here: copilotInitialDelay exists to
+		// give GitHub time to create the review request after a push, so we
+		// optimistically mark the gate as pending and let the TickMsg path fire
+		// the first fetch once the initial-delay window elapses. This also lets
+		// the two-consecutive-not-requested streak logic run from a real cold
+		// start (copilotPending must be true for TickMsg to re-poll).
 		if m.waitForCopilot {
 			if shaChanged {
 				m.copilotState = ""
 				m.copilotStale = false
 				m.copilotSubmittedAt = time.Time{}
-				m.copilotPending = false
 				m.copilotReviewComplete = false
 				m.copilotNotReqStreak = 0
 				debug.Log("copilot state reset on head SHA change", "old", m.headSHA, "new", msg.HeadSHA)
 			}
+			m.copilotPending = true
+			m.copilotReviewComplete = false
 			m.copilotWaitStartTime = time.Now().Add(m.copilotInitialDelay)
-			cmds = append(cmds, fetchCopilotReview(m.ctx, m.token, m.owner, m.repo, m.prNumber, m.headSHA))
+			debug.Log("copilot gate armed, first poll after initial delay",
+				"delay", m.copilotInitialDelay, "wait_start", m.copilotWaitStartTime)
 		}
 
 		return m, tea.Batch(cmds...)

@@ -50,13 +50,12 @@ type JobAveragesPartialMsg struct {
 // StatusCheckRollup.Contexts), so they require a separate fetch path and
 // their own message type (issue #409).
 type CopilotReviewMsg struct {
-	State               string
-	SubmittedAt         time.Time
-	CommitOID           string
-	Stale               bool
-	Pending             bool
-	NotRequested        bool
-	NotRequestedStreak  int
-	RateLimitRemaining  int
-	Err                 error
+	State              string
+	SubmittedAt        time.Time
+	CommitOID          string
+	Stale              bool
+	Pending            bool
+	NotRequested       bool
+	RateLimitRemaining int
+	Err                error
 }
