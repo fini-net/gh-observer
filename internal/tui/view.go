@@ -242,7 +242,12 @@ func (m Model) renderCopilotStatusLine() string {
 	if m.copilotPending && !m.copilotStale {
 		elapsed := time.Since(m.copilotWaitStartTime)
 		if elapsed < 0 {
-			elapsed = 0
+			// Still inside the initial-delay window (copilotWaitStartTime is
+			// set to now + copilotInitialDelay). Polling hasn't started yet, so
+			// show a distinct message rather than clamping to "0s elapsed".
+			remaining := -elapsed
+			return fmt.Sprintf("%s %s\n", m.spinner.View(),
+				m.styles.Running.Render(fmt.Sprintf("Copilot review queued, polling in %s…", timing.FormatDuration(remaining))))
 		}
 		return fmt.Sprintf("%s %s\n", m.spinner.View(),
 			m.styles.Running.Render(fmt.Sprintf("Copilot review in progress… (%s elapsed)", timing.FormatDuration(elapsed))))

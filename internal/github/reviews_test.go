@@ -392,6 +392,34 @@ func TestFetchCopilotReview(t *testing.T) {
 			wantRateLimit: 4991,
 		},
 		{
+			// Regression: the reviews connection returns nodes in
+			// ascending submission order (oldest first). When multiple
+			// Copilot reviews target HEAD, the last (newest) one must win.
+			// Here an older CHANGES_REQUESTED precedes a newer APPROVED;
+			// the result must be "approved", not "changes_requested".
+			name: "multiple HEAD reviews - newest wins (ascending order)",
+			query: makeReviewQuery(
+				nil,
+				[]struct {
+					Author struct {
+						Login string
+					}
+					State       string
+					SubmittedAt githubv4.DateTime
+					Commit      struct {
+						OID string
+					}
+					Body string
+				}{
+					makeReviewNode("copilot-pull-request-reviewer", "CHANGES_REQUESTED", headSHA, "2025-01-01T00:00:00Z"),
+					makeReviewNode("copilot-pull-request-reviewer", "APPROVED", headSHA, "2025-01-02T00:00:00Z"),
+				},
+				4989,
+			),
+			wantState:     "approved",
+			wantRateLimit: 4989,
+		},
+		{
 			name:          "query error",
 			err:           fmt.Errorf("graphql error"),
 			wantErr:       true,

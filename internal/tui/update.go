@@ -138,6 +138,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the first fetch once the initial-delay window elapses. This also lets
 		// the two-consecutive-not-requested streak logic run from a real cold
 		// start (copilotPending must be true for TickMsg to re-poll).
+		//
+		// NOTE: shaChanged is currently unreachable in production — fetchPRInfo
+		// is only dispatched once from Init(), so PRInfoMsg fires once per run.
+		// The reset is kept for forward compatibility if PR info is ever
+		// re-polled (e.g. to detect force-pushes mid-watch).
 		if m.waitForCopilot {
 			if shaChanged {
 				m.copilotState = ""
