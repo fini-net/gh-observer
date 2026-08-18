@@ -94,14 +94,13 @@ func (m Model) View() tea.View {
 		checkLine := m.renderCheckRun(check, widths)
 		b.WriteString(checkLine)
 
-		// Render the summary line for failed checks, and for synthetic
-		// Copilot review rows that carry a Summary (e.g. the stale review
-		// guidance: "Copilot review is stale (HEAD is abc1234) — refresh
-		// or re-request"). Reviews have no Conclusion, so the Kind check
-		// is what gates them through.
-		if check.Summary != "" && ((check.Conclusion == "failure" || check.Conclusion == "timed_out") || check.Kind == "review") {
-			b.WriteString(m.renderSummary(check, widths))
-		}
+	// Render the summary line for failed checks. (Synthetic Copilot
+	// review rows never appear in m.checkRuns — they are rendered at the
+	// separate copilotRow site below — so the summary path for them is
+	// also reached there, not here.)
+	if check.Summary != "" && (check.Conclusion == "failure" || check.Conclusion == "timed_out") {
+		b.WriteString(m.renderSummary(check, widths))
+	}
 
 		if (check.Conclusion == "failure" || check.Conclusion == "timed_out") && len(check.Annotations) > 0 {
 			b.WriteString(m.renderErrorBox(check, widths))
@@ -114,6 +113,14 @@ func (m Model) View() tea.View {
 	// regardless of state, to keep its position predictable.
 	if copilotRow != nil {
 		b.WriteString(m.renderCheckRun(*copilotRow, widths))
+		// Surface the stale-review Summary below the synthetic row,
+		// mirroring the failed-check summary render inside the loop
+		// above. The stale case is the only Copilot state that sets
+		// Summary today, but gating on Summary != "" keeps this future-
+		// proof for other review states that may carry guidance.
+		if copilotRow.Summary != "" {
+			b.WriteString(m.renderSummary(*copilotRow, widths))
+		}
 	}
 
 	// Copilot review status line (issue #409). Rendered below the Copilot

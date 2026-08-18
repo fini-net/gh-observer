@@ -523,6 +523,55 @@ func TestWidenForCopilotRow(t *testing.T) {
 	})
 }
 
+// TestView_StaleCopilotSummaryRendered verifies end-to-end that a stale
+// Copilot review surfaces its Summary line in the rendered View output.
+// buildCopilotCheckRun sets row.Summary for the stale case, but the row
+// is rendered outside the m.checkRuns loop (which previously made the
+// in-loop `check.Kind == "review"` branch unreachable dead code). This
+// test guards against regressing the separate renderSummary call at the
+// copilotRow render site — without it, only the ⚠ icon shows and the
+// "HEAD is <sha> — refresh or re-request" guidance is lost.
+func TestView_StaleCopilotSummaryRendered(t *testing.T) {
+	startedAt := time.Now().Add(-5 * time.Minute)
+	completedAt := startedAt.Add(60 * time.Second)
+	startedPtr := &startedAt
+	completedPtr := &completedAt
+	checks := []ghclient.CheckRunInfo{{
+		Name:         "build",
+		WorkflowName: "CI",
+		Status:       "completed",
+		Conclusion:   "success",
+		StartedAt:    startedPtr,
+		CompletedAt:  completedPtr,
+	}}
+
+	m := &Model{
+		styles:                stylesForTest(),
+		prTitle:               "Test PR",
+		prNumber:              1,
+		headSHA:               "abcd1234ef567890",
+		checkRuns:             checks,
+		lastUpdate:            time.Now(),
+		startTime:             time.Now().Add(-10 * time.Minute),
+		waitForCopilot:        true,
+		copilotStale:          true,
+		copilotWaitStartTime:  time.Now(),
+		fetchReceived:         true,
+		rateLimitRemaining:    5000,
+	}
+
+	out := m.View().Content
+	if !strings.Contains(out, "Copilot review is stale") {
+		t.Errorf("View output should contain the stale-review Summary line, got:\n%s", out)
+	}
+	if !strings.Contains(out, "abcd123") {
+		t.Errorf("View output should contain the short SHA in the stale summary, got:\n%s", out)
+	}
+	if !strings.Contains(out, "refresh or re-request") {
+		t.Errorf("View output should contain the actionable hint, got:\n%s", out)
+	}
+}
+
 // TestRenderCopilotReviewCheckRun_LongCountdown verifies that a long
 // initial-delay countdown ("in 1m 30s") is rendered without truncation
 // and right-aligns to the column width, locking in the
