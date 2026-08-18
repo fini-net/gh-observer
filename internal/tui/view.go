@@ -54,6 +54,17 @@ func (m Model) View() tea.View {
 		fmt.Fprintf(&b, "%s %s\n", prInfo, utcTime)
 		fmt.Fprintf(&b, "%s\n", updatedLine)
 
+		// Copilot review status line (issue #409). Rendered above the
+		// check table so it is visible during the startup phase (when
+		// len(m.checkRuns) == 0 triggers an early return below) — Copilot
+		// polling is armed in PRInfoMsg independently of check discovery
+		// and typically resolves well before Actions checks appear.
+		// Suppressed once the review reaches a non-stale terminal state,
+		// since the table row below conveys that state on its own.
+		if m.waitForCopilot {
+			b.WriteString(m.renderCopilotStatusLine())
+		}
+
 		b.WriteString("\n")
 	}
 
@@ -300,6 +311,50 @@ func (m Model) renderCopilotReviewCheckRun(check ghclient.CheckRunInfo, widths C
 	styledName := style.Render(nameCol)
 
 	return queueCol + " " + styledIcon + " " + styledName + "  " + styledDuration + "  " + avgCol + "\n"
+}
+
+// renderCopilotStatusLine renders the Copilot review status above the check
+// table: a spinner + countdown/elapsed line while pending, or a yellow stale
+// warning (issue #409). It is called from View() inside the PR-header block,
+// before the len(m.checkRuns)==0 early return, so it remains visible during
+// the startup phase when the table itself is suppressed — Copilot polling is
+// armed in PRInfoMsg independently of check discovery and typically resolves
+// well before Actions checks appear (30-90s after PR creation per CLAUDE.md).
+//
+// Returns "" when the review is in a non-stale terminal state (the table row
+// below conveys that state on its own, so the status line would be redundant)
+// or when the gate has not yet been armed.
+func (m Model) renderCopilotStatusLine() string {
+	if m.copilotWaitStartTime.IsZero() {
+		return ""
+	}
+	if m.copilotPending && !m.copilotStale {
+		remaining := time.Until(m.copilotPollStartTime)
+		if remaining > 0 {
+			// Still inside the initial-delay window (copilotPollStartTime
+			// is set to PRInfoMsg-time + copilotInitialDelay). Polling
+			// hasn't started yet, so show a countdown rather than "0s".
+			return fmt.Sprintf("%s %s\n", m.spinner.View(),
+				m.styles.Running.Render(fmt.Sprintf("Copilot review queued, polling in %s…", timing.FormatDuration(remaining))))
+		}
+		elapsed := time.Since(m.copilotPollStartTime)
+		return fmt.Sprintf("%s %s\n", m.spinner.View(),
+			m.styles.Running.Render(fmt.Sprintf("Copilot review in progress… (%s elapsed)", timing.FormatDuration(elapsed))))
+	}
+	if m.copilotStale {
+		return m.styles.Running.Render(
+			fmt.Sprintf("⚠ Copilot review is stale (HEAD is %s) — refresh or re-request\n", shortHeadSHA(m.headSHA)))
+	}
+	return ""
+}
+
+// shortHeadSHA returns the first 7 characters of a git SHA, matching GitHub's
+// short-SHA display convention. Returns "" when the SHA is empty.
+func shortHeadSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 // buildCopilotCheckRun synthesizes a display-only CheckRunInfo representing
