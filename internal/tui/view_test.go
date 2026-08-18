@@ -398,3 +398,159 @@ func TestRenderCheckRun_RegularRowUnchanged(t *testing.T) {
 		t.Errorf("row missing duration text: %q", row)
 	}
 }
+
+// TestWidenForCopilotRow verifies that widenForCopilotRow grows the
+// duration and name columns to fit the synthetic Copilot row, including
+// the "in <remaining>" countdown text that FormatDuration alone does not
+// synthesize for queued rows. This locks in the fix for the
+// column-misalignment regression where the countdown could overflow the
+// pre-computed DurationWidth derived from FormatDuration("-").
+func TestWidenForCopilotRow(t *testing.T) {
+	t.Run("countdown text widens DurationWidth past FormatDuration dash", func(t *testing.T) {
+		// Queued row inside the initial-delay window: copilotDurationText
+		// returns "in 1m 30s" (9 cells), but FormatDuration would return
+		// "-" (1 cell). The widths must accommodate the countdown, not the
+		// dash, or the rendered row will overflow the column.
+		widths := ColumnWidths{
+			QueueWidth:    5,
+			NameWidth:     20,
+			DurationWidth: 5, // minTimeWidth; smaller than "in 1m 30s"
+			AvgWidth:      5,
+		}
+		row := ghclient.CheckRunInfo{
+			Kind:         "review",
+			WorkflowName: "Copilot",
+			Name:         "Review",
+			Status:       "queued",
+			ReviewState:  "pending",
+		}
+		pollStart := time.Now().Add(90 * time.Second) // remaining ≈ 1m 30s
+
+		got := widenForCopilotRow(widths, row, pollStart)
+		if got.DurationWidth <= widths.DurationWidth {
+			t.Errorf("DurationWidth should grow to fit countdown, got %d (was %d); countdown is 9 cells",
+				got.DurationWidth, widths.DurationWidth)
+		}
+		if got.DurationWidth < 9 {
+			t.Errorf("DurationWidth should be >= 9 for \"in 1m 30s\", got %d", got.DurationWidth)
+		}
+	})
+
+	t.Run("completed row does not grow DurationWidth beyond dash", func(t *testing.T) {
+		// Completed rows have no timestamps; copilotDurationText returns
+		// "-" (1 cell), which never exceeds minTimeWidth. No growth expected.
+		widths := ColumnWidths{
+			QueueWidth:    5,
+			NameWidth:     20,
+			DurationWidth: 7,
+			AvgWidth:      5,
+		}
+		row := ghclient.CheckRunInfo{
+			Kind:         "review",
+			WorkflowName: "Copilot",
+			Name:         "Review",
+			Status:       "completed",
+			ReviewState:  "approved",
+		}
+		got := widenForCopilotRow(widths, row, time.Now().Add(15*time.Second))
+		if got.DurationWidth != widths.DurationWidth {
+			t.Errorf("DurationWidth should not change for completed row, got %d (was %d)",
+				got.DurationWidth, widths.DurationWidth)
+		}
+	})
+
+	t.Run("name column grows up to maxCheckNameWidth cap", func(t *testing.T) {
+		widths := ColumnWidths{
+			QueueWidth:    5,
+			NameWidth:     10, // smaller than "Copilot / Review" (16)
+			DurationWidth: 7,
+			AvgWidth:      5,
+		}
+		// Name "Copilot / Review" is 16 cells, under the cap — should grow NameWidth to 16.
+		row := ghclient.CheckRunInfo{
+			Kind:         "review",
+			WorkflowName: "Copilot",
+			Name:         "Review",
+			Status:       "completed",
+			ReviewState:  "approved",
+		}
+		got := widenForCopilotRow(widths, row, time.Now())
+		if got.NameWidth != 16 {
+			t.Errorf("NameWidth should be 16 for \"Copilot / Review\", got %d", got.NameWidth)
+		}
+	})
+
+	t.Run("name column caps at maxCheckNameWidth for very long names", func(t *testing.T) {
+		widths := ColumnWidths{
+			QueueWidth:    5,
+			NameWidth:     20,
+			DurationWidth: 7,
+			AvgWidth:      5,
+		}
+		longName := strings.Repeat("a", maxCheckNameWidth+50)
+		row := ghclient.CheckRunInfo{
+			Kind:         "review",
+			WorkflowName: "Copilot",
+			Name:         longName,
+			Status:       "completed",
+			ReviewState:  "approved",
+		}
+		got := widenForCopilotRow(widths, row, time.Now())
+		if got.NameWidth != maxCheckNameWidth {
+			t.Errorf("NameWidth should cap at %d, got %d", maxCheckNameWidth, got.NameWidth)
+		}
+	})
+
+	t.Run("no-op when widths already accommodate the row", func(t *testing.T) {
+		widths := ColumnWidths{
+			QueueWidth:    5,
+			NameWidth:     60,
+			DurationWidth: 20,
+			AvgWidth:      5,
+		}
+		row := ghclient.CheckRunInfo{
+			Kind:         "review",
+			WorkflowName: "Copilot",
+			Name:         "Review",
+			Status:       "queued",
+			ReviewState:  "pending",
+		}
+		pollStart := time.Now().Add(15 * time.Second)
+		got := widenForCopilotRow(widths, row, pollStart)
+		if got.NameWidth != widths.NameWidth || got.DurationWidth != widths.DurationWidth {
+			t.Errorf("widths should be unchanged when already large enough, got %+v (was %+v)", got, widths)
+		}
+	})
+}
+
+// TestRenderCopilotReviewCheckRun_LongCountdown verifies that a long
+// initial-delay countdown ("in 1m 30s") is rendered without truncation
+// and right-aligns to the column width, locking in the
+// copilotDurationText/widenForCopilotRow agreement. The row is fed the
+// same copilotPollStartTime the width calc would use, and the test
+// asserts the countdown appears verbatim and the column matches the
+// countdown's display width.
+func TestRenderCopilotReviewCheckRun_LongCountdown(t *testing.T) {
+	m := &Model{
+		styles:             stylesForTest(),
+		copilotPollStartTime: time.Now().Add(90 * time.Second), // remaining ≈ 1m 30s
+	}
+	row := ghclient.CheckRunInfo{
+		Kind:         "review",
+		WorkflowName: "Copilot",
+		Name:         "Review",
+		Status:       "queued",
+		ReviewState:  "pending",
+	}
+	widths := widenForCopilotRow(ColumnWidths{
+		QueueWidth:    5,
+		NameWidth:     20,
+		DurationWidth: 5,
+		AvgWidth:      5,
+	}, row, m.copilotPollStartTime)
+
+	rendered := m.renderCopilotReviewCheckRun(row, widths)
+	if !strings.Contains(rendered, "in 1m 30s") {
+		t.Errorf("row should contain the countdown text verbatim, got %q", rendered)
+	}
+}
