@@ -326,10 +326,10 @@ func (m Model) buildCopilotCheckRun() *ghclient.CheckRunInfo {
 	}
 
 	const (
-		kind        = "review"
-		workflow    = "Copilot"
-		name        = "Review"
-		detailsURL  = ""
+		kind       = "review"
+		workflow   = "Copilot"
+		name       = "Review"
+		detailsURL = ""
 	)
 
 	row := &ghclient.CheckRunInfo{

@@ -35,11 +35,11 @@ func TestBuildCopilotCheckRun(t *testing.T) {
 
 	t.Run("initial delay window: queued + pending", func(t *testing.T) {
 		m := &Model{
-			waitForCopilot:        true,
-			copilotPending:        true,
-			copilotWaitStartTime:  now,
-			copilotPollStartTime:  now.Add(15 * time.Second),
-			copilotInitialDelay:   15 * time.Second,
+			waitForCopilot:       true,
+			copilotPending:       true,
+			copilotWaitStartTime: now,
+			copilotPollStartTime: now.Add(15 * time.Second),
+			copilotInitialDelay:  15 * time.Second,
 		}
 		got := m.buildCopilotCheckRun()
 		if got == nil {
@@ -66,7 +66,7 @@ func TestBuildCopilotCheckRun(t *testing.T) {
 		pollStart := now.Add(-30 * time.Second) // polling started 30s ago
 		m := &Model{
 			waitForCopilot:       true,
-			copilotPending:      true,
+			copilotPending:       true,
 			copilotWaitStartTime: now.Add(-45 * time.Second),
 			copilotPollStartTime: pollStart,
 		}
@@ -111,10 +111,10 @@ func TestBuildCopilotCheckRun(t *testing.T) {
 
 	t.Run("approved review", func(t *testing.T) {
 		m := &Model{
-			waitForCopilot:         true,
-			copilotWaitStartTime:   now,
-			copilotReviewComplete:  true,
-			copilotState:           "approved",
+			waitForCopilot:        true,
+			copilotWaitStartTime:  now,
+			copilotReviewComplete: true,
+			copilotState:          "approved",
 		}
 		got := m.buildCopilotCheckRun()
 		if got == nil {
@@ -133,10 +133,10 @@ func TestBuildCopilotCheckRun(t *testing.T) {
 
 	t.Run("changes_requested review", func(t *testing.T) {
 		m := &Model{
-			waitForCopilot:         true,
-			copilotWaitStartTime:   now,
-			copilotReviewComplete:  true,
-			copilotState:           "changes_requested",
+			waitForCopilot:        true,
+			copilotWaitStartTime:  now,
+			copilotReviewComplete: true,
+			copilotState:          "changes_requested",
 		}
 		got := m.buildCopilotCheckRun()
 		if got == nil {
@@ -149,10 +149,10 @@ func TestBuildCopilotCheckRun(t *testing.T) {
 
 	t.Run("commented review", func(t *testing.T) {
 		m := &Model{
-			waitForCopilot:         true,
-			copilotWaitStartTime:   now,
-			copilotReviewComplete:  true,
-			copilotState:           "commented",
+			waitForCopilot:        true,
+			copilotWaitStartTime:  now,
+			copilotReviewComplete: true,
+			copilotState:          "commented",
 		}
 		got := m.buildCopilotCheckRun()
 		if got == nil {
@@ -165,10 +165,10 @@ func TestBuildCopilotCheckRun(t *testing.T) {
 
 	t.Run("dismissed review", func(t *testing.T) {
 		m := &Model{
-			waitForCopilot:         true,
-			copilotWaitStartTime:   now,
-			copilotReviewComplete:  true,
-			copilotState:           "dismissed",
+			waitForCopilot:        true,
+			copilotWaitStartTime:  now,
+			copilotReviewComplete: true,
+			copilotState:          "dismissed",
 		}
 		got := m.buildCopilotCheckRun()
 		if got == nil {

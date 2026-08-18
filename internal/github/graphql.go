@@ -63,8 +63,8 @@ type CheckRunInfo struct {
 	Annotations   []Annotation
 	WorkflowRunID int64
 	WorkflowID    int64
-	Kind         string
-	ReviewState  string
+	Kind          string
+	ReviewState   string
 }
 
 // contextNode represents a union type in the StatusCheckRollup
