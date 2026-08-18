@@ -329,6 +329,12 @@ func (m Model) renderCopilotReviewCheckRun(check ghclient.CheckRunInfo, widths C
 		style = m.styles.Running
 	}
 
+	// enableLinks is hardcoded false here because buildCopilotCheckRun
+	// always sets DetailsURL: "" — there is no per-job URL for a synthetic
+	// review row, so a hyperlink would be a no-op even if m.enableLinks is
+	// set. (This is the only BuildNameColumn call site that doesn't pass
+	// m.enableLinks; keeping it explicit avoids a future reader wondering
+	// if it's a bug.)
 	nameCol := BuildNameColumn(check, widths, false)
 
 	// Duration column: countdown while in the initial-delay window, elapsed
