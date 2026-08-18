@@ -313,7 +313,7 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 // the same column geometry as renderCheckRun but with review-specific
 // icon, style, and blank queue/avg columns.
 func (m Model) renderCopilotReviewCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) string {
-	icon := GetCopilotReviewIcon(check.ReviewState)
+	icon := GetCopilotReviewIcon(check.ReviewState, check.Status)
 
 	style := m.styles.Queued
 	switch check.ReviewState {

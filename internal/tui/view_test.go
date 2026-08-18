@@ -264,6 +264,33 @@ func TestRenderCopilotReviewCheckRun(t *testing.T) {
 		}
 	})
 
+	t.Run("queued pending row uses pause icon, not in_progress spinner", func(t *testing.T) {
+		// While still inside copilotInitialDelay the duration column shows
+		// "in 15s" and Status is "queued". The icon must be ⏸ (pause) to
+		// match that countdown — showing the in_progress spinner ◐ while
+		// the row says "in 15s" would be mixed signals.
+		m2 := &Model{
+			styles:               stylesForTest(),
+			copilotPollStartTime: time.Now().Add(15 * time.Second),
+		}
+		row := m2.renderCopilotReviewCheckRun(ghclient.CheckRunInfo{
+			Kind:         "review",
+			WorkflowName: "Copilot",
+			Name:         "Review",
+			Status:       "queued",
+			ReviewState:  "pending",
+		}, widths)
+		if !strings.Contains(row, "⏸") {
+			t.Errorf("queued pending row missing ⏸ icon: %q", row)
+		}
+		if strings.Contains(row, "◐") {
+			t.Errorf("queued pending row should not show in_progress spinner ◐: %q", row)
+		}
+		if !strings.Contains(row, "in 15s") {
+			t.Errorf("queued pending row missing countdown text: %q", row)
+		}
+	})
+
 	t.Run("stale row uses dedicated warning icon", func(t *testing.T) {
 		row := m.renderCopilotReviewCheckRun(ghclient.CheckRunInfo{
 			Kind:         "review",

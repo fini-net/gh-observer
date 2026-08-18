@@ -96,10 +96,17 @@ func GetCheckIcon(status, conclusion string) string {
 	}
 }
 
-// GetCopilotReviewIcon returns the icon for a Copilot review row, keyed on
-// review state (not check status/conclusion). Reviews are a distinct concept
-// from check runs, so this is separate from GetCheckIcon (issue #409).
-func GetCopilotReviewIcon(state string) string {
+// GetCopilotReviewIcon returns the icon for a Copilot review row.
+//
+// Reviews are a distinct concept from check runs, so this is separate
+// from GetCheckIcon (issue #409). The terminal-state icons (✓/✗/💬/⊘/⚠)
+// are keyed on review state, but the pending sub-states need to
+// distinguish queued (still inside copilotInitialDelay, duration column
+// shows "in 15s") from in_progress (actively polling) — keying only on
+// ReviewState would show the in-progress spinner ◐ while the countdown
+// reads "in 15s", which is mixed signals. So pending rows fall through
+// to a status check: queued → ⏸, in_progress → ◐ (matching GetCheckIcon).
+func GetCopilotReviewIcon(state, status string) string {
 	switch state {
 	case "approved":
 		return "✓"
@@ -109,10 +116,13 @@ func GetCopilotReviewIcon(state string) string {
 		return "💬"
 	case "dismissed":
 		return "⊘"
-	case "pending":
-		return "◐"
 	case "stale":
 		return "⚠"
+	case "pending":
+		if status == "queued" {
+			return "⏸"
+		}
+		return "◐"
 	default:
 		return "?"
 	}
