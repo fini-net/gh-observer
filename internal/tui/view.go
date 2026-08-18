@@ -94,13 +94,13 @@ func (m Model) View() tea.View {
 		checkLine := m.renderCheckRun(check, widths)
 		b.WriteString(checkLine)
 
-	// Render the summary line for failed checks. (Synthetic Copilot
-	// review rows never appear in m.checkRuns — they are rendered at the
-	// separate copilotRow site below — so the summary path for them is
-	// also reached there, not here.)
-	if check.Summary != "" && (check.Conclusion == "failure" || check.Conclusion == "timed_out") {
-		b.WriteString(m.renderSummary(check, widths))
-	}
+		// Render the summary line for failed checks. (Synthetic Copilot
+		// review rows never appear in m.checkRuns — they are rendered at the
+		// separate copilotRow site below — so the summary path for them is
+		// also reached there, not here.)
+		if check.Summary != "" && (check.Conclusion == "failure" || check.Conclusion == "timed_out") {
+			b.WriteString(m.renderSummary(check, widths))
+		}
 
 		if (check.Conclusion == "failure" || check.Conclusion == "timed_out") && len(check.Annotations) > 0 {
 			b.WriteString(m.renderErrorBox(check, widths))

@@ -546,18 +546,18 @@ func TestView_StaleCopilotSummaryRendered(t *testing.T) {
 	}}
 
 	m := &Model{
-		styles:                stylesForTest(),
-		prTitle:               "Test PR",
-		prNumber:              1,
-		headSHA:               "abcd1234ef567890",
-		checkRuns:             checks,
-		lastUpdate:            time.Now(),
-		startTime:             time.Now().Add(-10 * time.Minute),
-		waitForCopilot:        true,
-		copilotStale:          true,
-		copilotWaitStartTime:  time.Now(),
-		fetchReceived:         true,
-		rateLimitRemaining:    5000,
+		styles:               stylesForTest(),
+		prTitle:              "Test PR",
+		prNumber:             1,
+		headSHA:              "abcd1234ef567890",
+		checkRuns:            checks,
+		lastUpdate:           time.Now(),
+		startTime:            time.Now().Add(-10 * time.Minute),
+		waitForCopilot:       true,
+		copilotStale:         true,
+		copilotWaitStartTime: time.Now(),
+		fetchReceived:        true,
+		rateLimitRemaining:   5000,
 	}
 
 	out := m.View().Content
@@ -581,7 +581,7 @@ func TestView_StaleCopilotSummaryRendered(t *testing.T) {
 // countdown's display width.
 func TestRenderCopilotReviewCheckRun_LongCountdown(t *testing.T) {
 	m := &Model{
-		styles:             stylesForTest(),
+		styles:               stylesForTest(),
 		copilotPollStartTime: time.Now().Add(90 * time.Second), // remaining ≈ 1m 30s
 	}
 	row := ghclient.CheckRunInfo{
