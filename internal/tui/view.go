@@ -70,6 +70,13 @@ func (m Model) View() tea.View {
 	// evaluate differently between the two calls if the countdown crosses
 	// zero mid-render — leading the widths calc and the rendered row to
 	// disagree on status.
+	//
+	// This call site is intentionally below the len(m.checkRuns)==0 early
+	// return above: during the Actions startup phase the Copilot row is not
+	// rendered (see the comment by renderCopilotStatusLine below for why
+	// that tradeoff is acceptable). Hoisting it above the early return would
+	// resurface the row during startup but would also require re-evaluating
+	// the column-width path for an empty checkRuns slice.
 	copilotRow := m.buildCopilotCheckRun()
 
 	// Ensure the column geometry accommodates the synthetic Copilot review
@@ -111,11 +118,30 @@ func (m Model) View() tea.View {
 
 	// Copilot review status line (issue #409). Rendered below the Copilot
 	// table row, not in the header, so the spinner/countdown line sits
-	// visually next to the row it describes. Note: this call site is
-	// below the len(m.checkRuns)==0 early return above, so during the
-	// startup phase (before Actions checks appear) the status line is
-	// not rendered — Copilot polling is armed in PRInfoMsg independently
-	// of check discovery and typically resolves before checks appear.
+	// visually next to the row it describes.
+	//
+	// Startup-phase tradeoff: this call site is below the
+	// len(m.checkRuns)==0 early return above, so during the Actions startup
+	// phase (before any check appears, typically 30-90s after PR creation)
+	// NEITHER the synthetic Copilot row NOR this status line is rendered.
+	// That reopens a narrow window that an earlier revision (commit dd23bdd)
+	// had closed for the status line. We accept this because:
+	//   - copilotWaitStartTime is armed in PRInfoMsg, which fires before
+	//     any check appears, so the suppression window is bounded by how
+	//     long Actions takes to surface its first check, not by Copilot.
+	//   - For that window the only information lost is the initial-delay
+	//     countdown ("Copilot review queued, polling in 15s…"), which is
+	//     itself bounded by copilot_initial_delay (default 15s) and is
+	//     low-value: the user already knows from the PR-title block that a
+	//     watch is running, and the row would only show "⏸ in 15s" before
+	//     transitioning to "◐ in progress…".
+	//   - Polling is armed in PRInfoMsg independently of this render path,
+	//     so suppression here is display-only and does not delay the first
+	//     Copilot fetch.
+	// If user feedback changes the calculus, surface the status line from
+	// renderStartupPhase() (which IS reached during the startup phase) rather
+	// than hoisting this call above the early return, so the table geometry
+	// path is not perturbed for an empty checkRuns slice.
 	// renderCopilotStatusLine self-gates via copilotWaitStartTime and
 	// returns "" for terminal non-stale states.
 	if m.waitForCopilot {
