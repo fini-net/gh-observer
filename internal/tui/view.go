@@ -246,14 +246,14 @@ func (m Model) renderSummary(check ghclient.CheckRunInfo, widths ColumnWidths) s
 // renderCheckRun displays a single check run with aligned columns.
 //
 // For regular check runs (Kind == "") the four columns are populated from
-// timing data as before. For Copilot review rows (Kind == "review") the
-// queue and avg columns are left blank (reviews have no queue latency or
-// historical averages), the icon and style come from the review state, and
-// the duration column either shows a countdown (while queued in the
+// timing data as before. For Copilot review rows (Kind == copilotRowKind)
+// the queue and avg columns are left blank (reviews have no queue latency
+// or historical averages), the icon and style come from the review state,
+// and the duration column either shows a countdown (while queued in the
 // initial-delay window), an elapsed runtime (while pending), or "-"
 // (once complete — reviews expose no timestamps for FinalDuration).
 func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) string {
-	if check.Kind == "review" {
+	if check.Kind == copilotRowKind {
 		return m.renderCopilotReviewCheckRun(check, widths)
 	}
 	status := check.Status
@@ -416,7 +416,7 @@ func (m Model) buildCopilotCheckRun() *ghclient.CheckRunInfo {
 	}
 
 	const (
-		kind       = "review"
+		kind       = copilotRowKind
 		workflow   = "Copilot"
 		name       = "Review"
 		detailsURL = ""

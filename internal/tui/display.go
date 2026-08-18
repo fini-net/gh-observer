@@ -25,6 +25,12 @@ type ColumnWidths struct {
 // drift on the cap and produce different geometries for the same row.
 const maxCheckNameWidth = 60
 
+// copilotRowKind is the Kind discriminator for synthetic Copilot review
+// rows. Shared by renderCheckRun (which dispatches on it) and
+// buildCopilotCheckRun (which sets it) so the two call sites can't drift
+// on the literal string — same rationale as maxCheckNameWidth above.
+const copilotRowKind = "review"
+
 // FormatQueueLatency returns the queue time text or placeholder
 func FormatQueueLatency(check ghclient.CheckRunInfo, headCommitTime time.Time) string {
 	if check.Status == "queued" {
