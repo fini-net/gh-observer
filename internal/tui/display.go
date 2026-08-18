@@ -20,6 +20,17 @@ type ColumnWidths struct {
 	AvgWidth      int // Right-aligned historical average
 }
 
+// maxCheckNameWidth caps the left-aligned name column. Shared by
+// CalculateColumnWidths and widenForCopilotRow so the two paths can't
+// drift on the cap and produce different geometries for the same row.
+const maxCheckNameWidth = 60
+
+// copilotRowKind is the Kind discriminator for synthetic Copilot review
+// rows. Shared by renderCheckRun (which dispatches on it) and
+// buildCopilotCheckRun (which sets it) so the two call sites can't drift
+// on the literal string — same rationale as maxCheckNameWidth above.
+const copilotRowKind = "review"
+
 // FormatQueueLatency returns the queue time text or placeholder
 func FormatQueueLatency(check ghclient.CheckRunInfo, headCommitTime time.Time) string {
 	if check.Status == "queued" {
@@ -85,10 +96,17 @@ func GetCheckIcon(status, conclusion string) string {
 	}
 }
 
-// GetCopilotReviewIcon returns the icon for a Copilot review row, keyed on
-// review state (not check status/conclusion). Reviews are a distinct concept
-// from check runs, so this is separate from GetCheckIcon (issue #409).
-func GetCopilotReviewIcon(state string) string {
+// GetCopilotReviewIcon returns the icon for a Copilot review row.
+//
+// Reviews are a distinct concept from check runs, so this is separate
+// from GetCheckIcon (issue #409). The terminal-state icons (✓/✗/💬/⊘/⚠)
+// are keyed on review state, but the pending sub-states need to
+// distinguish queued (still inside copilotInitialDelay, duration column
+// shows "in 15s") from in_progress (actively polling) — keying only on
+// ReviewState would show the in-progress spinner ◐ while the countdown
+// reads "in 15s", which is mixed signals. So pending rows fall through
+// to a status check: queued → ⏸, in_progress → ◐ (matching GetCheckIcon).
+func GetCopilotReviewIcon(state, status string) string {
 	switch state {
 	case "approved":
 		return "✓"
@@ -98,7 +116,12 @@ func GetCopilotReviewIcon(state string) string {
 		return "💬"
 	case "dismissed":
 		return "⊘"
+	case "stale":
+		return "⚠"
 	case "pending":
+		if status == "queued" {
+			return "⏸"
+		}
 		return "◐"
 	default:
 		return "?"
@@ -186,7 +209,6 @@ func FormatAvg(check ghclient.CheckRunInfo, jobAverages map[string]time.Duration
 func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime time.Time, jobAverages map[string]time.Duration) ColumnWidths {
 	const (
 		minNameWidth = 20
-		maxNameWidth = 60
 		minTimeWidth = 5
 	)
 
@@ -205,10 +227,10 @@ func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime tim
 
 		name := FormatCheckName(check)
 		nameLen := runewidth.StringWidth(name)
-		if nameLen > widths.NameWidth && nameLen <= maxNameWidth {
+		if nameLen > widths.NameWidth && nameLen <= maxCheckNameWidth {
 			widths.NameWidth = nameLen
-		} else if nameLen > maxNameWidth {
-			widths.NameWidth = maxNameWidth
+		} else if nameLen > maxCheckNameWidth {
+			widths.NameWidth = maxCheckNameWidth
 		}
 
 		durationText := FormatDuration(check)
