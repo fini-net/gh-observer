@@ -310,11 +310,13 @@ func TestBuildCopilotCheckRun_StaleSummary(t *testing.T) {
 	}
 }
 
-// TestRenderCopilotStatusLine_StartupPhase verifies that the Copilot status
-// line is rendered during the startup phase (when len(m.checkRuns) == 0 and
-// the table itself is suppressed). This guards the regression introduced by
-// the original refactor where the Copilot row moved below the early return.
-func TestRenderCopilotStatusLine_StartupPhase(t *testing.T) {
+// TestRenderCopilotStatusLine_PendingCountdown verifies that the status line
+// shows a countdown while inside the initial-delay window. The function is
+// called directly here; in View() it is now invoked below the Copilot table
+// row rather than in the header block (Option B), so it is no longer shown
+// during the startup phase when len(m.checkRuns) == 0 triggers an early
+// return before the call site — see the comment in View() for the tradeoff.
+func TestRenderCopilotStatusLine_PendingCountdown(t *testing.T) {
 	m := &Model{
 		styles:               stylesForTest(),
 		waitForCopilot:       true,
@@ -324,16 +326,18 @@ func TestRenderCopilotStatusLine_StartupPhase(t *testing.T) {
 	}
 	line := m.renderCopilotStatusLine()
 	if line == "" {
-		t.Fatal("expected non-empty status line while pending during startup phase")
+		t.Fatal("expected non-empty status line while pending in initial-delay window")
 	}
 	if !strings.Contains(line, "Copilot review queued, polling in") {
 		t.Errorf("status line should show countdown while in initial-delay window, got %q", line)
 	}
 }
 
-// TestRenderCopilotStatusLine_Stale verifies that the stale warning carries
-// the short SHA and actionable hint, matching the pre-refactor behavior.
-func TestRenderCopilotStatusLine_Stale(t *testing.T) {
+// TestRenderCopilotStatusLine_StaleReturnsEmpty verifies that the status line
+// is suppressed when the review is stale. Stale-state guidance is surfaced
+// solely by the synthetic Copilot row's Summary line via renderSummary, so
+// the status line returns "" to avoid double-printing (issue #409).
+func TestRenderCopilotStatusLine_StaleReturnsEmpty(t *testing.T) {
 	m := &Model{
 		styles:               stylesForTest(),
 		waitForCopilot:       true,
@@ -341,15 +345,8 @@ func TestRenderCopilotStatusLine_Stale(t *testing.T) {
 		copilotWaitStartTime: time.Now(),
 		headSHA:              "abcd1234ef567890",
 	}
-	line := m.renderCopilotStatusLine()
-	if !strings.Contains(line, "⚠") {
-		t.Errorf("stale status line should start with ⚠, got %q", line)
-	}
-	if !strings.Contains(line, "abcd123") {
-		t.Errorf("stale status line should contain short SHA, got %q", line)
-	}
-	if !strings.Contains(line, "refresh or re-request") {
-		t.Errorf("stale status line should contain actionable hint, got %q", line)
+	if got := m.renderCopilotStatusLine(); got != "" {
+		t.Errorf("stale status line should be empty (Summary carries it), got %q", got)
 	}
 }
 
