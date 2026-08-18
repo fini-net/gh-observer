@@ -264,7 +264,7 @@ func TestRenderCopilotReviewCheckRun(t *testing.T) {
 		}
 	})
 
-	t.Run("stale row uses warning styling", func(t *testing.T) {
+	t.Run("stale row uses dedicated warning icon", func(t *testing.T) {
 		row := m.renderCopilotReviewCheckRun(ghclient.CheckRunInfo{
 			Kind:         "review",
 			WorkflowName: "Copilot",
@@ -272,12 +272,101 @@ func TestRenderCopilotReviewCheckRun(t *testing.T) {
 			Status:       "completed",
 			ReviewState:  "stale",
 		}, widths)
-		if !strings.Contains(row, "?") {
-			// stale has no specific icon in GetCopilotReviewIcon; falls to "?"
-			// which is acceptable — the style conveys the warning state.
-			t.Errorf("stale row missing icon: %q", row)
+		// "stale" has its own icon in GetCopilotReviewIcon (⚠), distinct
+		// from the generic "?" used for unrecognized states, so the user
+		// can tell a stale review apart from an unknown one by icon alone.
+		if !strings.Contains(row, "⚠") {
+			t.Errorf("stale row missing ⚠ icon: %q", row)
+		}
+		if strings.Contains(row, "?") {
+			t.Errorf("stale row should not fall through to generic '?' icon: %q", row)
 		}
 	})
+}
+
+// TestBuildCopilotCheckRun_StaleSummary verifies that the synthetic stale
+// review row carries a Summary line with the short SHA and actionable hint,
+// restoring the information the pre-refactor renderCopilotStatusLine carried.
+func TestBuildCopilotCheckRun_StaleSummary(t *testing.T) {
+	now := time.Now()
+	m := &Model{
+		waitForCopilot:       true,
+		copilotStale:         true,
+		copilotWaitStartTime: now,
+		headSHA:              "abcd1234ef567890",
+	}
+	got := m.buildCopilotCheckRun()
+	if got == nil {
+		t.Fatal("expected non-nil row for stale review")
+	}
+	if got.Summary == "" {
+		t.Fatal("expected non-empty Summary for stale review")
+	}
+	if !strings.Contains(got.Summary, "abcd123") {
+		t.Errorf("Summary should contain the 7-char short SHA, got %q", got.Summary)
+	}
+	if !strings.Contains(got.Summary, "refresh or re-request") {
+		t.Errorf("Summary should contain actionable hint, got %q", got.Summary)
+	}
+}
+
+// TestRenderCopilotStatusLine_StartupPhase verifies that the Copilot status
+// line is rendered during the startup phase (when len(m.checkRuns) == 0 and
+// the table itself is suppressed). This guards the regression introduced by
+// the original refactor where the Copilot row moved below the early return.
+func TestRenderCopilotStatusLine_StartupPhase(t *testing.T) {
+	m := &Model{
+		styles:               stylesForTest(),
+		waitForCopilot:       true,
+		copilotPending:       true,
+		copilotWaitStartTime: time.Now(),
+		copilotPollStartTime: time.Now().Add(15 * time.Second),
+	}
+	line := m.renderCopilotStatusLine()
+	if line == "" {
+		t.Fatal("expected non-empty status line while pending during startup phase")
+	}
+	if !strings.Contains(line, "Copilot review queued, polling in") {
+		t.Errorf("status line should show countdown while in initial-delay window, got %q", line)
+	}
+}
+
+// TestRenderCopilotStatusLine_Stale verifies that the stale warning carries
+// the short SHA and actionable hint, matching the pre-refactor behavior.
+func TestRenderCopilotStatusLine_Stale(t *testing.T) {
+	m := &Model{
+		styles:               stylesForTest(),
+		waitForCopilot:       true,
+		copilotStale:         true,
+		copilotWaitStartTime: time.Now(),
+		headSHA:              "abcd1234ef567890",
+	}
+	line := m.renderCopilotStatusLine()
+	if !strings.Contains(line, "⚠") {
+		t.Errorf("stale status line should start with ⚠, got %q", line)
+	}
+	if !strings.Contains(line, "abcd123") {
+		t.Errorf("stale status line should contain short SHA, got %q", line)
+	}
+	if !strings.Contains(line, "refresh or re-request") {
+		t.Errorf("stale status line should contain actionable hint, got %q", line)
+	}
+}
+
+// TestRenderCopilotStatusLine_CompletedReturnsEmpty verifies that the status
+// line is suppressed once the review reaches a non-stale terminal state, so
+// the table row is the sole presenter of that state (no double-printing).
+func TestRenderCopilotStatusLine_CompletedReturnsEmpty(t *testing.T) {
+	m := &Model{
+		styles:                stylesForTest(),
+		waitForCopilot:        true,
+		copilotWaitStartTime:  time.Now(),
+		copilotReviewComplete: true,
+		copilotState:          "approved",
+	}
+	if got := m.renderCopilotStatusLine(); got != "" {
+		t.Errorf("status line should be empty for non-stale terminal state, got %q", got)
+	}
 }
 
 // TestRenderCheckRun_RegularRowUnchanged verifies that the Kind==""

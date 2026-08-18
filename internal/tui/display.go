@@ -100,6 +100,8 @@ func GetCopilotReviewIcon(state string) string {
 		return "⊘"
 	case "pending":
 		return "◐"
+	case "stale":
+		return "⚠"
 	default:
 		return "?"
 	}

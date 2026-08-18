@@ -89,7 +89,12 @@ func (m Model) View() tea.View {
 		checkLine := m.renderCheckRun(check, widths)
 		b.WriteString(checkLine)
 
-		if check.Summary != "" && (check.Conclusion == "failure" || check.Conclusion == "timed_out") {
+		// Render the summary line for failed checks, and for synthetic
+		// Copilot review rows that carry a Summary (e.g. the stale review
+		// guidance: "Copilot review is stale (HEAD is abc1234) — refresh
+		// or re-request"). Reviews have no Conclusion, so the Kind check
+		// is what gates them through.
+		if check.Summary != "" && ((check.Conclusion == "failure" || check.Conclusion == "timed_out") || check.Kind == "review") {
 			b.WriteString(m.renderSummary(check, widths))
 		}
 
@@ -398,6 +403,12 @@ func (m Model) buildCopilotCheckRun() *ghclient.CheckRunInfo {
 	case m.copilotStale:
 		row.Status = "completed"
 		row.ReviewState = "stale"
+		// Surface the stale-state guidance as a Summary line below the
+		// row (rendered via renderSummary). GetCopilotReviewIcon gives
+		// "stale" its own "⚠" icon, but the short SHA + actionable hint
+		// are too long for the name column, so they live here — this
+		// restores the information the pre-refactor status line carried.
+		row.Summary = fmt.Sprintf("Copilot review is stale (HEAD is %s) — refresh or re-request", shortHeadSHA(m.headSHA))
 	case m.copilotPending && !m.copilotReviewComplete:
 		// Pending: either still inside the initial-delay window (queued,
 		// countdown shown in duration column) or actively polling
