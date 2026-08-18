@@ -74,10 +74,19 @@ func (m Model) View() tea.View {
 
 	widths := CalculateColumnWidths(m.checkRuns, m.headCommitTime, m.jobAverages)
 
+	// Compute the synthetic Copilot review row once and reuse it for both
+	// column-width widening and the row render. Calling buildCopilotCheckRun
+	// twice would take two time.Now() snapshots, and the queued/in_progress
+	// branch inside it (gated on time.Until(copilotPollStartTime)) could
+	// evaluate differently between the two calls if the countdown crosses
+	// zero mid-render — leading the widths calc and the rendered row to
+	// disagree on status.
+	copilotRow := m.buildCopilotCheckRun()
+
 	// Ensure the column geometry accommodates the synthetic Copilot review
 	// row when present, so the row never truncates its own name or the
 	// countdown/elapsed text in the duration column.
-	if copilotRow := m.buildCopilotCheckRun(); copilotRow != nil {
+	if copilotRow != nil {
 		widths = widenForCopilotRow(widths, *copilotRow)
 	}
 
@@ -107,7 +116,7 @@ func (m Model) View() tea.View {
 	// enters m.checkRuns, so allChecksComplete, SortCheckRuns, and
 	// determineExitCode are unaffected. It is always rendered last,
 	// regardless of state, to keep its position predictable.
-	if copilotRow := m.buildCopilotCheckRun(); copilotRow != nil {
+	if copilotRow != nil {
 		b.WriteString(m.renderCheckRun(*copilotRow, widths))
 	}
 
@@ -290,7 +299,9 @@ func (m Model) renderCopilotReviewCheckRun(check ghclient.CheckRunInfo, widths C
 	// Duration column: countdown while in the initial-delay window, elapsed
 	// runtime while in_progress (StartedAt was set to copilotPollStartTime
 	// by buildCopilotCheckRun so FormatDuration falls through to Runtime),
-	// or "-" once completed (timestamps are nil).
+	// or "-" once completed (timestamps are nil). Right-align to the
+	// column width, mirroring FormatAlignedColumns' duration padding
+	// without computing and discarding the queue/name/avg columns.
 	durationText := FormatDuration(check)
 	if check.Status == "queued" && !m.copilotPollStartTime.IsZero() {
 		remaining := time.Until(m.copilotPollStartTime)
@@ -298,14 +309,9 @@ func (m Model) renderCopilotReviewCheckRun(check ghclient.CheckRunInfo, widths C
 			durationText = "in " + timing.FormatDuration(remaining)
 		}
 	}
+	durationPad := max(widths.DurationWidth-runewidth.StringWidth(durationText), 0)
+	durationCol := strings.Repeat(" ", durationPad) + durationText
 
-	_, _, durationCol, _ := FormatAlignedColumns(
-		"", // queue column is blanked below
-		FormatCheckNameWithTruncate(check, widths.NameWidth),
-		durationText,
-		"", // avg column is blanked below
-		widths,
-	)
 	// Reviews carry no queue latency or historical average: blank both
 	// columns to keep the row aligned with the table geometry.
 	queueCol := strings.Repeat(" ", widths.QueueWidth)
