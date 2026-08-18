@@ -54,11 +54,6 @@ func (m Model) View() tea.View {
 		fmt.Fprintf(&b, "%s %s\n", prInfo, utcTime)
 		fmt.Fprintf(&b, "%s\n", updatedLine)
 
-		// Copilot review status line (issue #409)
-		if m.waitForCopilot {
-			b.WriteString(m.renderCopilotStatusLine())
-		}
-
 		b.WriteString("\n")
 	}
 
@@ -67,6 +62,13 @@ func (m Model) View() tea.View {
 	}
 
 	widths := CalculateColumnWidths(m.checkRuns, m.headCommitTime, m.jobAverages)
+
+	// Ensure the column geometry accommodates the synthetic Copilot review
+	// row when present, so the row never truncates its own name or the
+	// countdown/elapsed text in the duration column.
+	if copilotRow := m.buildCopilotCheckRun(); copilotRow != nil {
+		widths = widenForCopilotRow(widths, *copilotRow)
+	}
 
 	headerQueue, headerName, headerDuration, headerAvg := FormatHeaderColumns(widths)
 	b.WriteString(m.styles.Header.Render(fmt.Sprintf("%s   %s  %s  %s\n", headerQueue, headerName, headerDuration, headerAvg)))
@@ -85,11 +87,12 @@ func (m Model) View() tea.View {
 		}
 	}
 
-	// Copilot review row (issue #409) — no queue/duration/avg columns since
-	// reviews have no startedAt/completedAt timestamps. Rendered as a simple
-	// icon + label line aligned under the check table's icon column.
-	if m.waitForCopilot && m.copilotReviewComplete && m.copilotState != "" {
-		b.WriteString(m.renderCopilotReviewRow(widths))
+	// Copilot review row (issue #409). The row is display-only: it never
+	// enters m.checkRuns, so allChecksComplete, SortCheckRuns, and
+	// determineExitCode are unaffected. It is always rendered last,
+	// regardless of state, to keep its position predictable.
+	if copilotRow := m.buildCopilotCheckRun(); copilotRow != nil {
+		b.WriteString(m.renderCheckRun(*copilotRow, widths))
 	}
 
 	b.WriteString("\n")
@@ -180,8 +183,19 @@ func (m Model) renderSummary(check ghclient.CheckRunInfo, widths ColumnWidths) s
 	return fmt.Sprintf("%s%s\n", strings.Repeat(" ", indent), m.styles.Description.Render(check.Summary))
 }
 
-// renderCheckRun displays a single check run with aligned columns
+// renderCheckRun displays a single check run with aligned columns.
+//
+// For regular check runs (Kind == "") the four columns are populated from
+// timing data as before. For Copilot review rows (Kind == "review") the
+// queue and avg columns are left blank (reviews have no queue latency or
+// historical averages), the icon and style come from the review state, and
+// the duration column either shows a countdown (while queued in the
+// initial-delay window), an elapsed runtime (while pending), or "-"
+// (once complete — reviews expose no timestamps for FinalDuration).
 func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) string {
+	if check.Kind == "review" {
+		return m.renderCopilotReviewCheckRun(check, widths)
+	}
 	status := check.Status
 	conclusion := check.Conclusion
 
@@ -235,42 +249,14 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 	return queueCol + " " + styledIcon + " " + styledName + "  " + styledDuration + "  " + styledAvg + "\n"
 }
 
-// renderCopilotStatusLine renders the Copilot review status under the PR
-// header: a spinner + elapsed line while pending, or a yellow stale warning
-// (issue #409).
-func (m Model) renderCopilotStatusLine() string {
-	if m.copilotPending && !m.copilotStale {
-		remaining := time.Until(m.copilotPollStartTime)
-		if remaining > 0 {
-			// Still inside the initial-delay window (copilotPollStartTime is
-			// set to PRInfoMsg-time + copilotInitialDelay). Polling hasn't
-			// started yet, so show a countdown rather than "0s elapsed".
-			return fmt.Sprintf("%s %s\n", m.spinner.View(),
-				m.styles.Running.Render(fmt.Sprintf("Copilot review queued, polling in %s…", timing.FormatDuration(remaining))))
-		}
-		elapsed := time.Since(m.copilotPollStartTime)
-		return fmt.Sprintf("%s %s\n", m.spinner.View(),
-			m.styles.Running.Render(fmt.Sprintf("Copilot review in progress… (%s elapsed)", timing.FormatDuration(elapsed))))
-	}
-	if m.copilotStale {
-		shortHead := m.headSHA
-		if len(shortHead) > 7 {
-			shortHead = shortHead[:7]
-		}
-		return m.styles.Running.Render(
-			fmt.Sprintf("⚠ Copilot review is stale (HEAD is %s) — refresh or re-request\n", shortHead))
-	}
-	return ""
-}
+// renderCopilotReviewCheckRun renders a synthetic Copilot review row using
+// the same column geometry as renderCheckRun but with review-specific
+// icon, style, and blank queue/avg columns.
+func (m Model) renderCopilotReviewCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) string {
+	icon := GetCopilotReviewIcon(check.ReviewState)
 
-// renderCopilotReviewRow renders the completed Copilot review as a row in the
-// check table with an icon by state, but no queue-latency or runtime columns
-// (reviews have no startedAt/completedAt — issue #409).
-func (m Model) renderCopilotReviewRow(widths ColumnWidths) string {
-	icon := GetCopilotReviewIcon(m.copilotState)
-
-	var style = m.styles.Queued
-	switch m.copilotState {
+	style := m.styles.Queued
+	switch check.ReviewState {
 	case "approved":
 		style = m.styles.Success
 	case "changes_requested":
@@ -279,25 +265,136 @@ func (m Model) renderCopilotReviewRow(widths ColumnWidths) string {
 		style = m.styles.Info
 	case "dismissed":
 		style = m.styles.Queued
+	case "pending", "stale":
+		style = m.styles.Running
 	}
 
-	// Pad the queue column with spaces (reviews have no queue latency) and
-	// render the name as "Copilot / <state>" to match the Workflow/Job format.
+	nameCol := BuildNameColumn(check, widths, false)
+
+	// Duration column: countdown while in the initial-delay window, elapsed
+	// runtime while in_progress (StartedAt was set to copilotPollStartTime
+	// by buildCopilotCheckRun so FormatDuration falls through to Runtime),
+	// or "-" once completed (timestamps are nil).
+	durationText := FormatDuration(check)
+	if check.Status == "queued" && !m.copilotPollStartTime.IsZero() {
+		remaining := time.Until(m.copilotPollStartTime)
+		if remaining > 0 {
+			durationText = "in " + timing.FormatDuration(remaining)
+		}
+	}
+
+	_, _, durationCol, _ := FormatAlignedColumns(
+		"", // queue column is blanked below
+		FormatCheckNameWithTruncate(check, widths.NameWidth),
+		durationText,
+		"", // avg column is blanked below
+		widths,
+	)
+	// Reviews carry no queue latency or historical average: blank both
+	// columns to keep the row aligned with the table geometry.
 	queueCol := strings.Repeat(" ", widths.QueueWidth)
-	nameCol := fmt.Sprintf("Copilot / %s", m.copilotState)
+	avgCol := strings.Repeat(" ", widths.AvgWidth)
 
-	// Apply same width-based truncation as check names
-	if runewidth.StringWidth(nameCol) > widths.NameWidth {
-		nameCol = runewidth.Truncate(nameCol, widths.NameWidth, "…")
+	styledIcon := style.Render(icon)
+	styledDuration := style.Render(durationCol)
+	styledName := style.Render(nameCol)
+
+	return queueCol + " " + styledIcon + " " + styledName + "  " + styledDuration + "  " + avgCol + "\n"
+}
+
+// buildCopilotCheckRun synthesizes a display-only CheckRunInfo representing
+// the current Copilot review state for the PR's HEAD commit. Returns nil
+// when no row should be rendered:
+//   - waitForCopilot disabled
+//   - review never armed (copilotWaitStartTime is zero)
+//   - not-requested with no stale review to surface
+//
+// The returned row never enters m.checkRuns; it is rendered separately as
+// the last row of the table and is excluded from SortCheckRuns,
+// allChecksComplete, and determineExitCode. Timing fields are populated
+// only to drive the duration-column display:
+//   - queued:   StartedAt/CompletedAt nil (FormatDuration falls to "-")
+//   - in_progress: StartedAt = copilotPollStartTime (Runtime yields elapsed)
+//   - completed: StartedAt/CompletedAt nil (FormatDuration returns "-")
+func (m Model) buildCopilotCheckRun() *ghclient.CheckRunInfo {
+	if !m.waitForCopilot {
+		return nil
 	}
-	namePadding := max(widths.NameWidth-runewidth.StringWidth(nameCol), 0)
-	paddedName := nameCol + strings.Repeat(" ", namePadding)
+	// Only render once the Copilot gate has been armed by PRInfoMsg.
+	if m.copilotWaitStartTime.IsZero() {
+		return nil
+	}
 
-	// No duration or avg columns — pad with spaces to align with the table
-	durPad := strings.Repeat(" ", widths.DurationWidth)
-	avgPad := strings.Repeat(" ", widths.AvgWidth)
+	const (
+		kind        = "review"
+		workflow    = "Copilot"
+		name        = "Review"
+		detailsURL  = ""
+	)
 
-	return queueCol + " " + style.Render(icon) + " " + style.Render(paddedName) + "  " + durPad + "  " + avgPad + "\n"
+	row := &ghclient.CheckRunInfo{
+		Kind:         kind,
+		WorkflowName: workflow,
+		Name:         name,
+		DetailsURL:   detailsURL,
+	}
+
+	switch {
+	case m.copilotStale:
+		row.Status = "completed"
+		row.ReviewState = "stale"
+	case m.copilotPending && !m.copilotReviewComplete:
+		// Pending: either still inside the initial-delay window (queued,
+		// countdown shown in duration column) or actively polling
+		// (in_progress, elapsed shown).
+		if !m.copilotPollStartTime.IsZero() && time.Until(m.copilotPollStartTime) > 0 {
+			row.Status = "queued"
+			row.ReviewState = "pending"
+		} else {
+			row.Status = "in_progress"
+			row.ReviewState = "pending"
+			start := m.copilotPollStartTime
+			row.StartedAt = &start
+		}
+	default:
+		// Review reached a terminal state (approved/commented/dismissed/
+		// changes_requested) or copilotReviewComplete was set with an empty
+		// copilotState (e.g. two-consecutive-not-requested). Suppress the
+		// row entirely if there's nothing to show.
+		if !m.copilotReviewComplete || m.copilotState == "" {
+			return nil
+		}
+		row.Status = "completed"
+		row.ReviewState = m.copilotState
+	}
+	return row
+}
+
+// widenForCopilotRow grows column widths to fit the synthetic Copilot row,
+// mirroring the per-column logic in CalculateColumnWidths but without
+// touching the queue column (which is blank for reviews) and capping the
+// name column at maxNameWidth. This keeps the header row and check rows
+// aligned when the Copilot row would otherwise exceed the geometry derived
+// from m.checkRuns alone.
+func widenForCopilotRow(widths ColumnWidths, row ghclient.CheckRunInfo) ColumnWidths {
+	const maxNameWidth = 60
+	name := FormatCheckName(row)
+	nameLen := runewidth.StringWidth(name)
+	if nameLen > widths.NameWidth {
+		if nameLen <= maxNameWidth {
+			widths.NameWidth = nameLen
+		} else {
+			widths.NameWidth = maxNameWidth
+		}
+	}
+	// Duration column may show "in 15s" style countdown text while queued,
+	// or the elapsed runtime while in_progress. Pre-compute both possible
+	// texts and widen to the larger of the two.
+	durationText := FormatDuration(row)
+	if runewidth.StringWidth(durationText) > widths.DurationWidth {
+		widths.DurationWidth = runewidth.StringWidth(durationText)
+	}
+	return widths
 }
 
 // renderStartupPhase shows helpful message during GitHub Actions startup delay

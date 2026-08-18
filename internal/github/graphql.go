@@ -39,7 +39,17 @@ type Annotation struct {
 	AnnotationLevel string
 }
 
-// CheckRunInfo contains enriched check run data with workflow name
+// CheckRunInfo contains enriched check run data with workflow name.
+//
+// Kind discriminates the row type. The zero value ("") denotes a regular
+// check run sourced from GraphQL/REST. "review" denotes a synthetic row
+// representing a Copilot code review; in that case ReviewState carries the
+// review state vocabulary (pending/approved/changes_requested/commented/
+// dismissed/stale) which is intentionally distinct from Status/Conclusion
+// so that timing and conclusion helpers remain untouched. Synthetic review
+// rows must not participate in timing calculations: StartedAt is used only
+// to drive the in_progress runtime display while a review is pending, and
+// CompletedAt stays nil.
 type CheckRunInfo struct {
 	Name          string
 	WorkflowName  string
@@ -53,6 +63,8 @@ type CheckRunInfo struct {
 	Annotations   []Annotation
 	WorkflowRunID int64
 	WorkflowID    int64
+	Kind         string
+	ReviewState  string
 }
 
 // contextNode represents a union type in the StatusCheckRollup
