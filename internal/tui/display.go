@@ -20,6 +20,11 @@ type ColumnWidths struct {
 	AvgWidth      int // Right-aligned historical average
 }
 
+// maxCheckNameWidth caps the left-aligned name column. Shared by
+// CalculateColumnWidths and widenForCopilotRow so the two paths can't
+// drift on the cap and produce different geometries for the same row.
+const maxCheckNameWidth = 60
+
 // FormatQueueLatency returns the queue time text or placeholder
 func FormatQueueLatency(check ghclient.CheckRunInfo, headCommitTime time.Time) string {
 	if check.Status == "queued" {
@@ -188,7 +193,6 @@ func FormatAvg(check ghclient.CheckRunInfo, jobAverages map[string]time.Duration
 func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime time.Time, jobAverages map[string]time.Duration) ColumnWidths {
 	const (
 		minNameWidth = 20
-		maxNameWidth = 60
 		minTimeWidth = 5
 	)
 
@@ -207,10 +211,10 @@ func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime tim
 
 		name := FormatCheckName(check)
 		nameLen := runewidth.StringWidth(name)
-		if nameLen > widths.NameWidth && nameLen <= maxNameWidth {
+		if nameLen > widths.NameWidth && nameLen <= maxCheckNameWidth {
 			widths.NameWidth = nameLen
-		} else if nameLen > maxNameWidth {
-			widths.NameWidth = maxNameWidth
+		} else if nameLen > maxCheckNameWidth {
+			widths.NameWidth = maxCheckNameWidth
 		}
 
 		durationText := FormatDuration(check)

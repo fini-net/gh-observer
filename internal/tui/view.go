@@ -76,7 +76,7 @@ func (m Model) View() tea.View {
 	// row when present, so the row never truncates its own name or the
 	// countdown/elapsed text in the duration column.
 	if copilotRow != nil {
-		widths = widenForCopilotRow(widths, *copilotRow)
+		widths = widenForCopilotRow(widths, *copilotRow, m.copilotPollStartTime)
 	}
 
 	headerQueue, headerName, headerDuration, headerAvg := FormatHeaderColumns(widths)
@@ -304,13 +304,11 @@ func (m Model) renderCopilotReviewCheckRun(check ghclient.CheckRunInfo, widths C
 	// or "-" once completed (timestamps are nil). Right-align to the
 	// column width, mirroring FormatAlignedColumns' duration padding
 	// without computing and discarding the queue/name/avg columns.
-	durationText := FormatDuration(check)
-	if check.Status == "queued" && !m.copilotPollStartTime.IsZero() {
-		remaining := time.Until(m.copilotPollStartTime)
-		if remaining > 0 {
-			durationText = "in " + timing.FormatDuration(remaining)
-		}
-	}
+	//
+	// copilotDurationText is shared with widenForCopilotRow so the width
+	// calc and the rendered row agree on the exact string — including the
+	// "in Xs" countdown that FormatDuration alone does not synthesize.
+	durationText := copilotDurationText(check, m.copilotPollStartTime)
 	durationPad := max(widths.DurationWidth-runewidth.StringWidth(durationText), 0)
 	durationCol := strings.Repeat(" ", durationPad) + durationText
 
@@ -435,27 +433,57 @@ func (m Model) buildCopilotCheckRun() *ghclient.CheckRunInfo {
 	return row
 }
 
+// copilotDurationText returns the string that renderCopilotReviewCheckRun
+// will display in the duration column for a synthetic Copilot review row:
+//
+//   - queued + inside the initial-delay window: "in <remaining>" countdown
+//     (e.g. "in 15s"), where remaining = time.Until(copilotPollStartTime)
+//   - queued + delay elapsed, or in_progress: the elapsed-runtime text
+//     FormatDuration derives from StartedAt (set to copilotPollStartTime
+//     by buildCopilotCheckRun), or "-" if StartedAt is nil
+//   - completed (or any other status): "-" — reviews expose no timestamps
+//     for FinalDuration
+//
+// widenForCopilotRow calls this same helper so the width calc and the
+// rendered row agree on the exact string, including the "in <remaining>"
+// countdown that FormatDuration(check) alone does not synthesize (it
+// returns "-" for queued rows). Without this shared path, a configured
+// copilot_initial_delay large enough to produce a wider countdown than
+// any other row's duration text (e.g. "in 1m 30s") would overflow the
+// pre-computed DurationWidth and misalign the Copilot row against the
+// header for the duration of the countdown.
+func copilotDurationText(check ghclient.CheckRunInfo, copilotPollStartTime time.Time) string {
+	if check.Status == "queued" && !copilotPollStartTime.IsZero() {
+		remaining := time.Until(copilotPollStartTime)
+		if remaining > 0 {
+			return "in " + timing.FormatDuration(remaining)
+		}
+	}
+	return FormatDuration(check)
+}
+
 // widenForCopilotRow grows column widths to fit the synthetic Copilot row,
 // mirroring the per-column logic in CalculateColumnWidths but without
 // touching the queue column (which is blank for reviews) and capping the
-// name column at maxNameWidth. This keeps the header row and check rows
+// name column at maxCheckNameWidth. This keeps the header row and check rows
 // aligned when the Copilot row would otherwise exceed the geometry derived
 // from m.checkRuns alone.
-func widenForCopilotRow(widths ColumnWidths, row ghclient.CheckRunInfo) ColumnWidths {
-	const maxNameWidth = 60
+func widenForCopilotRow(widths ColumnWidths, row ghclient.CheckRunInfo, copilotPollStartTime time.Time) ColumnWidths {
 	name := FormatCheckName(row)
 	nameLen := runewidth.StringWidth(name)
 	if nameLen > widths.NameWidth {
-		if nameLen <= maxNameWidth {
+		if nameLen <= maxCheckNameWidth {
 			widths.NameWidth = nameLen
 		} else {
-			widths.NameWidth = maxNameWidth
+			widths.NameWidth = maxCheckNameWidth
 		}
 	}
-	// Duration column may show "in 15s" style countdown text while queued,
-	// or the elapsed runtime while in_progress. Pre-compute both possible
-	// texts and widen to the larger of the two.
-	durationText := FormatDuration(row)
+	// Duration column may show "in 15s" style countdown text while queued
+	// (synthesized by copilotDurationText, NOT by FormatDuration which
+	// returns "-" for queued rows), or the elapsed runtime while
+	// in_progress. Use the shared helper so the width calc sees the same
+	// string the row will render, including the countdown prefix.
+	durationText := copilotDurationText(row, copilotPollStartTime)
 	if runewidth.StringWidth(durationText) > widths.DurationWidth {
 		widths.DurationWidth = runewidth.StringWidth(durationText)
 	}
