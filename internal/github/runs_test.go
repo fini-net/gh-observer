@@ -295,11 +295,15 @@ func TestFetchCommitPushedTime_PushedDateWins(t *testing.T) {
 	resp := commitPushedDateQuery{}
 	resp.Repository.Object.Commit.PushedDate.Time = pushed
 	resp.Repository.Object.Commit.CommittedDate.Time = committed
+	resp.RateLimit.Remaining = 4999
 
 	mock := &mockPushedDateQuerier{responses: []commitPushedDateQuery{resp}}
-	got := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
+	got, rl := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
 	if !got.Equal(pushed) {
 		t.Errorf("got %v, want %v (pushedDate should win)", got, pushed)
+	}
+	if rl != 4999 {
+		t.Errorf("rate limit = %d, want 4999", rl)
 	}
 }
 
@@ -310,45 +314,62 @@ func TestFetchCommitPushedTime_FallsBackToCommittedDate(t *testing.T) {
 
 	resp := commitPushedDateQuery{}
 	resp.Repository.Object.Commit.CommittedDate.Time = committed
+	resp.RateLimit.Remaining = 4998
 
 	mock := &mockPushedDateQuerier{responses: []commitPushedDateQuery{resp}}
-	got := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
+	got, rl := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
 	if !got.Equal(committed) {
 		t.Errorf("got %v, want %v (committedDate fallback)", got, committed)
+	}
+	if rl != 4998 {
+		t.Errorf("rate limit = %d, want 4998", rl)
 	}
 }
 
 // TestFetchCommitPushedTime_ZeroWhenAbsent asserts the zero time is
-// returned when neither date is present so callers can fall back to REST.
+// returned when neither date is present so callers can fall back to REST,
+// while the rate limit is still surfaced for the caller's accounting.
 func TestFetchCommitPushedTime_ZeroWhenAbsent(t *testing.T) {
-	mock := &mockPushedDateQuerier{responses: []commitPushedDateQuery{{}}}
-	got := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
+	resp := commitPushedDateQuery{}
+	resp.RateLimit.Remaining = 4997
+	mock := &mockPushedDateQuerier{responses: []commitPushedDateQuery{resp}}
+	got, rl := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
 	if !got.IsZero() {
 		t.Errorf("got %v, want zero", got)
+	}
+	if rl != 4997 {
+		t.Errorf("rate limit = %d, want 4997", rl)
 	}
 }
 
 // TestFetchCommitPushedTime_ZeroOnQueryError asserts a GraphQL error
-// yields the zero time so the caller keeps the REST fallback rather than
-// crashing (issue #349 robustness criterion).
+// yields the zero time and a 0 rate limit so the caller keeps the REST
+// fallback rather than crashing (issue #349 robustness criterion).
 func TestFetchCommitPushedTime_ZeroOnQueryError(t *testing.T) {
 	mock := &mockPushedDateQuerier{
 		responses: []commitPushedDateQuery{{}},
 		errs:      []error{fmt.Errorf("network error")},
 	}
-	got := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
+	got, rl := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
 	if !got.IsZero() {
 		t.Errorf("got %v, want zero on query error", got)
+	}
+	if rl != 0 {
+		t.Errorf("rate limit = %d, want 0 on query error", rl)
 	}
 }
 
 // TestFetchCommitPushedTime_ZeroForEmptySHA guards against the GraphQL
-// helper being invoked with an empty SHA (would 404).
+// helper being invoked with an empty SHA (would 404). No GraphQL call
+// should be made, and the rate limit must be 0 (no observation).
 func TestFetchCommitPushedTime_ZeroForEmptySHA(t *testing.T) {
 	mock := &mockPushedDateQuerier{}
-	got := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "")
+	got, rl := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "")
 	if !got.IsZero() {
 		t.Errorf("got %v, want zero for empty SHA", got)
+	}
+	if rl != 0 {
+		t.Errorf("rate limit = %d, want 0 for empty SHA", rl)
 	}
 	if mock.calls != 0 {
 		t.Errorf("expected 0 GraphQL calls for empty SHA, got %d", mock.calls)

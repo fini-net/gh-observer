@@ -436,7 +436,7 @@ func runRunSnapshot(ctx context.Context, owner, repo string, runID int64, enable
 		return 1
 	}
 
-	runInfo, err := ghclient.FetchRunInfo(ctx, client, token, owner, repo, runID)
+	runInfo, _, err := ghclient.FetchRunInfo(ctx, client, token, owner, repo, runID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to fetch run info: %v\n", err)
 		return 1

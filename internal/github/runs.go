@@ -57,9 +57,12 @@ func firstLine(s string) string {
 // commitPushedDateQuery resolves the push time of a single commit via
 // GraphQL. The Actions REST API exposes only head_commit.timestamp (the
 // committer date), not the push time, so a small GraphQL lookup against
-// Repository.commit(oid:) is required to obtain pushedDate (issue #349).
-// committedDate is also fetched as a fallback for rare cases where
-// pushedDate is absent (e.g. some tagged-release runs not tied to a push).
+// Repository.object(oid:) ... on Commit is required to obtain pushedDate
+// (issue #349). committedDate is also fetched as a fallback for rare
+// cases where pushedDate is absent (e.g. some tagged-release runs not
+// tied to a push). RateLimit is requested for consistency with the
+// codebase's other GraphQL queries so this one-shot call participates in
+// the app's rate-limit accounting.
 type commitPushedDateQuery struct {
 	Repository struct {
 		Object struct {
@@ -69,17 +72,23 @@ type commitPushedDateQuery struct {
 			} `graphql:"... on Commit"`
 		} `graphql:"object(oid: $oid)"`
 	} `graphql:"repository(owner: $owner, name: $repo)"`
+	RateLimit struct {
+		Remaining int
+	}
 }
 
 // fetchCommitPushedTime looks up pushedDate (with committedDate fallback)
 // for the given SHA via a single GraphQL query. Returns the zero time
 // when the lookup fails or returns no usable timestamp; callers are
-// expected to fall back to another source rather than abort.
+// expected to fall back to another source rather than abort. The second
+// return value is the GraphQL rate limit remaining after the call (0 on
+// error or when the query is skipped), so callers can fold it into the
+// app's rate-limit accounting alongside other GraphQL queries.
 // The unexported helper takes a graphqlQuerier so tests can inject a mock;
 // the public caller builds the client from the token via the wrapper below.
-func fetchCommitPushedTimeWithClient(ctx context.Context, client graphqlQuerier, owner, repo, sha string) time.Time {
+func fetchCommitPushedTimeWithClient(ctx context.Context, client graphqlQuerier, owner, repo, sha string) (time.Time, int) {
 	if sha == "" {
-		return time.Time{}
+		return time.Time{}, 0
 	}
 
 	var q commitPushedDateQuery
@@ -90,23 +99,26 @@ func fetchCommitPushedTimeWithClient(ctx context.Context, client graphqlQuerier,
 	}
 	if err := client.Query(ctx, &q, variables); err != nil {
 		debug.Log("commit pushedDate lookup failed", "owner", owner, "repo", repo, "sha", sha, "err", err)
-		return time.Time{}
+		return time.Time{}, 0
 	}
+	rateLimitRemaining := q.RateLimit.Remaining
+	debug.Log("commit pushedDate lookup", "owner", owner, "repo", repo, "sha", sha, "rate_limit_remaining", rateLimitRemaining)
 	if !q.Repository.Object.Commit.PushedDate.IsZero() {
-		return q.Repository.Object.Commit.PushedDate.Time
+		return q.Repository.Object.Commit.PushedDate.Time, rateLimitRemaining
 	}
 	if !q.Repository.Object.Commit.CommittedDate.IsZero() {
-		return q.Repository.Object.Commit.CommittedDate.Time
+		return q.Repository.Object.Commit.CommittedDate.Time, rateLimitRemaining
 	}
-	return time.Time{}
+	return time.Time{}, rateLimitRemaining
 }
 
 // fetchCommitPushedTime builds an authenticated GraphQL client from token
 // and delegates to fetchCommitPushedTimeWithClient. A missing token yields
-// the zero time (callers fall back to the REST timestamp).
-func fetchCommitPushedTime(ctx context.Context, token, owner, repo, sha string) time.Time {
+// the zero time and a 0 rate limit (callers fall back to the REST
+// timestamp and keep their existing rate-limit value).
+func fetchCommitPushedTime(ctx context.Context, token, owner, repo, sha string) (time.Time, int) {
 	if token == "" {
-		return time.Time{}
+		return time.Time{}, 0
 	}
 	src := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	httpClient := oauth2.NewClient(ctx, src)
@@ -122,10 +134,18 @@ func fetchCommitPushedTime(ctx context.Context, token, owner, repo, sha string) 
 // fallback is used directly. Callers that already hold a token should pass
 // it here rather than letting this function re-derive it via GetToken()
 // (which may shell out to `gh auth token`).
-func FetchRunInfo(ctx context.Context, client *github.Client, token, owner, repo string, runID int64) (*RunInfo, error) {
+//
+// The second return value is the GitHub API rate limit remaining after the
+// GraphQL lookup (or 5000 — the REST default — when the lookup is skipped
+// or fails, since the REST GetWorkflowRunByID call does not expose a
+// remaining count in a way this function threads back). Callers should
+// fold it into their rate-limit accounting; when the GraphQL call
+// succeeds its observed value is returned, which may be lower than the
+// REST-side reality and is intentionally conservative.
+func FetchRunInfo(ctx context.Context, client *github.Client, token, owner, repo string, runID int64) (*RunInfo, int, error) {
 	run, _, err := client.Actions.GetWorkflowRunByID(ctx, owner, repo, runID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch workflow run %d: %w", runID, err)
+		return nil, 5000, fmt.Errorf("failed to fetch workflow run %d: %w", runID, err)
 	}
 
 	info := &RunInfo{
@@ -164,19 +184,30 @@ func FetchRunInfo(ctx context.Context, client *github.Client, token, owner, repo
 		info.Conclusion = *run.Conclusion
 	}
 
+	// Conservative default: matches FetchRunJobs's sentinel when no
+	// GraphQL rate-limit observation is available. The GraphQL lookup
+	// below replaces it with the real observed value when it succeeds.
+	rateLimitRemaining := 5000
+
 	// Best-effort GraphQL lookup of pushedDate: if it succeeds, replace
 	// the REST fallback with the real push time. A failure leaves the
 	// fallback in place and is logged, not surfaced — the header still
-	// renders (just with a slightly older timestamp).
+	// renders (just with a slightly older timestamp). The rate limit
+	// returned by the lookup is surfaced to the caller even on timestamp
+	// miss so the app's backoff accounting sees this one-shot call.
 	if info.HeadSHA != "" {
-		if pushed := fetchCommitPushedTime(ctx, token, owner, repo, info.HeadSHA); !pushed.IsZero() {
+		pushed, rl := fetchCommitPushedTime(ctx, token, owner, repo, info.HeadSHA)
+		if rl > 0 {
+			rateLimitRemaining = rl
+		}
+		if !pushed.IsZero() {
 			info.HeadPushedTime = &github.Timestamp{Time: pushed}
 		}
 	}
 
-	debug.Log("fetch run info", "run_id", runID, "name", info.DisplayTitle, "status", info.Status)
+	debug.Log("fetch run info", "run_id", runID, "name", info.DisplayTitle, "status", info.Status, "rate_limit_remaining", rateLimitRemaining)
 
-	return info, nil
+	return info, rateLimitRemaining, nil
 }
 
 // FetchRunJobs retrieves the jobs for a workflow run by its ID.
