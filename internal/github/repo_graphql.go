@@ -22,11 +22,13 @@ const maxPRsPerQuery = 10
 // PRCheckData holds check run data for a single PR in repo mode.
 // HeadSHA is the PR head commit OID, used to dedupe standalone branch runs
 // (see RepoModel.dedupeAndAttachExtraJobs) against the PR section.
+// HeadPushedTime is the head commit's pushedDate (with committedDate as a
+// fallback), used for the queue-latency column and "Pushed Xs ago" header.
 type PRCheckData struct {
 	Number         int
 	Title          string
 	CheckRuns      []CheckRunInfo
-	HeadCommitTime time.Time
+	HeadPushedTime time.Time
 	HeadSHA        string
 }
 
@@ -151,16 +153,16 @@ func fetchRepoCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner
 		}
 
 		commit := pr.Commits.Nodes[0].Commit
-		var headCommitTime time.Time
+		var headPushedTime time.Time
 		if !commit.PushedDate.IsZero() {
-			headCommitTime = commit.PushedDate.Time
+			headPushedTime = commit.PushedDate.Time
 		} else if !commit.CommittedDate.IsZero() {
-			headCommitTime = commit.CommittedDate.Time
+			headPushedTime = commit.CommittedDate.Time
 		}
 
 		checkRuns := repoContextNodesToCheckRuns(commit.StatusCheckRollup.Contexts.Nodes)
 
-		if len(checkRuns) == 0 && headCommitTime.IsZero() {
+		if len(checkRuns) == 0 && headPushedTime.IsZero() {
 			continue
 		}
 
@@ -168,7 +170,7 @@ func fetchRepoCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner
 			Number:         pr.Number,
 			Title:          pr.Title,
 			CheckRuns:      checkRuns,
-			HeadCommitTime: headCommitTime,
+			HeadPushedTime: headPushedTime,
 			HeadSHA:        string(commit.OID),
 		}
 	}

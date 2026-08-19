@@ -7,12 +7,17 @@ import (
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
-// QueueLatency calculates the time from commit push to check start
-func QueueLatency(commitTime time.Time, check ghclient.CheckRunInfo) time.Duration {
-	if check.StartedAt == nil || commitTime.IsZero() {
+// QueueLatency calculates the time from commit push to check start. The
+// pushTime parameter should be the head commit's pushedDate (not the
+// commit-author or committer timestamp): GitHub's actions-queue delay is
+// the gap between when a commit is pushed and when the first check on it
+// starts, and only pushedDate captures that. A zero pushTime (e.g.
+// GraphQL lookup failed) returns 0 so the caller can render a placeholder.
+func QueueLatency(pushTime time.Time, check ghclient.CheckRunInfo) time.Duration {
+	if check.StartedAt == nil || pushTime.IsZero() {
 		return 0
 	}
-	return check.StartedAt.Sub(commitTime)
+	return check.StartedAt.Sub(pushTime)
 }
 
 // Runtime calculates elapsed time for in_progress checks

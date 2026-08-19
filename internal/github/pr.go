@@ -12,17 +12,21 @@ import (
 )
 
 var (
-	prURLPattern          = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)$`)
+	prURLPattern         = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)$`)
 	actionsRunURLPattern = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/actions/runs/(\d+)$`)
 )
 
-// PRInfo contains metadata about a pull request
+// PRInfo contains metadata about a pull request. Only PR-level fields
+// (number, title, head SHA, created-at) come from REST; the head commit's
+// push time is sourced separately from the GraphQL check-runs query
+// (FetchCheckRunsGraphQL), which fetches pushedDate in the same round-trip
+// as the StatusCheckRollup. The REST commit endpoint only exposes
+// committer/author timestamps, not pushedDate, so it is not used here.
 type PRInfo struct {
-	Number         int
-	Title          string
-	HeadSHA        string
-	CreatedAt      string
-	HeadCommitDate string
+	Number    int
+	Title     string
+	HeadSHA   string
+	CreatedAt string
 }
 
 // parsePRViewWithRepo parses JSON output from 'gh pr view --json number,url'
@@ -114,7 +118,12 @@ func ParsePRURL(prURL string) (owner, repo string, prNumber int, err error) {
 	return matches[1], matches[2], prNum, nil
 }
 
-// FetchPRInfo retrieves metadata about a pull request
+// FetchPRInfo retrieves metadata about a pull request. Only the PR-level
+// fields (number, title, head SHA, created-at) come from REST; the head
+// commit's push time is sourced from the GraphQL check-runs query
+// (FetchCheckRunsGraphQL) which fetches pushedDate in the same round-trip
+// as the StatusCheckRollup. Callers that need the push time should consume
+// the time.Time returned by FetchCheckRunsGraphQL.
 func FetchPRInfo(ctx context.Context, client *github.Client, owner, repo string, prNumber int) (*PRInfo, error) {
 	pr, _, err := client.PullRequests.Get(ctx, owner, repo, prNumber)
 	if err != nil {
@@ -123,22 +132,10 @@ func FetchPRInfo(ctx context.Context, client *github.Client, owner, repo string,
 
 	headSHA := pr.GetHead().GetSHA()
 
-	// Fetch the commit to get its timestamp
-	commit, _, err := client.Repositories.GetCommit(ctx, owner, repo, headSHA, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch commit %s: %w", headSHA, err)
-	}
-
-	commitDate := ""
-	if !commit.GetCommit().GetCommitter().GetDate().IsZero() {
-		commitDate = commit.GetCommit().GetCommitter().GetDate().Format(TimestampFormat)
-	}
-
 	return &PRInfo{
-		Number:         prNumber,
-		Title:          pr.GetTitle(),
-		HeadSHA:        headSHA,
-		CreatedAt:      pr.GetCreatedAt().Format(TimestampFormat),
-		HeadCommitDate: commitDate,
+		Number:    prNumber,
+		Title:     pr.GetTitle(),
+		HeadSHA:   headSHA,
+		CreatedAt: pr.GetCreatedAt().Format(TimestampFormat),
 	}, nil
 }

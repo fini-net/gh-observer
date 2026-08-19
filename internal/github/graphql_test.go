@@ -10,24 +10,24 @@ import (
 )
 
 type checkRunContextFields struct {
-	Name          string
-	Summary       string
-	Status        string
-	Conclusion    string
-	StartedAt     githubv4.DateTime
-	CompletedAt   githubv4.DateTime
-	DetailsURL    string
-	Annotations   []struct {
+	Name        string
+	Summary     string
+	Status      string
+	Conclusion  string
+	StartedAt   githubv4.DateTime
+	CompletedAt githubv4.DateTime
+	DetailsURL  string
+	Annotations []struct {
 		Message         string
 		Path            string
 		Title           string
 		AnnotationLevel string
 		StartLine       int
 	}
-	WorkflowName   string
-	AppName        string
-	WorkflowRunID  int64
-	WorkflowID     int64
+	WorkflowName  string
+	AppName       string
+	WorkflowRunID int64
+	WorkflowID    int64
 }
 
 func makeCheckRunNode(f checkRunContextFields) contextNode {
@@ -308,10 +308,10 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 			name: "GHAS check with AppName but no WorkflowName",
 			nodes: []contextNode{
 				makeCheckRunNode(checkRunContextFields{
-					Name:        "analyze",
-					Status:      "COMPLETED",
-					Conclusion:  "SUCCESS",
-					AppName:     "GitHub Code Scanning",
+					Name:       "analyze",
+					Status:     "COMPLETED",
+					Conclusion: "SUCCESS",
+					AppName:    "GitHub Code Scanning",
 				}),
 			},
 			wantLen:          1,
@@ -331,11 +331,11 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 					WorkflowID:    456,
 				}),
 			},
-			wantLen:            1,
-			wantName:           []string{"test"},
-			wantWorkflowName:   []string{"CI"},
-			wantWorkflowRunID:  []int64{123},
-			wantWorkflowID:     []int64{456},
+			wantLen:           1,
+			wantName:          []string{"test"},
+			wantWorkflowName:  []string{"CI"},
+			wantWorkflowRunID: []int64{123},
+			wantWorkflowID:    []int64{456},
 		},
 		{
 			name: "CheckRun with large workflow IDs exceeding int32",
@@ -349,11 +349,11 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 					WorkflowID:    9876543210,
 				}),
 			},
-			wantLen:            1,
-			wantName:           []string{"test"},
-			wantWorkflowName:   []string{"CI"},
-			wantWorkflowRunID:  []int64{25027630970},
-			wantWorkflowID:     []int64{9876543210},
+			wantLen:           1,
+			wantName:          []string{"test"},
+			wantWorkflowName:  []string{"CI"},
+			wantWorkflowRunID: []int64{25027630970},
+			wantWorkflowID:    []int64{9876543210},
 		},
 		{
 			name: "WorkflowName takes priority over AppName",
@@ -377,8 +377,8 @@ func TestContextNodesToCheckRuns(t *testing.T) {
 				makeCheckRunNode(checkRunContextFields{
 					Name:       "Checkov",
 					Status:     "COMPLETED",
-					Conclusion:  "SUCCESS",
-					AppName:     "Bridgecrew",
+					Conclusion: "SUCCESS",
+					AppName:    "Bridgecrew",
 				}),
 			},
 			wantLen:          1,
@@ -675,6 +675,8 @@ func makeTestQuery(checkRunNames []string, hasNextPage bool, endCursor string, r
 
 	q.Repository.PullRequest.Commits.Nodes = []struct {
 		Commit struct {
+			PushedDate        githubv4.DateTime `graphql:"pushedDate"`
+			CommittedDate     githubv4.DateTime `graphql:"committedDate"`
 			StatusCheckRollup struct {
 				Contexts struct {
 					Nodes    []contextNode
@@ -702,7 +704,7 @@ func TestFetchCheckRunsGraphQL_SinglePage(t *testing.T) {
 		},
 	}
 
-	checkRuns, rateLimit, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
+	checkRuns, _, rateLimit, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -725,7 +727,7 @@ func TestFetchCheckRunsGraphQL_MultiPagePagination(t *testing.T) {
 		},
 	}
 
-	checkRuns, rateLimit, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
+	checkRuns, _, rateLimit, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -757,7 +759,7 @@ func TestFetchCheckRunsGraphQL_EmptyCommits(t *testing.T) {
 		responses: []mockResponse{{query: q}},
 	}
 
-	checkRuns, rateLimit, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
+	checkRuns, _, rateLimit, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -776,7 +778,7 @@ func TestFetchCheckRunsGraphQL_QueryError(t *testing.T) {
 		},
 	}
 
-	checkRuns, rateLimit, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
+	checkRuns, _, rateLimit, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -822,5 +824,79 @@ func TestBigInt_UnmarshalJSON(t *testing.T) {
 				t.Errorf("got %d, want %d", int64(b), tt.want)
 			}
 		})
+	}
+}
+
+// makeTestQueryWithPushTime builds a *pullRequestQuery like makeTestQuery but
+// also populates the head commit's PushedDate and CommittedDate so callers
+// can exercise the push-time extraction path in FetchCheckRunsGraphQL.
+func makeTestQueryWithPushTime(pushedDate, committedDate time.Time, rateLimitRemaining int) *pullRequestQuery {
+	q := makeTestQuery([]string{"lint"}, false, "", rateLimitRemaining)
+	commit := &q.Repository.PullRequest.Commits.Nodes[0]
+	if !pushedDate.IsZero() {
+		commit.Commit.PushedDate.Time = pushedDate
+	}
+	if !committedDate.IsZero() {
+		commit.Commit.CommittedDate.Time = committedDate
+	}
+	return q
+}
+
+// TestFetchCheckRunsGraphQL_HeadPushedTimeFromPushedDate asserts the push
+// time returned by FetchCheckRunsGraphQL is sourced from pushedDate when
+// both pushedDate and committedDate are present (issue #349).
+func TestFetchCheckRunsGraphQL_HeadPushedTimeFromPushedDate(t *testing.T) {
+	pushed := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	committed := pushed.Add(-2 * time.Hour) // older than pushed
+	mock := &mockQuerier{
+		responses: []mockResponse{
+			{query: makeTestQueryWithPushTime(pushed, committed, 4999)},
+		},
+	}
+
+	_, got, _, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Equal(pushed) {
+		t.Errorf("HeadPushedTime = %v, want %v (pushedDate should win over committedDate)", got, pushed)
+	}
+}
+
+// TestFetchCheckRunsGraphQL_HeadPushedTimeFallsBackToCommittedDate
+// asserts that when pushedDate is absent (zero), committedDate is used.
+func TestFetchCheckRunsGraphQL_HeadPushedTimeFallsBackToCommittedDate(t *testing.T) {
+	committed := time.Date(2024, 6, 1, 10, 0, 0, 0, time.UTC)
+	mock := &mockQuerier{
+		responses: []mockResponse{
+			{query: makeTestQueryWithPushTime(time.Time{}, committed, 4999)},
+		},
+	}
+
+	_, got, _, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Equal(committed) {
+		t.Errorf("HeadPushedTime = %v, want %v (committedDate fallback)", got, committed)
+	}
+}
+
+// TestFetchCheckRunsGraphQL_HeadPushedTimeZeroWhenAbsent asserts that when
+// neither pushedDate nor committedDate is present, the zero time is
+// returned so callers can render the fallback header.
+func TestFetchCheckRunsGraphQL_HeadPushedTimeZeroWhenAbsent(t *testing.T) {
+	mock := &mockQuerier{
+		responses: []mockResponse{
+			{query: makeTestQueryWithPushTime(time.Time{}, time.Time{}, 4999)},
+		},
+	}
+
+	_, got, _, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.IsZero() {
+		t.Errorf("HeadPushedTime = %v, want zero", got)
 	}
 }

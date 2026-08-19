@@ -1,6 +1,8 @@
 package github
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -254,5 +256,121 @@ func TestFailureJobConclusion(t *testing.T) {
 				t.Errorf("FailureJobConclusion(%q) = %v, want %v", tt.conclusion, got, tt.want)
 			}
 		})
+	}
+}
+
+// mockPushedDateQuerier returns a sequence of canned commitPushedDateQuery
+// responses (or errors). Mirrors mockQuerier in graphql_test.go but for
+// the run-mode commit-push-time query.
+type mockPushedDateQuerier struct {
+	responses []commitPushedDateQuery
+	errs      []error
+	calls     int
+}
+
+func (m *mockPushedDateQuerier) Query(_ context.Context, q interface{}, _ map[string]interface{}) error {
+	if m.calls >= len(m.responses) && m.calls >= len(m.errs) {
+		return fmt.Errorf("unexpected query call #%d", m.calls+1)
+	}
+	var err error
+	if m.calls < len(m.errs) && m.errs[m.calls] != nil {
+		err = m.errs[m.calls]
+	}
+	if err == nil {
+		resp := m.responses[m.calls]
+		target := q.(*commitPushedDateQuery)
+		*target = resp
+	}
+	m.calls++
+	return err
+}
+
+// TestFetchCommitPushedTime_PushedDateWins asserts pushedDate is returned
+// when both pushedDate and committedDate are present (issue #349).
+func TestFetchCommitPushedTime_PushedDateWins(t *testing.T) {
+	pushed := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	committed := pushed.Add(-2 * time.Hour)
+
+	resp := commitPushedDateQuery{}
+	resp.Repository.Object.Commit.PushedDate.Time = pushed
+	resp.Repository.Object.Commit.CommittedDate.Time = committed
+	resp.RateLimit.Remaining = 4999
+
+	mock := &mockPushedDateQuerier{responses: []commitPushedDateQuery{resp}}
+	got, rl := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
+	if !got.Equal(pushed) {
+		t.Errorf("got %v, want %v (pushedDate should win)", got, pushed)
+	}
+	if rl != 4999 {
+		t.Errorf("rate limit = %d, want 4999", rl)
+	}
+}
+
+// TestFetchCommitPushedTime_FallsBackToCommittedDate asserts the
+// committedDate fallback when pushedDate is absent.
+func TestFetchCommitPushedTime_FallsBackToCommittedDate(t *testing.T) {
+	committed := time.Date(2024, 6, 1, 10, 0, 0, 0, time.UTC)
+
+	resp := commitPushedDateQuery{}
+	resp.Repository.Object.Commit.CommittedDate.Time = committed
+	resp.RateLimit.Remaining = 4998
+
+	mock := &mockPushedDateQuerier{responses: []commitPushedDateQuery{resp}}
+	got, rl := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
+	if !got.Equal(committed) {
+		t.Errorf("got %v, want %v (committedDate fallback)", got, committed)
+	}
+	if rl != 4998 {
+		t.Errorf("rate limit = %d, want 4998", rl)
+	}
+}
+
+// TestFetchCommitPushedTime_ZeroWhenAbsent asserts the zero time is
+// returned when neither date is present so callers can fall back to REST,
+// while the rate limit is still surfaced for the caller's accounting.
+func TestFetchCommitPushedTime_ZeroWhenAbsent(t *testing.T) {
+	resp := commitPushedDateQuery{}
+	resp.RateLimit.Remaining = 4997
+	mock := &mockPushedDateQuerier{responses: []commitPushedDateQuery{resp}}
+	got, rl := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
+	if !got.IsZero() {
+		t.Errorf("got %v, want zero", got)
+	}
+	if rl != 4997 {
+		t.Errorf("rate limit = %d, want 4997", rl)
+	}
+}
+
+// TestFetchCommitPushedTime_ZeroOnQueryError asserts a GraphQL error
+// yields the zero time and a 0 rate limit so the caller keeps the REST
+// fallback rather than crashing (issue #349 robustness criterion).
+func TestFetchCommitPushedTime_ZeroOnQueryError(t *testing.T) {
+	mock := &mockPushedDateQuerier{
+		responses: []commitPushedDateQuery{{}},
+		errs:      []error{fmt.Errorf("network error")},
+	}
+	got, rl := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
+	if !got.IsZero() {
+		t.Errorf("got %v, want zero on query error", got)
+	}
+	if rl != 0 {
+		t.Errorf("rate limit = %d, want 0 on query error", rl)
+	}
+}
+
+// TestFetchCommitPushedTime_ZeroForEmptySHA guards against the GraphQL
+// helper being invoked with an empty SHA (would 404). No GraphQL call
+// should be made, and the rate limit must be 0 (no observation).
+func TestFetchCommitPushedTime_ZeroForEmptySHA(t *testing.T) {
+	mock := &mockPushedDateQuerier{}
+	got, rl := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "")
+	if !got.IsZero() {
+		t.Errorf("got %v, want zero for empty SHA", got)
+	}
+	if rl != 0 {
+		t.Errorf("rate limit = %d, want 0 for empty SHA", rl)
+	}
+	if mock.calls != 0 {
+		t.Errorf("expected 0 GraphQL calls for empty SHA, got %d", mock.calls)
 	}
 }

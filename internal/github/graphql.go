@@ -120,6 +120,8 @@ type pullRequestQuery struct {
 			Commits struct {
 				Nodes []struct {
 					Commit struct {
+						PushedDate        githubv4.DateTime `graphql:"pushedDate"`
+						CommittedDate     githubv4.DateTime `graphql:"committedDate"`
 						StatusCheckRollup struct {
 							Contexts struct {
 								Nodes    []contextNode
@@ -230,21 +232,28 @@ func contextNodesToCheckRuns(nodes []contextNode) []CheckRunInfo {
 
 // FetchCheckRunsGraphQL fetches check runs with workflow names using GraphQL
 // with cursor-based pagination to handle PRs with more than 100 status contexts.
-func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNumber int) ([]CheckRunInfo, int, error) {
+// Also returns the head commit's push time (pushedDate, falling back to
+// committedDate when pushedDate is absent) so callers can render queue
+// latency and "Pushed Xs ago" against the push time rather than the
+// (possibly stale) commit time. The push time is populated from the first
+// page only; if the PR has no commits or the first page errors, the zero
+// value is returned and callers must fall back.
+func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNumber int) ([]CheckRunInfo, time.Time, int, error) {
 	src := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	httpClient := oauth2.NewClient(ctx, src)
 	client := githubv4.NewClient(httpClient)
 	return fetchCheckRunsGraphQL(ctx, client, owner, repo, prNumber)
 }
 
-func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, repo string, prNumber int) ([]CheckRunInfo, int, error) {
+func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, repo string, prNumber int) ([]CheckRunInfo, time.Time, int, error) {
 	var allCheckRuns []CheckRunInfo
+	var headPushedTime time.Time
 	var cursor *githubv4.String
 	rateLimitRemaining := 5000
 
 	prNum, err := safeGraphQLInt(prNumber)
 	if err != nil {
-		return nil, rateLimitRemaining, err
+		return nil, headPushedTime, rateLimitRemaining, err
 	}
 
 	for {
@@ -263,7 +272,7 @@ func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, re
 		err := client.Query(ctx, &query, variables)
 		if err != nil {
 			debug.Log("graphql query failed", "owner", owner, "repo", repo, "pr", prNumber, "err", err)
-			return nil, rateLimitRemaining, err
+			return nil, headPushedTime, rateLimitRemaining, err
 		}
 
 		debug.Log("graphql query success", "owner", owner, "repo", repo, "pr", prNumber, "rate_limit_remaining", query.RateLimit.Remaining)
@@ -277,6 +286,16 @@ func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, re
 		}
 
 		commit := query.Repository.PullRequest.Commits.Nodes[0]
+		// Capture push time from the first page; subsequent pages operate
+		// on the same commit and would just overwrite with the same value.
+		if headPushedTime.IsZero() {
+			if !commit.Commit.PushedDate.IsZero() {
+				headPushedTime = commit.Commit.PushedDate.Time
+			} else if !commit.Commit.CommittedDate.IsZero() {
+				headPushedTime = commit.Commit.CommittedDate.Time
+			}
+		}
+
 		contexts := commit.Commit.StatusCheckRollup.Contexts
 		allCheckRuns = append(allCheckRuns, contextNodesToCheckRuns(contexts.Nodes)...)
 
@@ -286,5 +305,5 @@ func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, re
 		cursor = &contexts.PageInfo.EndCursor
 	}
 
-	return allCheckRuns, rateLimitRemaining, nil
+	return allCheckRuns, headPushedTime, rateLimitRemaining, nil
 }

@@ -325,15 +325,17 @@ Snapshot mode runs when stdout is not a terminal (e.g., scripts, CI, redirected 
 ```go
 client, err := ghclient.NewClient(ctx)
 prInfo, err := ghclient.FetchPRInfo(ctx, client, owner, repo, prNumber)
-headCommitTime, err := time.Parse(time.RFC3339, prInfo.HeadCommitDate)
 ```
 
-Uses REST API to get PR title, head SHA, and timestamps.
+Uses REST API to get PR title, head SHA, and created-at timestamp. The head
+commit's push time is sourced separately from the GraphQL check-runs query
+(`FetchCheckRunsGraphQL`), which fetches `pushedDate` in the same round-trip
+as the StatusCheckRollup (issue #349).
 
 #### Step 2: Fetch Check Runs
 
 ```go
-checkRuns, _, err := ghclient.FetchCheckRunsGraphQL(ctx, token, owner, repo, prNumber)
+checkRuns, headPushedTime, _, err := ghclient.FetchCheckRunsGraphQL(ctx, token, owner, repo, prNumber)
 ```
 
 Returns `[]CheckRunInfo` with workflow names, status, timestamps, and annotations.
@@ -407,7 +409,7 @@ if check.Status == "completed" {
 Mirrors the PR snapshot but for a standalone workflow run:
 
 ```go
-runInfo, err := ghclient.FetchRunInfo(ctx, client, owner, repo, runID)
+runInfo, err := ghclient.FetchRunInfo(ctx, client, token, owner, repo, runID)
 jobs, _, err := ghclient.FetchRunJobs(ctx, client, owner, repo, runID)
 
 // Header: pushed/created time, display title
@@ -899,14 +901,12 @@ Uses REST API for PR info and commit timestamps:
 ```go
 func FetchPRInfo(ctx context.Context, client *github.Client, owner, repo string, prNumber int) (*PRInfo, error) {
     pr, _, err := client.PullRequests.Get(ctx, owner, repo, prNumber)
-    commit, _, err := client.Repositories.GetCommit(ctx, owner, repo, headSHA, nil)
     
     return &PRInfo{
-        Number:         prNumber,
-        Title:          pr.GetTitle(),
-        HeadSHA:        headSHA,
-        CreatedAt:      pr.GetCreatedAt().Format(TimestampFormat),
-        HeadCommitDate: commit.GetCommit().GetCommitter().GetDate().Format(TimestampFormat),
+        Number:    prNumber,
+        Title:     pr.GetTitle(),
+        HeadSHA:   headSHA,
+        CreatedAt: pr.GetCreatedAt().Format(TimestampFormat),
     }, nil
 }
 ```
@@ -1342,10 +1342,10 @@ main.go run()
         │   └── Creates REST API client with OAuth2
         │
         ├── ghclient.FetchPRInfo()                      [internal/github/pr.go]
-        │   └── Returns: PRInfo{Title, HeadSHA, HeadCommitDate}
+        │   └── Returns: PRInfo{Title, HeadSHA, CreatedAt}
         │
         ├── ghclient.FetchCheckRunsGraphQL()            [internal/github/graphql.go]
-        │   └── Returns: []CheckRunInfo{Name, WorkflowName, AppName, Status, ...}
+        │   └── Returns: []CheckRunInfo{...}, headPushedTime, rateLimit
         │
         ├── ghclient.FetchJobAverages() (unless --quick)
         │   └── Returns: map[jobName]averageDuration

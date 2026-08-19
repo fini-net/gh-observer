@@ -124,7 +124,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prTitle = msg.Title
 		m.headSHA = msg.HeadSHA
 		m.prCreatedAt = msg.CreatedAt
-		m.headCommitTime = msg.HeadCommitTime
 
 		cmds := []tea.Cmd{
 			fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber),
@@ -325,6 +324,14 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 
 	m.checkRuns = msg.CheckRuns
 	SortCheckRuns(m.checkRuns)
+	// Adopt the GraphQL-sourced push time on the first successful poll
+	// where it is non-zero. Subsequent polls overwrite with the same
+	// value; if a later poll returns zero (e.g. transient query shape
+	// change), preserve the last known value rather than dropping the
+	// user-facing "Pushed Xs ago" header.
+	if !msg.HeadPushedTime.IsZero() {
+		m.headPushedTime = msg.HeadPushedTime
+	}
 	m.rateLimitRemaining = msg.RateLimitRemaining
 	m.fetchReceived = true
 	m.lastUpdate = time.Now()
@@ -537,17 +544,15 @@ func fetchPRInfo(ctx context.Context, token, owner, repo string, prNumber int) t
 		if err != nil {
 			debug.Log("timestamp parse error", "field", "CreatedAt", "value", prInfo.CreatedAt, "err", err)
 		}
-		headCommitTime, err := ghclient.ParseTimestamp(prInfo.HeadCommitDate)
-		if err != nil {
-			debug.Log("timestamp parse error", "field", "HeadCommitDate", "value", prInfo.HeadCommitDate, "err", err)
-		}
+
+		// The head push time arrives via ChecksUpdateMsg from the GraphQL
+		// check-runs query (FetchCheckRunsGraphQL), not from PRInfo (issue #349).
 
 		return PRInfoMsg{
-			Number:         prInfo.Number,
-			Title:          prInfo.Title,
-			HeadSHA:        prInfo.HeadSHA,
-			CreatedAt:      createdAt,
-			HeadCommitTime: headCommitTime,
+			Number:    prInfo.Number,
+			Title:     prInfo.Title,
+			HeadSHA:   prInfo.HeadSHA,
+			CreatedAt: createdAt,
 		}
 	}
 }
@@ -591,13 +596,14 @@ func fetchWorkflowHistory(ctx context.Context, owner, repo string, workflowID in
 // fetchCheckRuns fetches check runs using GraphQL
 func fetchCheckRuns(ctx context.Context, token, owner, repo string, prNumber int) tea.Cmd {
 	return func() tea.Msg {
-		checkRuns, rateLimit, err := ghclient.FetchCheckRunsGraphQL(ctx, token, owner, repo, prNumber)
+		checkRuns, headPushedTime, rateLimit, err := ghclient.FetchCheckRunsGraphQL(ctx, token, owner, repo, prNumber)
 		if err != nil {
 			return ChecksUpdateMsg{Err: err}
 		}
 
 		return ChecksUpdateMsg{
 			CheckRuns:          checkRuns,
+			HeadPushedTime:     headPushedTime,
 			RateLimitRemaining: rateLimit,
 		}
 	}

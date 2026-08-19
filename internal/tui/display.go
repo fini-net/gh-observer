@@ -31,16 +31,22 @@ const maxCheckNameWidth = 60
 // on the literal string — same rationale as maxCheckNameWidth above.
 const copilotRowKind = "review"
 
-// FormatQueueLatency returns the queue time text or placeholder
-func FormatQueueLatency(check ghclient.CheckRunInfo, headCommitTime time.Time) string {
+// FormatQueueLatency returns the queue time text or placeholder. The
+// headPushedTime parameter is the PR head commit's push time (not the
+// commit-author time): for a queued check this shows "how long since the
+// push" (a stand-in for "how long until the check starts"), and for a
+// started check it backs the QueueLatency calculation (check.StartedAt -
+// pushedAt) which represents how long GitHub took to start the check after
+// the commit was pushed.
+func FormatQueueLatency(check ghclient.CheckRunInfo, headPushedTime time.Time) string {
 	if check.Status == "queued" {
-		if !headCommitTime.IsZero() {
-			return timing.FormatDuration(time.Since(headCommitTime))
+		if !headPushedTime.IsZero() {
+			return timing.FormatDuration(time.Since(headPushedTime))
 		}
 		return "-"
 	}
 
-	queueLatency := timing.QueueLatency(headCommitTime, check)
+	queueLatency := timing.QueueLatency(headPushedTime, check)
 	if queueLatency > 0 {
 		return timing.FormatDuration(queueLatency)
 	}
@@ -206,7 +212,7 @@ func FormatAvg(check ghclient.CheckRunInfo, jobAverages map[string]time.Duration
 }
 
 // CalculateColumnWidths scans all check runs and determines max width for each column
-func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime time.Time, jobAverages map[string]time.Duration) ColumnWidths {
+func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headPushedTime time.Time, jobAverages map[string]time.Duration) ColumnWidths {
 	const (
 		minNameWidth = 20
 		minTimeWidth = 5
@@ -220,7 +226,7 @@ func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headCommitTime tim
 	}
 
 	for _, check := range checkRuns {
-		queueText := FormatQueueLatency(check, headCommitTime)
+		queueText := FormatQueueLatency(check, headPushedTime)
 		if runewidth.StringWidth(queueText) > widths.QueueWidth {
 			widths.QueueWidth = runewidth.StringWidth(queueText)
 		}

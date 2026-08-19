@@ -23,7 +23,7 @@ type PRViewData struct {
 	Title          string
 	CheckRuns      []ghclient.CheckRunInfo
 	ExtraCheckRuns []ghclient.CheckRunInfo
-	HeadCommitTime time.Time
+	HeadPushedTime time.Time
 	HeadSHA        string
 }
 

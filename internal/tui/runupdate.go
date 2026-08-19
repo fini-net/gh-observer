@@ -18,8 +18,9 @@ type RunTickMsg time.Time
 
 // RunInfoMsg contains run metadata.
 type RunInfoMsg struct {
-	RunInfo ghclient.RunInfo
-	Err     error
+	RunInfo            ghclient.RunInfo
+	RateLimitRemaining int
+	Err                error
 }
 
 // RunJobsUpdateMsg contains updated job statuses for a workflow run.
@@ -33,7 +34,7 @@ type RunJobsUpdateMsg struct {
 type RunWorkflowsDiscoveredMsg struct {
 	NewRunIDToWorkflowID map[int64]int64
 	WorkflowIDsToFetch   []int64
-	Err                   error
+	Err                  error
 }
 
 // RunJobAveragesPartialMsg is sent for each workflow that finishes history fetch in run mode.
@@ -50,9 +51,9 @@ type RunErrorMsg struct {
 
 // Init initializes the run model.
 func (m RunModel) Init() tea.Cmd {
-		return tea.Batch(
+	return tea.Batch(
 		m.spinner.Tick,
-		fetchRunInfo(m.ctx, m.client, m.owner, m.repo, m.runID),
+		fetchRunInfo(m.ctx, m.client, m.token, m.owner, m.repo, m.runID),
 		runTick(m.refreshInterval),
 	)
 }
@@ -77,7 +78,7 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (0) before the first successful response doesn't suppress fetches.
 		if m.fetchReceived && m.rateLimitRemaining < rateBackoffThreshold {
 			debug.Log("rate limit backoff (run)", "remaining", m.rateLimitRemaining, "threshold", rateBackoffThreshold)
-			return m, runTick(m.refreshInterval*3)
+			return m, runTick(m.refreshInterval * 3)
 		}
 		return m, tea.Batch(
 			fetchRunJobs(m.ctx, m.client, m.owner, m.repo, m.runID),
@@ -91,6 +92,14 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.runInfo = msg.RunInfo
 		m.runInfoLoaded = true
+		// Fold the GraphQL rate-limit observation from the pushedDate
+		// lookup into the model's accounting. Only mark fetchReceived
+		// when we actually got a value, so the zero-value default (0)
+		// doesn't suppress the first poll tick (see RunTickMsg handler).
+		if msg.RateLimitRemaining > 0 {
+			m.rateLimitRemaining = msg.RateLimitRemaining
+			m.fetchReceived = true
+		}
 		return m, fetchRunJobs(m.ctx, m.client, m.owner, m.repo, m.runID)
 
 	case RunJobsUpdateMsg:
@@ -233,14 +242,17 @@ func runTick(d time.Duration) tea.Cmd {
 }
 
 // fetchRunInfo fetches workflow run metadata.
-func fetchRunInfo(ctx context.Context, client *github.Client, owner, repo string, runID int64) tea.Cmd {
+func fetchRunInfo(ctx context.Context, client *github.Client, token, owner, repo string, runID int64) tea.Cmd {
 	return func() tea.Msg {
-		runInfo, err := ghclient.FetchRunInfo(ctx, client, owner, repo, runID)
+		runInfo, rateLimit, err := ghclient.FetchRunInfo(ctx, client, token, owner, repo, runID)
 		if err != nil {
 			return RunInfoMsg{Err: err}
 		}
 
-		return RunInfoMsg{RunInfo: *runInfo}
+		return RunInfoMsg{
+			RunInfo:            *runInfo,
+			RateLimitRemaining: rateLimit,
+		}
 	}
 }
 

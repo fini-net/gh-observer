@@ -52,7 +52,7 @@ gh-observer follows a clean architecture with distinct layers:
 **Input type** (from `parseArgs()`):
 
 - **PR mode** - Watches checks on a PR; accepts PR number, PR URL, or auto-detects from current branch
-- **Run mode** - Watches jobs in a standalone Actions run URL. No queue latency column (no commit push event to reference)
+- **Run mode** - Watches jobs in a standalone Actions run URL. No queue latency column (run-mode rows have no commit push event to reference). The "Pushed Xs ago" header uses `RunInfo.HeadPushedTime`, sourced from a GraphQL `Repository.object(oid:) ... on Commit` `pushedDate` lookup (with `committedDate` and REST `head_commit.timestamp` fallbacks) — see issue #349.
 
 **Output type** (from `term.IsTerminal(os.Stdout.Fd())`):
 
@@ -93,7 +93,7 @@ Check names display as "Workflow Name / Job Name". Failed checks include inline 
 
 ### Key timing calculations (`internal/timing/calculator.go`)
 
-- **Queue latency**: `check.StartedAt - headCommitTime` (how long GitHub took to queue)
+- **Queue latency**: `check.StartedAt - headPushedTime` (how long GitHub took to queue after the push). `headPushedTime` is the head commit's `pushedDate` (with `committedDate` fallback) sourced from GraphQL; the Actions REST API exposes only the committer timestamp, not the push time.
 - **Runtime**: `time.Now() - check.StartedAt` (in_progress only)
 - **Final duration**: `check.CompletedAt - check.StartedAt`
 
