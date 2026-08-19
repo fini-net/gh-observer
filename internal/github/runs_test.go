@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/go-github/v90/github"
-	"github.com/shurcooL/githubv4"
 )
 
 func TestFirstLine(t *testing.T) {
@@ -375,9 +374,3 @@ func TestFetchCommitPushedTime_ZeroForEmptySHA(t *testing.T) {
 		t.Errorf("expected 0 GraphQL calls for empty SHA, got %d", mock.calls)
 	}
 }
-
-// Compile-time guard: confirm githubv4.GitObjectID is used correctly in
-// fetchCommitPushedTimeWithClient's variables map. If the githubv4 API
-// changes the type, this will surface at compile time rather than at the
-// first real run.
-var _ githubv4.GitObjectID = githubv4.GitObjectID("")
