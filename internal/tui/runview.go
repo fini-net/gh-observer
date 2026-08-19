@@ -7,9 +7,9 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/google/go-github/v90/github"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
+	"github.com/google/go-github/v90/github"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -27,8 +27,8 @@ func (m RunModel) View() tea.View {
 		timeSinceUpdate := time.Since(m.lastUpdate)
 
 		var updatedLine string
-		if m.runInfo.HeadCommitTime != nil && !m.runInfo.HeadCommitTime.IsZero() {
-			timeSincePush := time.Since(m.runInfo.HeadCommitTime.Time)
+		if m.runInfo.HeadPushedTime != nil && !m.runInfo.HeadPushedTime.IsZero() {
+			timeSincePush := time.Since(m.runInfo.HeadPushedTime.Time)
 			updatedLine = fmt.Sprintf("Updated %s ago  •  Pushed %s ago",
 				timing.FormatDuration(timeSinceUpdate),
 				timing.FormatDuration(timeSincePush))

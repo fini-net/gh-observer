@@ -20,7 +20,7 @@ type Model struct {
 	prTitle        string
 	headSHA        string
 	prCreatedAt    time.Time
-	headCommitTime time.Time
+	headPushedTime time.Time
 
 	// Check runs
 	checkRuns []ghclient.CheckRunInfo
@@ -53,7 +53,7 @@ type Model struct {
 	// Historical job averages (incrementally updated as new workflows appear)
 	jobAverages             map[string]time.Duration
 	workflowAverages        map[int64]map[string]time.Duration
-	advSecMatchWorkflow    map[string]int64
+	advSecMatchWorkflow     map[string]int64
 	runIDToWorkflowID       map[int64]int64
 	fetchedWorkflowIDs      map[int64]bool
 	pendingWorkflowFetch    map[int64]bool
@@ -94,18 +94,18 @@ type Model struct {
 	// proceeding. copilotPollStartTime is set to now + initialDelay and gates
 	// when the first Copilot review poll may fire (gives GitHub time to create
 	// the review request after a push).
-	waitForCopilot         bool
-	copilotMaxWait         time.Duration
-	copilotPollInterval    time.Duration
-	copilotInitialDelay    time.Duration
-	copilotState           string
-	copilotStale           bool
-	copilotPending         bool
-	copilotWaitStartTime   time.Time
-	copilotPollStartTime   time.Time
-	copilotLastPoll        time.Time
-	copilotNotReqStreak    int
-	copilotReviewComplete  bool
+	waitForCopilot        bool
+	copilotMaxWait        time.Duration
+	copilotPollInterval   time.Duration
+	copilotInitialDelay   time.Duration
+	copilotState          string
+	copilotStale          bool
+	copilotPending        bool
+	copilotWaitStartTime  time.Time
+	copilotPollStartTime  time.Time
+	copilotLastPoll       time.Time
+	copilotNotReqStreak   int
+	copilotReviewComplete bool
 }
 
 // NewModel creates a new TUI model
@@ -127,12 +127,12 @@ func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refr
 		noAvg:                   noAvg,
 		jobAverages:             make(map[string]time.Duration),
 		workflowAverages:        make(map[int64]map[string]time.Duration),
-		advSecMatchWorkflow:    make(map[string]int64),
+		advSecMatchWorkflow:     make(map[string]int64),
 		runIDToWorkflowID:       make(map[int64]int64),
 		fetchedWorkflowIDs:      make(map[int64]bool),
 		pendingWorkflowFetch:    make(map[int64]bool),
 		dispatchedWorkflowFetch: make(map[int64]bool),
-		seenCheckKeys:          make(map[string]bool),
+		seenCheckKeys:           make(map[string]bool),
 		presumedAverages:        presumedAverages,
 		waitForCopilot:          waitForCopilot,
 		copilotMaxWait:          copilotMaxWait,

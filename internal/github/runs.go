@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/fini-net/gh-observer/internal/debug"
 	"github.com/google/go-github/v90/github"
+	"github.com/shurcooL/githubv4"
+	"golang.org/x/oauth2"
 )
 
 // WorkflowJobInfo contains status data for a single job within a workflow run.
@@ -23,12 +26,18 @@ type WorkflowJobInfo struct {
 }
 
 // RunInfo contains metadata about a workflow run (for the header display).
+// HeadPushedTime is the time the run's head commit was pushed to GitHub
+// (sourced from GraphQL pushedDate, with committedDate as a fallback and
+// the REST head_commit.timestamp as a last resort when GraphQL is
+// unavailable). The "Pushed Xs ago" header renders this value, so it must
+// reflect the push event — not the (potentially much older) commit author
+// or committer timestamp (issue #349).
 type RunInfo struct {
 	ID             int64
 	DisplayTitle   string
 	HeadSHA        string
 	HeadCommitMsg  string
-	HeadCommitTime *github.Timestamp
+	HeadPushedTime *github.Timestamp
 	CreatedAt      *github.Timestamp
 	RunStartedAt   *github.Timestamp
 	Status         string
@@ -45,7 +54,72 @@ func firstLine(s string) string {
 	return strings.TrimSpace(line)
 }
 
-// FetchRunInfo retrieves metadata for a workflow run by its ID.
+// commitPushedDateQuery resolves the push time of a single commit via
+// GraphQL. The Actions REST API exposes only head_commit.timestamp (the
+// committer date), not the push time, so a small GraphQL lookup against
+// Repository.commit(oid:) is required to obtain pushedDate (issue #349).
+// committedDate is also fetched as a fallback for rare cases where
+// pushedDate is absent (e.g. some tagged-release runs not tied to a push).
+type commitPushedDateQuery struct {
+	Repository struct {
+		Object struct {
+			Commit struct {
+				PushedDate    githubv4.DateTime `graphql:"pushedDate"`
+				CommittedDate githubv4.DateTime `graphql:"committedDate"`
+			} `graphql:"... on Commit"`
+		} `graphql:"object(oid: $oid)"`
+	} `graphql:"repository(owner: $owner, name: $repo)"`
+}
+
+// fetchCommitPushedTime looks up pushedDate (with committedDate fallback)
+// for the given SHA via a single GraphQL query. Returns the zero time
+// (and a nil error) when the lookup fails or returns no usable timestamp;
+// callers are expected to fall back to another source rather than abort.
+// The unexported helper takes a graphqlQuerier so tests can inject a mock;
+// the public caller builds the client from the token via the wrapper below.
+func fetchCommitPushedTimeWithClient(ctx context.Context, client graphqlQuerier, owner, repo, sha string) time.Time {
+	if sha == "" {
+		return time.Time{}
+	}
+
+	var q commitPushedDateQuery
+	variables := map[string]any{
+		"owner": githubv4.String(owner),
+		"repo":  githubv4.String(repo),
+		"oid":   githubv4.GitObjectID(sha),
+	}
+	if err := client.Query(ctx, &q, variables); err != nil {
+		debug.Log("commit pushedDate lookup failed", "owner", owner, "repo", repo, "sha", sha, "err", err)
+		return time.Time{}
+	}
+	if !q.Repository.Object.Commit.PushedDate.IsZero() {
+		return q.Repository.Object.Commit.PushedDate.Time
+	}
+	if !q.Repository.Object.Commit.CommittedDate.IsZero() {
+		return q.Repository.Object.Commit.CommittedDate.Time
+	}
+	return time.Time{}
+}
+
+// fetchCommitPushedTime builds an authenticated GraphQL client from token
+// and delegates to fetchCommitPushedTimeWithClient. A missing token yields
+// the zero time (callers fall back to the REST timestamp).
+func fetchCommitPushedTime(ctx context.Context, token, owner, repo, sha string) time.Time {
+	if token == "" {
+		return time.Time{}
+	}
+	src := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
+	httpClient := oauth2.NewClient(ctx, src)
+	client := githubv4.NewClient(httpClient)
+	return fetchCommitPushedTimeWithClient(ctx, client, owner, repo, sha)
+}
+
+// FetchRunInfo retrieves metadata for a workflow run by its ID. The head
+// commit's push time is sourced from a GraphQL pushedDate lookup (with
+// committedDate fallback); if that lookup fails, it falls back to the
+// REST head_commit.timestamp so the "Pushed Xs ago" header still renders.
+// A non-empty token is required for the GraphQL path; without it the REST
+// fallback is used directly.
 func FetchRunInfo(ctx context.Context, client *github.Client, owner, repo string, runID int64) (*RunInfo, error) {
 	run, _, err := client.Actions.GetWorkflowRunByID(ctx, owner, repo, runID)
 	if err != nil {
@@ -53,8 +127,8 @@ func FetchRunInfo(ctx context.Context, client *github.Client, owner, repo string
 	}
 
 	info := &RunInfo{
-		ID:       run.GetID(),
-		Status:   run.GetStatus(),
+		ID:         run.GetID(),
+		Status:     run.GetStatus(),
 		WorkflowID: run.GetWorkflowID(),
 	}
 
@@ -71,7 +145,12 @@ func FetchRunInfo(ctx context.Context, client *github.Client, owner, repo string
 		if run.HeadCommit.Message != nil {
 			info.HeadCommitMsg = firstLine(*run.HeadCommit.Message)
 		}
-		info.HeadCommitTime = run.HeadCommit.Timestamp
+		// REST fallback: head_commit.timestamp is the committer date, not
+		// the push time. Used only if the GraphQL lookup below fails or
+		// returns no timestamp (issue #349).
+		if run.HeadCommit.Timestamp != nil {
+			info.HeadPushedTime = run.HeadCommit.Timestamp
+		}
 	}
 	if run.CreatedAt != nil {
 		info.CreatedAt = run.CreatedAt
@@ -81,6 +160,17 @@ func FetchRunInfo(ctx context.Context, client *github.Client, owner, repo string
 	}
 	if run.Conclusion != nil {
 		info.Conclusion = *run.Conclusion
+	}
+
+	// Best-effort GraphQL lookup of pushedDate: if it succeeds, replace
+	// the REST fallback with the real push time. A failure leaves the
+	// fallback in place and is logged, not surfaced — the header still
+	// renders (just with a slightly older timestamp).
+	if info.HeadSHA != "" {
+		token, _ := GetToken()
+		if pushed := fetchCommitPushedTime(ctx, token, owner, repo, info.HeadSHA); !pushed.IsZero() {
+			info.HeadPushedTime = &github.Timestamp{Time: pushed}
+		}
 	}
 
 	debug.Log("fetch run info", "run_id", runID, "name", info.DisplayTitle, "status", info.Status)
@@ -159,7 +249,7 @@ func WorkflowJobInfoToCheckRuns(jobs []WorkflowJobInfo) []CheckRunInfo {
 			WorkflowName:  job.WorkflowName,
 			Status:        job.Status,
 			Conclusion:    job.Conclusion,
-			DetailsURL:   job.HTMLURL,
+			DetailsURL:    job.HTMLURL,
 			WorkflowRunID: job.RunID,
 			WorkflowID:    job.WorkflowID,
 		}

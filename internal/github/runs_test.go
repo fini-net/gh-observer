@@ -1,10 +1,13 @@
 package github
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/google/go-github/v90/github"
+	"github.com/shurcooL/githubv4"
 )
 
 func TestFirstLine(t *testing.T) {
@@ -256,3 +259,104 @@ func TestFailureJobConclusion(t *testing.T) {
 		})
 	}
 }
+
+// mockPushedDateQuerier returns a sequence of canned commitPushedDateQuery
+// responses (or errors). Mirrors mockQuerier in graphql_test.go but for
+// the run-mode commit-push-time query.
+type mockPushedDateQuerier struct {
+	responses []commitPushedDateQuery
+	errs      []error
+	calls     int
+}
+
+func (m *mockPushedDateQuerier) Query(_ context.Context, q interface{}, _ map[string]interface{}) error {
+	if m.calls >= len(m.responses) && m.calls >= len(m.errs) {
+		return fmt.Errorf("unexpected query call #%d", m.calls+1)
+	}
+	var err error
+	if m.calls < len(m.errs) && m.errs[m.calls] != nil {
+		err = m.errs[m.calls]
+	}
+	if err == nil {
+		resp := m.responses[m.calls]
+		target := q.(*commitPushedDateQuery)
+		*target = resp
+	}
+	m.calls++
+	return err
+}
+
+// TestFetchCommitPushedTime_PushedDateWins asserts pushedDate is returned
+// when both pushedDate and committedDate are present (issue #349).
+func TestFetchCommitPushedTime_PushedDateWins(t *testing.T) {
+	pushed := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	committed := pushed.Add(-2 * time.Hour)
+
+	resp := commitPushedDateQuery{}
+	resp.Repository.Object.Commit.PushedDate.Time = pushed
+	resp.Repository.Object.Commit.CommittedDate.Time = committed
+
+	mock := &mockPushedDateQuerier{responses: []commitPushedDateQuery{resp}}
+	got := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
+	if !got.Equal(pushed) {
+		t.Errorf("got %v, want %v (pushedDate should win)", got, pushed)
+	}
+}
+
+// TestFetchCommitPushedTime_FallsBackToCommittedDate asserts the
+// committedDate fallback when pushedDate is absent.
+func TestFetchCommitPushedTime_FallsBackToCommittedDate(t *testing.T) {
+	committed := time.Date(2024, 6, 1, 10, 0, 0, 0, time.UTC)
+
+	resp := commitPushedDateQuery{}
+	resp.Repository.Object.Commit.CommittedDate.Time = committed
+
+	mock := &mockPushedDateQuerier{responses: []commitPushedDateQuery{resp}}
+	got := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
+	if !got.Equal(committed) {
+		t.Errorf("got %v, want %v (committedDate fallback)", got, committed)
+	}
+}
+
+// TestFetchCommitPushedTime_ZeroWhenAbsent asserts the zero time is
+// returned when neither date is present so callers can fall back to REST.
+func TestFetchCommitPushedTime_ZeroWhenAbsent(t *testing.T) {
+	mock := &mockPushedDateQuerier{responses: []commitPushedDateQuery{{}}}
+	got := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
+	if !got.IsZero() {
+		t.Errorf("got %v, want zero", got)
+	}
+}
+
+// TestFetchCommitPushedTime_ZeroOnQueryError asserts a GraphQL error
+// yields the zero time so the caller keeps the REST fallback rather than
+// crashing (issue #349 robustness criterion).
+func TestFetchCommitPushedTime_ZeroOnQueryError(t *testing.T) {
+	mock := &mockPushedDateQuerier{
+		responses: []commitPushedDateQuery{{}},
+		errs:      []error{fmt.Errorf("network error")},
+	}
+	got := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")
+	if !got.IsZero() {
+		t.Errorf("got %v, want zero on query error", got)
+	}
+}
+
+// TestFetchCommitPushedTime_ZeroForEmptySHA guards against the GraphQL
+// helper being invoked with an empty SHA (would 404).
+func TestFetchCommitPushedTime_ZeroForEmptySHA(t *testing.T) {
+	mock := &mockPushedDateQuerier{}
+	got := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "")
+	if !got.IsZero() {
+		t.Errorf("got %v, want zero for empty SHA", got)
+	}
+	if mock.calls != 0 {
+		t.Errorf("expected 0 GraphQL calls for empty SHA, got %d", mock.calls)
+	}
+}
+
+// Compile-time guard: confirm githubv4.GitObjectID is used correctly in
+// fetchCommitPushedTimeWithClient's variables map. If the githubv4 API
+// changes the type, this will surface at compile time rather than at the
+// first real run.
+var _ githubv4.GitObjectID = githubv4.GitObjectID("")

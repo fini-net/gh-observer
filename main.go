@@ -342,13 +342,7 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 		return 1
 	}
 
-	headCommitTime, err := time.Parse(time.RFC3339, prInfo.HeadCommitDate)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to parse commit time: %v\n", err)
-		return 1
-	}
-
-	checkRuns, _, err := ghclient.FetchCheckRunsGraphQL(ctx, token, owner, repo, prNumber)
+	checkRuns, headPushedTime, _, err := ghclient.FetchCheckRunsGraphQL(ctx, token, owner, repo, prNumber)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to fetch check runs: %v\n", err)
 		return 1
@@ -357,8 +351,12 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 	fmt.Printf("PR #%d: %s\n\n", prNumber, prInfo.Title)
 
 	if len(checkRuns) == 0 {
-		sinceCreation := time.Since(headCommitTime)
-		fmt.Printf("No checks found (commit pushed %s ago)\n", timing.FormatDuration(sinceCreation))
+		if !headPushedTime.IsZero() {
+			sincePush := time.Since(headPushedTime)
+			fmt.Printf("No checks found (commit pushed %s ago)\n", timing.FormatDuration(sincePush))
+		} else {
+			fmt.Println("No checks found")
+		}
 		fmt.Println("Checks may still be starting up or not configured for this PR")
 		return 0
 	}
@@ -379,7 +377,7 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 	}
 	ghclient.ApplyPresumedAverages(jobAverages, checkRuns, presumedAverages)
 
-	widths := tui.CalculateColumnWidths(checkRuns, headCommitTime, jobAverages)
+	widths := tui.CalculateColumnWidths(checkRuns, headPushedTime, jobAverages)
 
 	headerQueue, headerName, headerDuration, headerAvg := tui.FormatHeaderColumns(widths)
 	fmt.Printf("%s   %s  %s  %s\n\n", headerQueue, headerName, headerDuration, headerAvg)
@@ -387,7 +385,7 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 	exitCode := 0
 	for _, check := range checkRuns {
 		nameCol := tui.BuildNameColumn(check, widths, enableLinks)
-		queueText := tui.FormatQueueLatency(check, headCommitTime)
+		queueText := tui.FormatQueueLatency(check, headPushedTime)
 		durationText := tui.FormatDuration(check)
 		avgText := tui.FormatAvg(check, jobAverages)
 		icon := tui.GetCheckIcon(check.Status, check.Conclusion)
@@ -451,8 +449,8 @@ func runRunSnapshot(ctx context.Context, owner, repo string, runID int64, enable
 	}
 
 	var timeSinceStr string
-	if runInfo.HeadCommitTime != nil && !runInfo.HeadCommitTime.IsZero() {
-		timeSinceStr = fmt.Sprintf("Pushed %s ago", timing.FormatDuration(time.Since(runInfo.HeadCommitTime.Time)))
+	if runInfo.HeadPushedTime != nil && !runInfo.HeadPushedTime.IsZero() {
+		timeSinceStr = fmt.Sprintf("Pushed %s ago", timing.FormatDuration(time.Since(runInfo.HeadPushedTime.Time)))
 	} else if runInfo.CreatedAt != nil && !runInfo.CreatedAt.IsZero() {
 		timeSinceStr = fmt.Sprintf("Created %s ago", timing.FormatDuration(time.Since(runInfo.CreatedAt.Time)))
 	}

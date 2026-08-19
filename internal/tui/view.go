@@ -25,8 +25,8 @@ func (m Model) View() tea.View {
 		timeSinceUpdate := time.Since(m.lastUpdate)
 
 		var updatedLine string
-		if !m.headCommitTime.IsZero() {
-			timeSincePush := time.Since(m.headCommitTime)
+		if !m.headPushedTime.IsZero() {
+			timeSincePush := time.Since(m.headPushedTime)
 			updatedLine = fmt.Sprintf("Updated %s ago  •  Pushed %s ago",
 				timing.FormatDuration(timeSinceUpdate),
 				timing.FormatDuration(timeSincePush))
@@ -61,7 +61,7 @@ func (m Model) View() tea.View {
 		return tea.NewView(b.String() + m.renderStartupPhase())
 	}
 
-	widths := CalculateColumnWidths(m.checkRuns, m.headCommitTime, m.jobAverages)
+	widths := CalculateColumnWidths(m.checkRuns, m.headPushedTime, m.jobAverages)
 
 	// Compute the synthetic Copilot review row once and reuse it for both
 	// column-width widening and the row render. Calling buildCopilotCheckRun
@@ -262,7 +262,7 @@ func (m Model) renderCheckRun(check ghclient.CheckRunInfo, widths ColumnWidths) 
 	nameCol := BuildNameColumn(check, widths, m.enableLinks)
 
 	// Get column data (plain text)
-	queueText := FormatQueueLatency(check, m.headCommitTime)
+	queueText := FormatQueueLatency(check, m.headPushedTime)
 	durationText := FormatDuration(check)
 	avgText := FormatAvg(check, m.jobAverages)
 

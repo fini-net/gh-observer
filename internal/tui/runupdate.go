@@ -33,7 +33,7 @@ type RunJobsUpdateMsg struct {
 type RunWorkflowsDiscoveredMsg struct {
 	NewRunIDToWorkflowID map[int64]int64
 	WorkflowIDsToFetch   []int64
-	Err                   error
+	Err                  error
 }
 
 // RunJobAveragesPartialMsg is sent for each workflow that finishes history fetch in run mode.
@@ -50,7 +50,7 @@ type RunErrorMsg struct {
 
 // Init initializes the run model.
 func (m RunModel) Init() tea.Cmd {
-		return tea.Batch(
+	return tea.Batch(
 		m.spinner.Tick,
 		fetchRunInfo(m.ctx, m.client, m.owner, m.repo, m.runID),
 		runTick(m.refreshInterval),
@@ -77,7 +77,7 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (0) before the first successful response doesn't suppress fetches.
 		if m.fetchReceived && m.rateLimitRemaining < rateBackoffThreshold {
 			debug.Log("rate limit backoff (run)", "remaining", m.rateLimitRemaining, "threshold", rateBackoffThreshold)
-			return m, runTick(m.refreshInterval*3)
+			return m, runTick(m.refreshInterval * 3)
 		}
 		return m, tea.Batch(
 			fetchRunJobs(m.ctx, m.client, m.owner, m.repo, m.runID),

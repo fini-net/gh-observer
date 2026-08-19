@@ -1397,10 +1397,9 @@ func TestHandleCopilotReview(t *testing.T) {
 		// fetch. The gate must remain unsatisfied while pending and within
 		// max-wait.
 		model, _ := m.Update(PRInfoMsg{
-			Number:         42,
-			Title:          "test",
-			HeadSHA:        "abc123",
-			HeadCommitTime: time.Now(),
+			Number:  42,
+			Title:   "test",
+			HeadSHA: "abc123",
 		})
 		result := model.(Model)
 		if !result.copilotPending {
@@ -1440,10 +1439,9 @@ func TestHandleCopilotReview(t *testing.T) {
 		m.headSHA = "abc123"
 
 		model, _ := m.Update(PRInfoMsg{
-			Number:         42,
-			Title:          "test",
-			HeadSHA:        "abc123",
-			HeadCommitTime: time.Now(),
+			Number:  42,
+			Title:   "test",
+			HeadSHA: "abc123",
 		})
 		result := model.(Model)
 		if !result.copilotPending {

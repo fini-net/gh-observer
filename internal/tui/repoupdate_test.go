@@ -378,7 +378,7 @@ func TestRepoChecksUpdateErrorNonFatal(t *testing.T) {
 					{Status: "in_progress", Name: "build"},
 					{Status: "completed", Conclusion: "success", Name: "lint", CompletedAt: &goodCompletedAt},
 				},
-				HeadCommitTime: now.Add(-2 * time.Minute),
+				HeadPushedTime: now.Add(-2 * time.Minute),
 			},
 		},
 		fadeSuccess:        fadeSuccess,
@@ -1151,7 +1151,7 @@ func TestRepoRunsDedupDropsStaleExtras(t *testing.T) {
 	// New runs poll reports no runs at all for this SHA — the Copilot run
 	// has faded. The stale extra must be dropped, not carried forward.
 	msg := RepoRunsUpdateMsg{
-		Runs:             []ghclient.BranchRunData{},
+		Runs:               []ghclient.BranchRunData{},
 		RateLimitRemaining: 5000,
 	}
 
@@ -1198,7 +1198,7 @@ func TestRepoRunsDedupReattachesStillVisibleExtra(t *testing.T) {
 				Status:  "in_progress",
 				Jobs: []ghclient.CheckRunInfo{
 					makeDedupBranchJob("CI", "build"), // duplicate
-					copilot, // still present, should re-attach
+					copilot,                           // still present, should re-attach
 				},
 			},
 		},
