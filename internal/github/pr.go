@@ -16,20 +16,17 @@ var (
 	actionsRunURLPattern = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/actions/runs/(\d+)$`)
 )
 
-// PRInfo contains metadata about a pull request. HeadCommitDate is now
-// populated by the GraphQL check-runs query (FetchCheckRunsGraphQL) rather
-// than a separate REST Repositories.GetCommit call, because GraphQL exposes
-// pushedDate (which is what we actually want for queue latency and the
-// "Pushed Xs ago" label) while the REST commit endpoint only exposes the
-// committer/author timestamps. HeadCommitDate is retained as an empty string
-// for backwards compatibility but is unused by callers that have moved to
-// the GraphQL push time.
+// PRInfo contains metadata about a pull request. Only PR-level fields
+// (number, title, head SHA, created-at) come from REST; the head commit's
+// push time is sourced separately from the GraphQL check-runs query
+// (FetchCheckRunsGraphQL), which fetches pushedDate in the same round-trip
+// as the StatusCheckRollup. The REST commit endpoint only exposes
+// committer/author timestamps, not pushedDate, so it is not used here.
 type PRInfo struct {
-	Number         int
-	Title          string
-	HeadSHA        string
-	CreatedAt      string
-	HeadCommitDate string
+	Number    int
+	Title     string
+	HeadSHA   string
+	CreatedAt string
 }
 
 // parsePRViewWithRepo parses JSON output from 'gh pr view --json number,url'
@@ -125,8 +122,7 @@ func ParsePRURL(prURL string) (owner, repo string, prNumber int, err error) {
 // fields (number, title, head SHA, created-at) come from REST; the head
 // commit's push time is sourced from the GraphQL check-runs query
 // (FetchCheckRunsGraphQL) which fetches pushedDate in the same round-trip
-// as the StatusCheckRollup. HeadCommitDate is left empty here for
-// backwards compatibility; callers that need the push time should consume
+// as the StatusCheckRollup. Callers that need the push time should consume
 // the time.Time returned by FetchCheckRunsGraphQL.
 func FetchPRInfo(ctx context.Context, client *github.Client, owner, repo string, prNumber int) (*PRInfo, error) {
 	pr, _, err := client.PullRequests.Get(ctx, owner, repo, prNumber)

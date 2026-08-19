@@ -545,9 +545,8 @@ func fetchPRInfo(ctx context.Context, token, owner, repo string, prNumber int) t
 			debug.Log("timestamp parse error", "field", "CreatedAt", "value", prInfo.CreatedAt, "err", err)
 		}
 
-		// HeadCommitDate is no longer populated by FetchPRInfo; the push
-		// time now arrives via ChecksUpdateMsg from the GraphQL check-runs
-		// query (issue #349).
+		// The head push time arrives via ChecksUpdateMsg from the GraphQL
+		// check-runs query (FetchCheckRunsGraphQL), not from PRInfo (issue #349).
 
 		return PRInfoMsg{
 			Number:    prInfo.Number,
