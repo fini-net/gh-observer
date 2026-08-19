@@ -73,8 +73,8 @@ type commitPushedDateQuery struct {
 
 // fetchCommitPushedTime looks up pushedDate (with committedDate fallback)
 // for the given SHA via a single GraphQL query. Returns the zero time
-// (and a nil error) when the lookup fails or returns no usable timestamp;
-// callers are expected to fall back to another source rather than abort.
+// when the lookup fails or returns no usable timestamp; callers are
+// expected to fall back to another source rather than abort.
 // The unexported helper takes a graphqlQuerier so tests can inject a mock;
 // the public caller builds the client from the token via the wrapper below.
 func fetchCommitPushedTimeWithClient(ctx context.Context, client graphqlQuerier, owner, repo, sha string) time.Time {
@@ -119,8 +119,10 @@ func fetchCommitPushedTime(ctx context.Context, token, owner, repo, sha string) 
 // committedDate fallback); if that lookup fails, it falls back to the
 // REST head_commit.timestamp so the "Pushed Xs ago" header still renders.
 // A non-empty token is required for the GraphQL path; without it the REST
-// fallback is used directly.
-func FetchRunInfo(ctx context.Context, client *github.Client, owner, repo string, runID int64) (*RunInfo, error) {
+// fallback is used directly. Callers that already hold a token should pass
+// it here rather than letting this function re-derive it via GetToken()
+// (which may shell out to `gh auth token`).
+func FetchRunInfo(ctx context.Context, client *github.Client, token, owner, repo string, runID int64) (*RunInfo, error) {
 	run, _, err := client.Actions.GetWorkflowRunByID(ctx, owner, repo, runID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch workflow run %d: %w", runID, err)
@@ -167,7 +169,6 @@ func FetchRunInfo(ctx context.Context, client *github.Client, owner, repo string
 	// fallback in place and is logged, not surfaced — the header still
 	// renders (just with a slightly older timestamp).
 	if info.HeadSHA != "" {
-		token, _ := GetToken()
 		if pushed := fetchCommitPushedTime(ctx, token, owner, repo, info.HeadSHA); !pushed.IsZero() {
 			info.HeadPushedTime = &github.Timestamp{Time: pushed}
 		}

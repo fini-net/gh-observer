@@ -409,7 +409,7 @@ if check.Status == "completed" {
 Mirrors the PR snapshot but for a standalone workflow run:
 
 ```go
-runInfo, err := ghclient.FetchRunInfo(ctx, client, owner, repo, runID)
+runInfo, err := ghclient.FetchRunInfo(ctx, client, token, owner, repo, runID)
 jobs, _, err := ghclient.FetchRunJobs(ctx, client, owner, repo, runID)
 
 // Header: pushed/created time, display title
