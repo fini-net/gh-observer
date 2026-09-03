@@ -13,7 +13,7 @@ sync:
     git pull
     git status --porcelain # stp
 
-# PR create v8.2
+# PR create v8.7
 [group('Process')]
 pr: _has_commits && pr_checks
     #!/usr/bin/env bash
@@ -216,8 +216,14 @@ pr_checks: _on_a_pull_request && claude_review
 
     # Skip workflow watcher when repo has no GitHub Actions workflows
     if [[ -d ".github/workflows" ]]; then
-        # Use gh observer if installed, otherwise fall back to gh pr checks --watch
+        # Use gh observer if installed, otherwise fall back to gh pr checks --watch.
+        # gh observer gates exit on Copilot review completion itself
+        # (gh-observer #409), so the separate wait_for_copilot.sh call below is
+        # only needed on the fallback path. Track which watcher ran so the
+        # Copilot wait block can skip itself when gh observer already waited.
+        used_gh_observer=false
         if gh observer --help >/dev/null 2>&1; then
+            used_gh_observer=true
             echo ""
             gh observer
         else
@@ -227,6 +233,7 @@ pr_checks: _on_a_pull_request && claude_review
         echo "" # blank line for visual space
     else
         echo "{{BLUE}}no workflows in this repo - skipping workflow watcher{{NORMAL}}"
+        used_gh_observer=false
     fi
 
     # Load repo metadata for conditional display
@@ -241,14 +248,55 @@ pr_checks: _on_a_pull_request && claude_review
 
     # Only display Copilot review if flag is enabled
     if [[ "$FLAG_COPILOT_REVIEW" == "true" ]]; then
-        PR_META=$(gh pr view --json number,headRepository,headRepositoryOwner)
+        PR_META=$(gh pr view --json number,headRepository,headRepositoryOwner,headRefOid)
         PR_REPO_NAME=$(echo "$PR_META" | jq -r '.headRepository.name')
         PR_REPO_OWNER=$(echo "$PR_META" | jq -r '.headRepositoryOwner.login')
         PR_NUMBER=$(echo "$PR_META" | jq '.number')
+        PR_HEAD_SHA=$(echo "$PR_META" | jq -r '.headRefOid')
         #echo "$PR_NUMBER $PR_REPO_OWNER/$PR_REPO_NAME"
 
         # Define temp file for passing count to claude_review (based on repo and PR)
         COPILOT_COUNT_FILE="/tmp/copilot_count_${PR_REPO_OWNER}_${PR_REPO_NAME}_${PR_NUMBER}"
+
+        # Wait for Copilot to finish before querying threads, so the one-shot
+        # count below runs against settled state instead of racing Copilot
+        # (issue #299: the v8.3 state machine was only wired into
+        # copilot_refresh; pr_checks ran the thread query immediately after
+        # the CI watcher exited and printed false "looks good!" negatives
+        # when CI settled before Copilot finished). The shared
+        # wait_for_copilot.sh polls reviewRequests + reviews(last: 10) and
+        # completes when a Copilot review for the HEAD commit lands.
+        # MODE=nonfatal: if Copilot was never requested (no auto-review on
+        # this repo), exit 0 and fall through to the thread query instead of
+        # failing the whole PR flow.
+        #
+        # Skip the wait on the gh observer path: gh observer already gates its
+        # exit on Copilot review completion (gh-observer #409), so by the time
+        # we get here the review state is already settled and a second wait is
+        # dead time (issue #320). The fallback path (gh pr checks --watch)
+        # only watches CI check runs and still needs the explicit wait.
+        if [[ "$used_gh_observer" == "true" ]]; then
+            echo "{{BLUE}}Copilot wait already handled by gh observer{{NORMAL}}"
+        elif [[ -x ".just/lib/wait_for_copilot.sh" ]]; then
+            MAX_WAIT=180
+            POLL_INTERVAL=5
+            INITIAL_DELAY=10
+            if command -v gum &> /dev/null; then
+                gum spin --spinner dot --show-output --title "Waiting for Copilot review..." -- \
+                    .just/lib/wait_for_copilot.sh \
+                    "$PR_REPO_OWNER" "$PR_REPO_NAME" "$PR_NUMBER" "$PR_HEAD_SHA" \
+                    "$MAX_WAIT" "$POLL_INTERVAL" "$INITIAL_DELAY" "1" "nonfatal" \
+                    || true
+            else
+                echo "{{BLUE}}Waiting for Copilot review...{{NORMAL}}"
+                .just/lib/wait_for_copilot.sh \
+                    "$PR_REPO_OWNER" "$PR_REPO_NAME" "$PR_NUMBER" "$PR_HEAD_SHA" \
+                    "$MAX_WAIT" "$POLL_INTERVAL" "$INITIAL_DELAY" "0" "nonfatal" \
+                    || true
+            fi
+        else
+            echo "{{YELLOW}}Warning: .just/lib/wait_for_copilot.sh not found - skipping Copilot wait{{NORMAL}}"
+        fi
 
         # Capture GraphQL output
         # Note: reviewThreads(first: 100) limits to 100 threads; see copilot_pick for comment.
@@ -313,6 +361,43 @@ claude_review: _on_a_pull_request
         FLAG_CLAUDE_REVIEW="false"
     fi
 
+    # Display Copilot count summary if available (moved above *both*
+    # early exits - the FLAG_CLAUDE_REVIEW disabled gate and the "No
+    # Claude comment found" gate - so the end-of-run summary always
+    # prints and the temp file is always cleaned up when copilot-review
+    # is enabled, regardless of the claude-review flag. Previously the
+    # claude-review=false early exit skipped this block, leaking the
+    # count file and skipping the summary - the same class of bug as
+    # issue #299 bug 2, via a different early-exit path. See Claude
+    # review of PR #299 (round 2, issue 1).
+    if [[ "${FLAG_COPILOT_REVIEW:-false}" == "true" ]]; then
+        PR_META=$(gh pr view --json number,headRepository,headRepositoryOwner)
+        PR_REPO_NAME=$(echo "$PR_META" | jq -r '.headRepository.name')
+        PR_REPO_OWNER=$(echo "$PR_META" | jq -r '.headRepositoryOwner.login')
+        PR_NUMBER=$(echo "$PR_META" | jq '.number')
+        COPILOT_COUNT_FILE="/tmp/copilot_count_${PR_REPO_OWNER}_${PR_REPO_NAME}_${PR_NUMBER}"
+        # Sentinel written by wait_for_copilot.sh when it exited having seen
+        # a stale Copilot review (older commit) but no HEAD-matching one.
+        # Annotates the "looks good!" summary so a stale review is not
+        # mistaken for a current one. See Claude review of PR #300
+        # (Potential bug 2).
+        COPILOT_STALE_FILE="/tmp/copilot_stale_${PR_REPO_OWNER}_${PR_REPO_NAME}_${PR_NUMBER}"
+        if [[ -f "$COPILOT_COUNT_FILE" ]]; then
+            COPILOT_COUNT=$(cat "$COPILOT_COUNT_FILE")
+            echo ""
+            if [[ "$COPILOT_COUNT" -eq 0 ]]; then
+                if [[ -f "$COPILOT_STALE_FILE" ]]; then
+                    echo "🐈‍⬛ No unresolved Copilot suggestions - looks good! {{YELLOW}}(review may be stale - run just copilot_refresh){{NORMAL}}"
+                else
+                    echo "🐈‍⬛ No unresolved Copilot suggestions - looks good!"
+                fi
+            else
+                echo "🐈‍⬛ Unresolved Copilot suggestions: $COPILOT_COUNT"
+            fi
+            rm -f "$COPILOT_COUNT_FILE" "$COPILOT_STALE_FILE"
+        fi
+    fi
+
     # Only display Claude review if flag is enabled
     if [[ "$FLAG_CLAUDE_REVIEW" != "true" ]]; then
         echo "{{BLUE}}Skipping Claude review (disabled in .repo.toml){{NORMAL}}"
@@ -371,24 +456,6 @@ claude_review: _on_a_pull_request
     fi
 
     echo "$COMMENT_BODY"
-
-    # Display Copilot count summary if available
-    # Get PR metadata to construct the same temp filename
-    PR_META=$(gh pr view --json number,headRepository,headRepositoryOwner)
-    PR_REPO_NAME=$(echo "$PR_META" | jq -r '.headRepository.name')
-    PR_REPO_OWNER=$(echo "$PR_META" | jq -r '.headRepositoryOwner.login')
-    PR_NUMBER=$(echo "$PR_META" | jq '.number')
-    COPILOT_COUNT_FILE="/tmp/copilot_count_${PR_REPO_OWNER}_${PR_REPO_NAME}_${PR_NUMBER}"
-    if [[ -f "$COPILOT_COUNT_FILE" ]]; then
-        COPILOT_COUNT=$(cat "$COPILOT_COUNT_FILE")
-        echo ""
-        if [[ "$COPILOT_COUNT" -eq 0 ]]; then
-            echo "🐈‍⬛ No unresolved Copilot suggestions - looks good!"
-        else
-            echo "🐈‍⬛ Unresolved Copilot suggestions: $COPILOT_COUNT"
-        fi
-        rm -f "$COPILOT_COUNT_FILE"
-    fi
 
     # Always exit 0 - this is informational, not an error
     exit 0

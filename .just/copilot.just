@@ -349,81 +349,50 @@ copilot_refresh: _on_a_pull_request
     POLL_INTERVAL=5
     INITIAL_DELAY=10  # Give Copilot time to start processing
 
-    # Write a self-contained polling script to avoid declare -f serialization issues
-    poll_script=$(mktemp /tmp/justfile.copilot_poll.XXXXXX)
-    {
-        printf '#!/usr/bin/env bash\n'
-        printf 'set -euo pipefail\n'
-        printf 'MAX_WAIT="$1"; POLL_INTERVAL="$2"; INITIAL_DELAY="$3"\n'
-        printf 'PR_REPO_OWNER="$4"; PR_REPO_NAME="$5"; PR_NUMBER="$6"\n'
-        printf 'USING_GUM="${7:-0}"\n'
-        printf '\n'
-        printf 'echo "Waiting ${INITIAL_DELAY}s for Copilot to start processing..."\n'
-        printf 'sleep "$INITIAL_DELAY"\n'
-        printf '\n'
-        printf 'elapsed=$INITIAL_DELAY\n'
-        printf 'while (( elapsed < MAX_WAIT )); do\n'
-        printf '    copilot_data=$(gh api graphql \\\n'
-        printf '        -F owner="$PR_REPO_OWNER" -F name="$PR_REPO_NAME" -F pr="$PR_NUMBER" \\\n'
-        printf '        --jq '"'"'.data.repository.pullRequest.reviews.nodes[] | select(.author.login=="copilot-pull-request-reviewer") | {state: .state, commentCount: (.comments.totalCount)}'"'"' \\\n'
-        printf '        -f query='"'"'\n'
-        printf '        query($name: String!, $owner: String!, $pr: Int!) {\n'
-        printf '            repository(owner: $owner, name: $name) {\n'
-        printf '                pullRequest(number: $pr) {\n'
-        printf '                    reviews(last: 1) {\n'
-        printf '                        nodes {\n'
-        printf '                            author { login }\n'
-        printf '                            state\n'
-        printf '                            comments { totalCount }\n'
-        printf '                        }\n'
-        printf '                    }\n'
-        printf '                }\n'
-        printf '            }\n'
-        printf '        }\n'
-        printf '        '"'"' 2>/dev/null) || true\n'
-        printf '\n'
-        printf '    if [[ -n "$copilot_data" ]]; then\n'
-        printf '        review_state=$(echo "$copilot_data" | jq -r '"'"'.state // "UNKNOWN"'"'"')\n'
-        printf '        comment_count=$(echo "$copilot_data" | jq -r '"'"'.commentCount // 0'"'"')\n'
-        printf '        if [[ "$review_state" != "null" && "$review_state" != "UNKNOWN" ]] && [[ "$comment_count" -gt 0 ]]; then\n'
-        printf '            echo "Review complete after ${elapsed}s (state: $review_state, $comment_count comments)"\n'
-        printf '            exit 0\n'
-        printf '        elif [[ "$review_state" != "null" && "$review_state" != "UNKNOWN" ]]; then\n'
-        printf '            echo "Review found but still processing (state: $review_state, $comment_count comments)"\n'
-        printf '        fi\n'
-        printf '    fi\n'
-        printf '\n'
-        printf '    sleep "$POLL_INTERVAL"\n'
-        printf '    elapsed=$((elapsed + POLL_INTERVAL))\n'
-        printf '\n'
-        printf '    if [ "$USING_GUM" = "0" ]; then\n'
-        printf '        echo -n "."\n'
-        printf '    fi\n'
-        printf 'done\n'
-        printf '\n'
-        printf 'echo ""\n'
-        printf 'echo "Review not completed after ${MAX_WAIT}s - it may still be processing"\n'
-        printf 'exit 1\n'
-    } > "$poll_script"
-    chmod +x "$poll_script"
+    # Capture HEAD sha now so the shared poll script can reject stale reviews
+    # left over from an older commit (issue #299 bug 4). Completion is a
+    # Copilot-authored review whose commit oid matches HEAD - this replaces
+    # the v8.3 submittedAt > REQUEST_TIME filter and unifies the
+    # copilot_refresh and pr_checks paths.
+    PR_HEAD_SHA=$(gh pr view --json headRefOid --jq '.headRefOid')
 
-    # Use gum spin if available, otherwise fall back to simple progress
+    # Delegate to the shared poll/state-machine (see issue #299). The v8.3
+    # poll loop lived only inside copilot_refresh (as a printf-generated
+    # temp script); pr_checks ran a one-shot query that raced Copilot.
+    # Extracting the logic into .just/lib/wait_for_copilot.sh closes that
+    # gap and keeps the two paths from drifting again. MODE=fatal: exit 1
+    # when Copilot is not requested, since copilot_refresh just explicitly
+    # requested it and a missing request is a real failure here.
+    #
+    # GraphQL reviewRequests with the Bot fragment is the reliable signal
+    # for an in-progress Copilot review. REST
+    # /pulls/N/requested_reviewers no longer surfaces Copilot as of
+    # gh 2.95.0+ (returns {"teams":[],"users":[]} while GraphQL correctly
+    # returns copilot-pull-request-reviewer), so it is not a usable
+    # fallback. See issue #299 bug 3.
     if command -v gum &> /dev/null; then
-        USING_GUM=1 gum spin --spinner dot --title "Waiting for Copilot review..." -- \
-            bash "$poll_script" "$MAX_WAIT" "$POLL_INTERVAL" "$INITIAL_DELAY" \
-            "$PR_REPO_OWNER" "$PR_REPO_NAME" "$PR_NUMBER" "1"
-        review_ready=$?
+        # review_ready=0 then || capture: gum spin is a bare simple command,
+        # so under `set -e` an exit 1 from wait_for_copilot.sh (timeout or
+        # the fatal-mode "not requested" fast-fail) would abort the recipe
+        # before the friendly fallback block below could run. The non-gum
+        # branch is fine because it sits inside an `if` condition. See
+        # Claude review of PR #300 (Potential bug 1).
+        review_ready=0
+        gum spin --spinner dot --show-output --title "Waiting for Copilot review..." -- \
+            .just/lib/wait_for_copilot.sh \
+            "$PR_REPO_OWNER" "$PR_REPO_NAME" "$PR_NUMBER" "$PR_HEAD_SHA" \
+            "$MAX_WAIT" "$POLL_INTERVAL" "$INITIAL_DELAY" "1" "fatal" \
+            || review_ready=$?
     else
         echo "{{BLUE}}Waiting for Copilot review...{{NORMAL}}"
-        if bash "$poll_script" "$MAX_WAIT" "$POLL_INTERVAL" "$INITIAL_DELAY" \
-            "$PR_REPO_OWNER" "$PR_REPO_NAME" "$PR_NUMBER" "0"; then
+        if .just/lib/wait_for_copilot.sh \
+            "$PR_REPO_OWNER" "$PR_REPO_NAME" "$PR_NUMBER" "$PR_HEAD_SHA" \
+            "$MAX_WAIT" "$POLL_INTERVAL" "$INITIAL_DELAY" "0" "fatal"; then
             review_ready=0
         else
             review_ready=1
         fi
     fi
-
-    rm -f "$poll_script"
 
     if [[ $review_ready -eq 0 ]]; then
         echo ""
@@ -471,6 +440,14 @@ copilot_refresh: _on_a_pull_request
         echo "{{YELLOW}}Review may still be processing (waited ${MAX_WAIT}s total). Options:{{NORMAL}}"
         echo "  {{GREEN}}just copilot_pick{{NORMAL}} (check if suggestions are ready)"
         echo "  {{GREEN}}just copilot_refresh{{NORMAL}} (wait longer for completion)"
+        # Clean up any stale sentinel / count file left by wait_for_copilot.sh
+        # on the timeout or stale-review path. copilot_refresh never writes
+        # a count file, but rm -f it defensively. This mirrors the cleanup
+        # claude_review does, preventing stray /tmp files between runs.
+        # See Claude review of PR #299 (round 2, issue 2).
+        COPILOT_STALE_FILE="/tmp/copilot_stale_${PR_REPO_OWNER}_${PR_REPO_NAME}_${PR_NUMBER}"
+        COPILOT_COUNT_FILE="/tmp/copilot_count_${PR_REPO_OWNER}_${PR_REPO_NAME}_${PR_NUMBER}"
+        rm -f "$COPILOT_STALE_FILE" "$COPILOT_COUNT_FILE"
     fi
 
 # Restore from Copilot backup
