@@ -76,6 +76,34 @@ func TestParseRunIDFromURL(t *testing.T) {
 	}
 }
 
+// FuzzParseRunIDFromURL checks the details-URL parser used to recover workflow
+// run IDs from check-run links. Runs as a seed-corpus unit test under plain
+// `go test ./...`; real fuzzing is opt-in via `just fuzz`. On success the
+// extracted run ID must be positive.
+func FuzzParseRunIDFromURL(f *testing.F) {
+	seeds := []string{
+		"https://github.com/owner/repo/actions/runs/12345678/job/987654321",
+		"https://github.com/owner/repo/commit/abc123/checks",
+		"",
+		"https://github.com/owner/repo/runs/73263098935",
+		"https://probot.github.io/apps/dco/",
+		"https://github.com/owner/repo/actions/runs/0/job/987654321",
+		"https://github.com/owner/repo/actions/runs/99999999999999999999/job/1",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, detailsURL string) {
+		runID, err := ParseRunIDFromURL(detailsURL)
+		if err != nil {
+			return
+		}
+		if runID <= 0 {
+			t.Errorf("ParseRunIDFromURL(%q) accepted non-positive run ID %d", detailsURL, runID)
+		}
+	})
+}
+
 func TestWeightedAverage(t *testing.T) {
 	tests := []struct {
 		name      string
