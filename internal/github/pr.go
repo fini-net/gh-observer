@@ -11,9 +11,13 @@ import (
 	"github.com/google/go-github/v90/github"
 )
 
+// URL patterns for PR and Actions run links. Owner/repo segments are
+// restricted to GitHub slug characters ([a-zA-Z0-9_.-]); looser matching let
+// fuzzing find inputs like "https://github.com/ow ner/re po/pull/1" parse
+// with spaces in owner/repo (found by FuzzParsePRURL).
 var (
-	prURLPattern         = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)$`)
-	actionsRunURLPattern = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/actions/runs/(\d+)$`)
+	prURLPattern         = regexp.MustCompile(`^https?://github\.com/([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)/pull/(\d+)$`)
+	actionsRunURLPattern = regexp.MustCompile(`^https?://github\.com/([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)/actions/runs/(\d+)$`)
 )
 
 // PRInfo contains metadata about a pull request. Only PR-level fields
@@ -93,6 +97,7 @@ func GetPRWithRepo(prNumber int) (int, string, string, error) {
 
 // ParseActionsRunURL extracts owner, repo, and run ID from a GitHub Actions run URL.
 // Expected format: https://github.com/owner/repo/actions/runs/NNN
+// A run ID of 0 is rejected (found by FuzzParseActionsRunURL).
 func ParseActionsRunURL(url string) (owner, repo string, runID int64, err error) {
 	matches := actionsRunURLPattern.FindStringSubmatch(url)
 	if len(matches) != 4 {
@@ -102,10 +107,14 @@ func ParseActionsRunURL(url string) (owner, repo string, runID int64, err error)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("invalid run ID: %w", err)
 	}
+	if id <= 0 {
+		return "", "", 0, fmt.Errorf("invalid run ID %d in URL: %s", id, url)
+	}
 	return matches[1], matches[2], id, nil
 }
 
-// ParsePRURL extracts owner, repo, and PR number from a GitHub PR URL
+// ParsePRURL extracts owner, repo, and PR number from a GitHub PR URL.
+// A PR number of 0 is rejected (found by FuzzParsePRURL).
 func ParsePRURL(prURL string) (owner, repo string, prNumber int, err error) {
 	matches := prURLPattern.FindStringSubmatch(prURL)
 	if len(matches) != 4 {
@@ -114,6 +123,9 @@ func ParsePRURL(prURL string) (owner, repo string, prNumber int, err error) {
 	prNum, err := strconv.Atoi(matches[3])
 	if err != nil {
 		return "", "", 0, fmt.Errorf("invalid PR number: %w", err)
+	}
+	if prNum <= 0 {
+		return "", "", 0, fmt.Errorf("invalid PR number %d in URL: %s", prNum, prURL)
 	}
 	return matches[1], matches[2], prNum, nil
 }

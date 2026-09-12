@@ -23,12 +23,20 @@ var runIDRegexp = regexp.MustCompile(`/actions/runs/(\d+)/job/`)
 const historyDecayFactor = 0.7
 
 // ParseRunIDFromURL extracts the workflow run ID from a GitHub Actions details URL.
+// A run ID of 0 is rejected (found by FuzzParseRunIDFromURL).
 func ParseRunIDFromURL(detailsURL string) (int64, error) {
 	matches := runIDRegexp.FindStringSubmatch(detailsURL)
 	if len(matches) < 2 {
 		return 0, fmt.Errorf("no run ID found in URL: %s", detailsURL)
 	}
-	return strconv.ParseInt(matches[1], 10, 64)
+	runID, err := strconv.ParseInt(matches[1], 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if runID <= 0 {
+		return 0, fmt.Errorf("invalid run ID %d in URL: %s", runID, detailsURL)
+	}
+	return runID, nil
 }
 
 // FetchJobAverages fetches historical average durations for each job.
