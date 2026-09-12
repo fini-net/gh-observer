@@ -1,6 +1,8 @@
 package github
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -382,4 +384,149 @@ func TestParseActionsRunURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Go native fuzz targets for the untrusted-input parsers. Seed corpora come
+// from the table tests above plus adversarial shapes (deeply nested JSON,
+// oversized numeric literals, malformed UTF-8). Under plain `go test ./...`
+// (what CI runs) each target executes only its seed corpus as ordinary unit
+// tests, so these act as permanent regression tests at zero workflow cost.
+// Coverage-guided fuzzing is opt-in via `just fuzz`.
+//
+// The invariants assert that on success the parsed owner/repo are GitHub
+// slugs, the numeric ID is positive, and — for the gh CLI JSON path — that
+// the canonical URL rebuilt from the parsed fields re-parses identically.
+
+var slugRE = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+
+// assertValidOwnerRepo fails t unless owner and repo are non-empty GitHub slugs.
+func assertValidOwnerRepo(t *testing.T, label, owner, repo string) {
+	t.Helper()
+	if !slugRE.MatchString(owner) {
+		t.Errorf("%s: owner %q is not a GitHub slug", label, owner)
+	}
+	if !slugRE.MatchString(repo) {
+		t.Errorf("%s: repo %q is not a GitHub slug", label, repo)
+	}
+}
+
+func FuzzParsePRURL(f *testing.F) {
+	seeds := []string{
+		"https://github.com/fini-net/gh-observer/pull/88",
+		"http://github.com/owner/repo/pull/123",
+		"https://github.com/org-123/repo-name/pull/456",
+		"https://github.com/owner/repo.name/pull/789",
+		"github.com/owner/repo/pull/123",
+		"https://gitlab.com/owner/repo/pull/123",
+		"https://github.com/owner/repo/issues/123",
+		"https://github.com/owner/repo/pull/",
+		"https://github.com/owner/repo/pull/abc",
+		"https://github.com/owner/repo/pull/123/",
+		"",
+		"https://github.com",
+		"notes-about-github.com-api-/pull/123.md",
+		"https://github.com/owner/repo/blob/main/pull/123",
+		"https://github.com/owner/repo/pull/123?w=1",
+		"https://github.com/owner/repo/pull/123#issuecomment",
+		"https://github.com/owner/repo/pull/0",
+		"https://github.com/owner/repo/pull/-1",
+		"https://github.com/owner/repo/pull/99999999999999999999",
+		"https://github.com/owner/repo/pull/007",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, url string) {
+		owner, repo, prNum, err := ParsePRURL(url)
+		if err != nil {
+			return
+		}
+		assertValidOwnerRepo(t, "ParsePRURL("+url+")", owner, repo)
+		if prNum <= 0 {
+			t.Errorf("ParsePRURL(%q) accepted non-positive PR number %d", url, prNum)
+		}
+	})
+}
+
+func FuzzParseActionsRunURL(f *testing.F) {
+	seeds := []string{
+		"https://github.com/fini-net/gh-observer/actions/runs/25856656092",
+		"http://github.com/owner/repo/actions/runs/123",
+		"https://github.com/org-123/repo-name/actions/runs/456",
+		"https://github.com/owner/repo.name/actions/runs/789",
+		"github.com/owner/repo/actions/runs/123",
+		"https://gitlab.com/owner/repo/actions/runs/123",
+		"https://github.com/owner/repo/pull/123",
+		"https://github.com/owner/repo/actions/runs/",
+		"https://github.com/owner/repo/actions/runs/abc",
+		"https://github.com/owner/repo/actions/runs/123/",
+		"",
+		"https://github.com",
+		"https://github.com/owner/repo/actions/runs/123?w=1",
+		"https://github.com/owner/repo/actions/runs/123#summary",
+		"https://github.com/owner/repo/actions/runs/123/job/456",
+		"https://github.com/owner/repo/actions/runs/0",
+		"https://github.com/owner/repo/actions/runs/9223372036854775808",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, url string) {
+		owner, repo, runID, err := ParseActionsRunURL(url)
+		if err != nil {
+			return
+		}
+		assertValidOwnerRepo(t, "ParseActionsRunURL("+url+")", owner, repo)
+		if runID <= 0 {
+			t.Errorf("ParseActionsRunURL(%q) accepted non-positive run ID %d", url, runID)
+		}
+	})
+}
+
+func FuzzParsePRViewWithRepo(f *testing.F) {
+	seeds := []string{
+		`{"number":4173,"url":"https://github.com/StackExchange/dnscontrol/pull/4173"}`,
+		`{"number":123,"url":"https://github.com/upstream-owner/upstream-repo/pull/123"}`,
+		`{"number":456,"url":"https://github.com/org-123/repo-name-789/pull/456"}`,
+		`{"number":1,"url":"https://github.com/owner/repo.name/pull/1"}`,
+		`{"url":"https://github.com/owner/repo/pull/123"}`,
+		`{"number":123}`,
+		`{"number":123,"url":"https://github.com/owner/repo/issues/123"}`,
+		`{invalid json`,
+		`{}`,
+		`{"number":123,"url":"https://github.com/owner/repo/pull/456"}`,
+		`{"number":-5,"url":"https://github.com/owner/repo/pull/123"}`,
+		`{"number":1e3,"url":"https://github.com/owner/repo/pull/1000"}`,
+		`{"number":123,"url":"https://github.com/owner/repo/pull/123","extra":{"deeply":{"nested":[1,2,{"x":true}]}}}`,
+		`null`,
+		`[]`,
+		`"just a string"`,
+		`{"number":123,"url":null}`,
+		`{"number":123,"url":123}`,
+	}
+	for _, s := range seeds {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, jsonOutput []byte) {
+		number, owner, repo, err := parsePRViewWithRepo(jsonOutput)
+		if err != nil {
+			return
+		}
+		assertValidOwnerRepo(t, "parsePRViewWithRepo("+string(jsonOutput)+")", owner, repo)
+		if number <= 0 {
+			t.Errorf("parsePRViewWithRepo(%q) accepted non-positive PR number %d", jsonOutput, number)
+		}
+		// The parsed triple must be self-consistent: the canonical URL
+		// rebuilt from owner/repo/number has to re-parse identically.
+		canonical := "https://github.com/" + owner + "/" + repo + "/pull/" + strconv.Itoa(number)
+		cOwner, cRepo, cNum, err := ParsePRURL(canonical)
+		if err != nil {
+			t.Fatalf("parsePRViewWithRepo(%q): canonical URL %q failed to re-parse: %v",
+				jsonOutput, canonical, err)
+		}
+		if cNum != number || cOwner != owner || cRepo != repo {
+			t.Errorf("parsePRViewWithRepo(%q) round-trip mismatch: got (%d, %q, %q), want (%d, %q, %q)",
+				jsonOutput, cNum, cOwner, cRepo, number, owner, repo)
+		}
+	})
 }

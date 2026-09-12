@@ -48,6 +48,19 @@ test2cast-repo repo="fini-net/gh-observer": build
 test:
 	go test ./...
 
+# run Go native fuzz targets for short bursts (opt-in; CI runs the seed
+# corpora as ordinary unit tests via 'just test', so this is for deeper
+# local exploration). Each target runs for the given -fuzztime.
+[group('Testing')]
+fuzz time="30s":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for target in ParsePRURL ParseActionsRunURL ParsePRViewWithRepo \
+                  ParseRepoArg ParseRunIDFromURL BigIntUnmarshalJSON ParseTimestamp; do
+        echo "{{BLUE}}Fuzzing Fuzz${target} for {{ time }}...{{NORMAL}}"
+        go test -run='^$' -fuzz="Fuzz${target}" -fuzztime="{{ time }}" ./internal/github/
+    done
+
 # update Go dependencies and tidy go.mod/go.sum
 [group('Build')]
 deps-update:

@@ -827,6 +827,54 @@ func TestBigInt_UnmarshalJSON(t *testing.T) {
 	}
 }
 
+// FuzzBigIntUnmarshalJSON checks the custom unmarshaler that lets the GraphQL
+// layer decode GitHub IDs delivered as JSON numbers larger than int32 (issue:
+// run/workflow IDs already exceed 2^34). Runs as a seed-corpus unit test
+// under plain `go test ./...`; real fuzzing is opt-in via `just fuzz`.
+// Invariant: on success the value must survive a Marshal/Unmarshal round
+// trip unchanged — encoding/json accepts surrounding whitespace and various
+// numeric spellings, so we assert on the decoded value rather than the input
+// bytes.
+func FuzzBigIntUnmarshalJSON(f *testing.F) {
+	seeds := []string{
+		`42`,
+		`0`,
+		`-1`,
+		`2147483647`,
+		`25027630970`,
+		`-9223372036854775808`,
+		`9223372036854775808`,
+		`"hello"`,
+		`1.5`,
+		`1e3`,
+		`null`,
+		` 42 `,
+		`[1]`,
+		`{"a":1}`,
+		`true`,
+	}
+	for _, s := range seeds {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var b BigInt
+		if err := b.UnmarshalJSON(data); err != nil {
+			return
+		}
+		marshaled, err := b.MarshalJSON()
+		if err != nil {
+			t.Fatalf("BigInt(%d).MarshalJSON() failed: %v", int64(b), err)
+		}
+		var b2 BigInt
+		if err := b2.UnmarshalJSON(marshaled); err != nil {
+			t.Fatalf("round-trip: UnmarshalJSON(%q) failed: %v", marshaled, err)
+		}
+		if b2 != b {
+			t.Errorf("round-trip mismatch: %d became %d via %q", int64(b), int64(b2), marshaled)
+		}
+	})
+}
+
 // makeTestQueryWithPushTime builds a *pullRequestQuery like makeTestQuery but
 // also populates the head commit's PushedDate and CommittedDate so callers
 // can exercise the push-time extraction path in FetchCheckRunsGraphQL.
