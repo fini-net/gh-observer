@@ -14,7 +14,7 @@ import (
 // View renders the current state
 func (m Model) View() tea.View {
 	if m.err != nil {
-		return tea.NewView(m.styles.Error.Render(fmt.Sprintf("Error: %v\n", m.err)))
+		return newAltScreenView(m.styles.Error.Render(fmt.Sprintf("Error: %v\n", m.err)))
 	}
 
 	var b strings.Builder
@@ -58,7 +58,7 @@ func (m Model) View() tea.View {
 	}
 
 	if len(m.checkRuns) == 0 {
-		return tea.NewView(b.String() + m.renderStartupPhase())
+		return newAltScreenView(b.String() + m.renderStartupPhase())
 	}
 
 	widths := CalculateColumnWidths(m.checkRuns, m.headPushedTime, m.jobAverages)
@@ -195,7 +195,7 @@ func (m Model) View() tea.View {
 		b.WriteString("\nPress q to quit\n")
 	}
 
-	return tea.NewView(b.String())
+	return newAltScreenView(b.String())
 }
 
 // renderErrorBox displays error annotations for failed checks

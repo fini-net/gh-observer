@@ -98,7 +98,7 @@ func (m RepoModel) View() tea.View {
 		b.WriteString("Press q to quit\n")
 	}
 
-	return tea.NewView(b.String())
+	return newAltScreenView(b.String())
 }
 
 // truncateFetchError shortens an error message to fit within maxWidth terminal
@@ -206,7 +206,7 @@ func (m RepoModel) renderBranchRunHeader(b *strings.Builder, run ghclient.Branch
 	}
 
 	durationText := formatBranchRunDuration(run)
-	title := run.DisplayTitle
+	title := stripVariationSelectors(run.DisplayTitle)
 	if run.WorkflowName != "" && title == "" {
 		title = run.WorkflowName
 	}

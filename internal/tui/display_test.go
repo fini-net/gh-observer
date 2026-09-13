@@ -126,6 +126,44 @@ func TestFormatCheckName(t *testing.T) {
 	}
 }
 
+func TestStripVariationSelectors(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "VS16 emoji presentation selector removed",
+			in:   "☑️ Ready",
+			want: "☑ Ready",
+		},
+		{
+			name: "VS15 text presentation selector removed",
+			in:   "☑︎ Ready",
+			want: "☑ Ready",
+		},
+		{
+			name: "plain emoji without variation selector is unchanged",
+			in:   "🚀 deploy",
+			want: "🚀 deploy",
+		},
+		{
+			name: "plain ASCII is unchanged",
+			in:   "add renovate with 14-day cooldown, fixes #14",
+			want: "add renovate with 14-day cooldown, fixes #14",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripVariationSelectors(tt.in)
+			if got != tt.want {
+				t.Errorf("stripVariationSelectors(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFormatCheckNameWithTruncate(t *testing.T) {
 	tests := []struct {
 		name     string
