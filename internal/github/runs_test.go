@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v90/github"
+	"github.com/google/go-github/v91/github"
 )
 
 func TestFirstLine(t *testing.T) {
@@ -46,12 +46,12 @@ func TestConvertWorkflowJob(t *testing.T) {
 		{
 			name: "completed success",
 			job: &github.WorkflowJob{
-				Name:         github.Ptr("test"),
-				WorkflowName: github.Ptr("CI"),
-				Status:       github.Ptr("completed"),
-				Conclusion:   github.Ptr("success"),
-				HTMLURL:      github.Ptr("https://github.com/owner/repo/actions/runs/1/job/1"),
-				RunID:        github.Ptr(int64(1)),
+				Name:         new("test"),
+				WorkflowName: new("CI"),
+				Status:       new("completed"),
+				Conclusion:   new("success"),
+				HTMLURL:      new("https://github.com/owner/repo/actions/runs/1/job/1"),
+				RunID:        new(int64(1)),
 				StartedAt:    startedAt,
 				CompletedAt:  completedAt,
 			},
@@ -69,10 +69,10 @@ func TestConvertWorkflowJob(t *testing.T) {
 		{
 			name: "in_progress job",
 			job: &github.WorkflowJob{
-				Name:         github.Ptr("build"),
-				WorkflowName: github.Ptr("Deploy"),
-				Status:       github.Ptr("in_progress"),
-				Conclusion:   github.Ptr(""),
+				Name:         new("build"),
+				WorkflowName: new("Deploy"),
+				Status:       new("in_progress"),
+				Conclusion:   new(""),
 				StartedAt:    startedAt,
 			},
 			want: WorkflowJobInfo{
@@ -86,8 +86,8 @@ func TestConvertWorkflowJob(t *testing.T) {
 		{
 			name: "nil optional fields",
 			job: &github.WorkflowJob{
-				Status:     github.Ptr("queued"),
-				Conclusion: github.Ptr(""),
+				Status:     new("queued"),
+				Conclusion: new(""),
 			},
 			want: WorkflowJobInfo{
 				Status:     "queued",
