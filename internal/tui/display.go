@@ -125,6 +125,8 @@ func GetCopilotReviewIcon(state, status string) string {
 		return "⊘"
 	case "stale":
 		return "⚠"
+	case "timed_out":
+		return "⏱"
 	case "pending":
 		if status == "queued" {
 			return "⏸"

@@ -310,6 +310,25 @@ func TestRenderCopilotReviewCheckRun(t *testing.T) {
 			t.Errorf("stale row should not fall through to generic '?' icon: %q", row)
 		}
 	})
+
+	t.Run("timed_out row uses dedicated stopwatch icon", func(t *testing.T) {
+		row := m.renderCopilotReviewCheckRun(ghclient.CheckRunInfo{
+			Kind:         "review",
+			WorkflowName: "Copilot",
+			Name:         "Review",
+			Status:       "completed",
+			ReviewState:  "timed_out",
+		}, widths)
+		// "timed_out" has its own icon (⏱), distinct from "stale"'s ⚠ —
+		// giving up after copilot_max_wait is a different situation from a
+		// review that needs re-requesting (issue #442).
+		if !strings.Contains(row, "⏱") {
+			t.Errorf("timed_out row missing ⏱ icon: %q", row)
+		}
+		if strings.Contains(row, "?") {
+			t.Errorf("timed_out row should not fall through to generic '?' icon: %q", row)
+		}
+	})
 }
 
 // TestBuildCopilotCheckRun_StaleSummary verifies that the synthetic stale
@@ -335,6 +354,39 @@ func TestBuildCopilotCheckRun_StaleSummary(t *testing.T) {
 	}
 	if !strings.Contains(got.Summary, "refresh or re-request") {
 		t.Errorf("Summary should contain actionable hint, got %q", got.Summary)
+	}
+}
+
+// TestBuildCopilotCheckRun_TimedOut verifies that a Copilot review still
+// pending once copilot_max_wait elapses renders as a completed "timed_out"
+// row with an explanatory Summary, rather than disappearing silently or
+// continuing to show as pending (issue #442).
+func TestBuildCopilotCheckRun_TimedOut(t *testing.T) {
+	now := time.Now()
+	m := &Model{
+		waitForCopilot:       true,
+		copilotTimedOut:      true,
+		copilotWaitStartTime: now,
+		copilotMaxWait:       3 * time.Minute,
+	}
+	got := m.buildCopilotCheckRun()
+	if got == nil {
+		t.Fatal("expected non-nil row for timed-out review")
+	}
+	if got.Status != "completed" {
+		t.Errorf("Status = %q, want completed", got.Status)
+	}
+	if got.ReviewState != "timed_out" {
+		t.Errorf("ReviewState = %q, want timed_out", got.ReviewState)
+	}
+	if got.Summary == "" {
+		t.Fatal("expected non-empty Summary for timed-out review")
+	}
+	if !strings.Contains(got.Summary, "3m") {
+		t.Errorf("Summary should mention the max-wait duration, got %q", got.Summary)
+	}
+	if !strings.Contains(got.Summary, "giving up") {
+		t.Errorf("Summary should explain gh-observer gave up, got %q", got.Summary)
 	}
 }
 

@@ -99,6 +99,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tick(m.refreshInterval),
 		}
 
+		// Independently cap the Copilot poll loop/row on copilot_max_wait,
+		// regardless of check completion (issue #442). Without this, a
+		// review that's requested but never submitted (copilotPending stays
+		// true forever, distinct from the two-consecutive-not-requested case
+		// below) polls and shows "in progress…" indefinitely — copilotGateSatisfied
+		// only bounds program exit, not this loop. Clearing copilotPending
+		// here also disarms the poll-dispatch condition below this same tick.
+		if m.waitForCopilot && m.copilotPending && !m.copilotReviewComplete &&
+			!m.copilotStale && copilotMaxWaitElapsed(&m) {
+			m.copilotPending = false
+			m.copilotReviewComplete = true
+			m.copilotTimedOut = true
+			m.copilotState = ""
+			debug.Log("copilot poll timed out", "max_wait", m.copilotMaxWait)
+		}
+
 		// Poll Copilot review on its own cadence, gated on rate limit and
 		// the initial delay window (issue #409). copilotPollStartTime is
 		// PRInfoMsg-time + copilotInitialDelay; the first poll may fire only
@@ -150,6 +166,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.copilotStale = false
 				m.copilotReviewComplete = false
 				m.copilotNotReqStreak = 0
+				m.copilotTimedOut = false
 				debug.Log("copilot state reset on head SHA change", "old", oldSHA, "new", msg.HeadSHA)
 			}
 			m.copilotPending = true
@@ -475,12 +492,22 @@ func copilotGateSatisfied(m *Model) bool {
 	// from the real push time once handleChecksUpdate re-anchors
 	// copilotWaitStartTime to it (falling back to PR-info time if the push
 	// time never arrives), so this includes the initial-delay window
-	// (issue #409).
-	if !m.copilotWaitStartTime.IsZero() && time.Since(m.copilotWaitStartTime) >= m.copilotMaxWait {
+	// (issue #409). In practice the TickMsg timeout check above already
+	// clears copilotPending once this elapses, so this branch is a safety
+	// net for exit timing that races ahead of the next tick.
+	if copilotMaxWaitElapsed(m) {
 		debug.Log("copilot max wait elapsed, proceeding", "max_wait", m.copilotMaxWait)
 		return true
 	}
 	return false
+}
+
+// copilotMaxWaitElapsed returns true once copilot_max_wait has elapsed since
+// copilotWaitStartTime was armed (issue #442). Shared by copilotGateSatisfied
+// (bounds program exit) and the TickMsg handler (bounds the poll loop and row
+// display independently of check completion).
+func copilotMaxWaitElapsed(m *Model) bool {
+	return !m.copilotWaitStartTime.IsZero() && time.Since(m.copilotWaitStartTime) >= m.copilotMaxWait
 }
 
 // handleCopilotReview processes Copilot review state updates (issue #409).

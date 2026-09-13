@@ -1457,6 +1457,80 @@ func TestHandleCopilotReview(t *testing.T) {
 	})
 }
 
+func TestTickMsg_CopilotTimeout(t *testing.T) {
+	t.Run("max wait elapsed while pending stops polling and marks timed out", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.copilotState = "pending"
+		m.copilotMaxWait = 100 * time.Millisecond
+		m.copilotWaitStartTime = time.Now().Add(-200 * time.Millisecond)
+		m.copilotPollStartTime = time.Now().Add(-100 * time.Millisecond) // past, so poll would otherwise fire
+		m.copilotLastPoll = time.Time{}
+		m.rateLimitRemaining = 5000
+		m.fetchReceived = true
+
+		model, cmd := m.Update(TickMsg(time.Now()))
+		result := model.(Model)
+
+		if result.copilotPending {
+			t.Error("copilotPending should be false once max wait elapses")
+		}
+		if !result.copilotReviewComplete {
+			t.Error("copilotReviewComplete should be true once max wait elapses")
+		}
+		if !result.copilotTimedOut {
+			t.Error("copilotTimedOut should be true once max wait elapses")
+		}
+		if result.copilotState != "" {
+			t.Errorf("copilotState = %q, want empty after timeout", result.copilotState)
+		}
+		// Only the 2 baseline cmds (fetchCheckRuns + tick) — no copilot fetch,
+		// since copilotPending is cleared before the poll-dispatch check runs.
+		if n := countBatchedCmds(cmd); n != 2 {
+			t.Errorf("TickMsg after max wait elapsed should not poll copilot; got %d cmds (want 2)", n)
+		}
+	})
+
+	t.Run("stale review is not re-marked timed out", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.copilotStale = true
+		m.copilotMaxWait = 100 * time.Millisecond
+		m.copilotWaitStartTime = time.Now().Add(-200 * time.Millisecond)
+		m.rateLimitRemaining = 5000
+		m.fetchReceived = true
+
+		model, _ := m.Update(TickMsg(time.Now()))
+		result := model.(Model)
+
+		if result.copilotTimedOut {
+			t.Error("a stale review should not also be marked timed out")
+		}
+	})
+
+	t.Run("not yet elapsed leaves pending state untouched", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.copilotMaxWait = 5 * time.Second
+		m.copilotWaitStartTime = time.Now()
+		m.rateLimitRemaining = 5000
+		m.fetchReceived = true
+
+		model, _ := m.Update(TickMsg(time.Now()))
+		result := model.(Model)
+
+		if result.copilotTimedOut {
+			t.Error("copilotTimedOut should be false before max wait elapses")
+		}
+		if !result.copilotPending {
+			t.Error("copilotPending should remain true before max wait elapses")
+		}
+	})
+}
+
 // countBatchedCmds executes a tea.Cmd and, if it returns a tea.BatchMsg,
 // returns the number of batched commands. Returns 1 for a single (non-batch)
 // command and 0 for nil.
