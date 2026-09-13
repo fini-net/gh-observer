@@ -471,9 +471,11 @@ func copilotGateSatisfied(m *Model) bool {
 	if m.copilotStale {
 		return true
 	}
-	// Max wait elapsed (total wall-clock since PRInfoMsg) — stop waiting and
-	// proceed. copilot_max_wait measures from PR-info time, so this includes
-	// the initial-delay window (issue #409).
+	// Max wait elapsed — stop waiting and proceed. copilot_max_wait measures
+	// from the real push time once handleChecksUpdate re-anchors
+	// copilotWaitStartTime to it (falling back to PR-info time if the push
+	// time never arrives), so this includes the initial-delay window
+	// (issue #409).
 	if !m.copilotWaitStartTime.IsZero() && time.Since(m.copilotWaitStartTime) >= m.copilotMaxWait {
 		debug.Log("copilot max wait elapsed, proceeding", "max_wait", m.copilotMaxWait)
 		return true
