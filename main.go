@@ -332,17 +332,13 @@ func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, own
 	return 0
 }
 
-// printFinalFrame reprints a quit program's last rendered frame to stdout.
-// Alt-screen mode (used to fix #451's stale-frame corruption) restores the
-// pre-launch screen content when the program exits, so without this the
-// completed run's summary would vanish instead of landing in scrollback.
+// printFinalFrame re-renders the final model state to stdout once the
+// program has quit. Alt-screen mode (used to fix #451's stale-frame
+// corruption) restores the pre-launch screen content on exit, so without
+// this the completed run's summary would vanish instead of landing in
+// scrollback.
 func printFinalFrame(finalModel tea.Model) {
-	type viewer interface {
-		View() tea.View
-	}
-	if v, ok := finalModel.(viewer); ok {
-		fmt.Print(v.View().Content)
-	}
+	fmt.Print(finalModel.View().Content)
 }
 
 // runSnapshot prints a one-time snapshot of PR check status (non-interactive mode)
