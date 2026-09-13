@@ -1471,6 +1471,109 @@ func countBatchedCmds(cmd tea.Cmd) int {
 	return 1
 }
 
+func TestCopilotWaitAnchorReanchorsToPushTime(t *testing.T) {
+	t.Run("re-anchors wait/poll start to push time before first poll", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotInitialDelay = 15 * time.Second
+		m.copilotMaxWait = 180 * time.Second
+
+		// PRInfoMsg arms the gate with the time.Now() fallback.
+		m.copilotPending = true
+		m.copilotWaitStartTime = time.Now()
+		m.copilotPollStartTime = time.Now().Add(m.copilotInitialDelay)
+
+		pushTime := time.Now().Add(-5 * time.Minute)
+		model, _ := m.handleChecksUpdate(ChecksUpdateMsg{
+			CheckRuns:          []ghclient.CheckRunInfo{{Status: "in_progress"}},
+			HeadPushedTime:     pushTime,
+			RateLimitRemaining: 5000,
+		})
+		result := model.(*Model)
+
+		if !result.copilotWaitStartTime.Equal(pushTime) {
+			t.Errorf("copilotWaitStartTime = %v, want %v (real push time)", result.copilotWaitStartTime, pushTime)
+		}
+		wantPollStart := pushTime.Add(m.copilotInitialDelay)
+		if !result.copilotPollStartTime.Equal(wantPollStart) {
+			t.Errorf("copilotPollStartTime = %v, want %v", result.copilotPollStartTime, wantPollStart)
+		}
+	})
+
+	t.Run("gate satisfied immediately when push predates max-wait", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotInitialDelay = 15 * time.Second
+		m.copilotMaxWait = 3 * time.Minute
+
+		m.copilotPending = true
+		m.copilotWaitStartTime = time.Now()
+		m.copilotPollStartTime = time.Now().Add(m.copilotInitialDelay)
+
+		// Push happened 5 minutes ago — already older than the 3-minute
+		// max-wait budget by the time gh-observer attached.
+		pushTime := time.Now().Add(-5 * time.Minute)
+		model, _ := m.handleChecksUpdate(ChecksUpdateMsg{
+			CheckRuns:          []ghclient.CheckRunInfo{{Status: "in_progress"}},
+			HeadPushedTime:     pushTime,
+			RateLimitRemaining: 5000,
+		})
+		result := model.(*Model)
+
+		if !copilotGateSatisfied(result) {
+			t.Error("copilotGateSatisfied should be true once the re-anchored wait start already exceeds copilot_max_wait")
+		}
+	})
+
+	t.Run("does not re-anchor once a poll has already fired", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotInitialDelay = 15 * time.Second
+		m.copilotMaxWait = 180 * time.Second
+
+		fallbackWaitStart := time.Now()
+		fallbackPollStart := fallbackWaitStart.Add(m.copilotInitialDelay)
+		m.copilotPending = true
+		m.copilotWaitStartTime = fallbackWaitStart
+		m.copilotPollStartTime = fallbackPollStart
+		m.copilotLastPoll = time.Now() // a Copilot poll has already gone out
+
+		pushTime := time.Now().Add(-5 * time.Minute)
+		model, _ := m.handleChecksUpdate(ChecksUpdateMsg{
+			CheckRuns:          []ghclient.CheckRunInfo{{Status: "in_progress"}},
+			HeadPushedTime:     pushTime,
+			RateLimitRemaining: 5000,
+		})
+		result := model.(*Model)
+
+		if !result.copilotWaitStartTime.Equal(fallbackWaitStart) {
+			t.Errorf("copilotWaitStartTime should stay at the fallback once polling has started, got %v, want %v",
+				result.copilotWaitStartTime, fallbackWaitStart)
+		}
+		if !result.copilotPollStartTime.Equal(fallbackPollStart) {
+			t.Errorf("copilotPollStartTime should stay at the fallback once polling has started, got %v, want %v",
+				result.copilotPollStartTime, fallbackPollStart)
+		}
+	})
+
+	t.Run("no-op when Copilot waiting is disabled", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = false
+
+		pushTime := time.Now().Add(-5 * time.Minute)
+		model, _ := m.handleChecksUpdate(ChecksUpdateMsg{
+			CheckRuns:          []ghclient.CheckRunInfo{{Status: "in_progress"}},
+			HeadPushedTime:     pushTime,
+			RateLimitRemaining: 5000,
+		})
+		result := model.(*Model)
+
+		if !result.copilotWaitStartTime.IsZero() {
+			t.Errorf("copilotWaitStartTime should stay zero when Copilot waiting is disabled, got %v", result.copilotWaitStartTime)
+		}
+	})
+}
+
 func TestDetermineExitCode_Copilot(t *testing.T) {
 	tests := []struct {
 		name           string
