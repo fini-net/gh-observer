@@ -259,10 +259,8 @@ func runPRMode(ctx context.Context, token string, parsed runArgs, cfg *config.Co
 		return 1
 	}
 
+	printFinalFrame(finalModel)
 	if m, ok := finalModel.(tui.Model); ok {
-		// Alt-screen discards the final frame on exit, so reprint it to the
-		// now-restored normal screen to leave a summary in scrollback (#451).
-		fmt.Print(m.View().Content)
 		return m.ExitCode()
 	}
 
@@ -289,10 +287,8 @@ func runActionsMode(ctx context.Context, token string, parsed runArgs, cfg *conf
 		return 1
 	}
 
+	printFinalFrame(finalModel)
 	if m, ok := finalModel.(tui.RunModel); ok {
-		// Alt-screen discards the final frame on exit, so reprint it to the
-		// now-restored normal screen to leave a summary in scrollback (#451).
-		fmt.Print(m.View().Content)
 		return m.ExitCode()
 	}
 
@@ -321,25 +317,32 @@ func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, own
 		return 1
 	}
 
+	printFinalFrame(finalModel)
+
 	// RepoModel.Update can return either a value or pointer RepoModel
-	// (the per-message handlers use pointer receivers), so assert on
-	// interfaces rather than a concrete type to handle both forms.
-	type viewer interface {
-		View() tea.View
-	}
+	// (the per-message handlers use pointer receivers), so assert on the
+	// ExitCode method rather than a concrete type to handle both forms.
 	type exitCoder interface {
 		ExitCode() int
-	}
-	if v, ok := finalModel.(viewer); ok {
-		// Alt-screen discards the final frame on exit, so reprint it to the
-		// now-restored normal screen to leave a summary in scrollback (#451).
-		fmt.Print(v.View().Content)
 	}
 	if ec, ok := finalModel.(exitCoder); ok {
 		return ec.ExitCode()
 	}
 
 	return 0
+}
+
+// printFinalFrame reprints a quit program's last rendered frame to stdout.
+// Alt-screen mode (used to fix #451's stale-frame corruption) restores the
+// pre-launch screen content when the program exits, so without this the
+// completed run's summary would vanish instead of landing in scrollback.
+func printFinalFrame(finalModel tea.Model) {
+	type viewer interface {
+		View() tea.View
+	}
+	if v, ok := finalModel.(viewer); ok {
+		fmt.Print(v.View().Content)
+	}
 }
 
 // runSnapshot prints a one-time snapshot of PR check status (non-interactive mode)

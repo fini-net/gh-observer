@@ -206,6 +206,9 @@ func (m RepoModel) renderBranchRunHeader(b *strings.Builder, run ghclient.Branch
 	}
 
 	durationText := formatBranchRunDuration(run)
+	// Stripped here at render time, not at ingestion like prTitle/RunInfo.DisplayTitle
+	// (update.go, runupdate.go): BranchRunData isn't cached on a model field with a
+	// single arrival point, it's read fresh from ghclient each render.
 	title := stripVariationSelectors(run.DisplayTitle)
 	if run.WorkflowName != "" && title == "" {
 		title = run.WorkflowName
