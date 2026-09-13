@@ -155,11 +155,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.copilotPending = true
 			m.copilotReviewComplete = false
 			// copilotWaitStartTime bounds the total wall-clock wait for a
-			// Copilot review (copilot_max_wait), measured from PR-info time so
-			// the config knob means what it says. copilotPollStartTime is the
+			// Copilot review (copilot_max_wait); copilotPollStartTime is the
 			// initial-delay gate: the first poll may fire only after this
 			// instant, giving GitHub time to create the review request after a
 			// push. See copilotGateSatisfied and the TickMsg poll gate below.
+			//
+			// Both are provisional here, anchored to PR-info time (now) as a
+			// fallback in case the real push time never arrives. handleChecksUpdate
+			// re-anchors them to the actual push time (m.headPushedTime) as soon
+			// as it's known, so copilot_max_wait means "since push" like queue
+			// latency does, not "since gh-observer attached".
 			m.copilotWaitStartTime = time.Now()
 			m.copilotPollStartTime = time.Now().Add(m.copilotInitialDelay)
 			debug.Log("copilot gate armed",
@@ -330,7 +335,21 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	// change), preserve the last known value rather than dropping the
 	// user-facing "Pushed Xs ago" header.
 	if !msg.HeadPushedTime.IsZero() {
+		firstPushTime := m.headPushedTime.IsZero()
 		m.headPushedTime = msg.HeadPushedTime
+
+		// Re-anchor the Copilot wait budget to the real push time instead of
+		// the PRInfoMsg-arrival fallback, so copilot_max_wait is measured
+		// "since push" (matching queue latency) and a review request that's
+		// already older than the budget on attach doesn't get a fresh
+		// timeout. Only before the first poll, so the countdown/elapsed text
+		// never jumps mid-poll.
+		if firstPushTime && m.waitForCopilot && !m.copilotWaitStartTime.IsZero() && m.copilotLastPoll.IsZero() {
+			m.copilotWaitStartTime = msg.HeadPushedTime
+			m.copilotPollStartTime = msg.HeadPushedTime.Add(m.copilotInitialDelay)
+			debug.Log("copilot gate re-anchored to push time",
+				"wait_start", m.copilotWaitStartTime, "poll_start", m.copilotPollStartTime)
+		}
 	}
 	m.rateLimitRemaining = msg.RateLimitRemaining
 	m.fetchReceived = true
@@ -452,9 +471,11 @@ func copilotGateSatisfied(m *Model) bool {
 	if m.copilotStale {
 		return true
 	}
-	// Max wait elapsed (total wall-clock since PRInfoMsg) — stop waiting and
-	// proceed. copilot_max_wait measures from PR-info time, so this includes
-	// the initial-delay window (issue #409).
+	// Max wait elapsed — stop waiting and proceed. copilot_max_wait measures
+	// from the real push time once handleChecksUpdate re-anchors
+	// copilotWaitStartTime to it (falling back to PR-info time if the push
+	// time never arrives), so this includes the initial-delay window
+	// (issue #409).
 	if !m.copilotWaitStartTime.IsZero() && time.Since(m.copilotWaitStartTime) >= m.copilotMaxWait {
 		debug.Log("copilot max wait elapsed, proceeding", "max_wait", m.copilotMaxWait)
 		return true

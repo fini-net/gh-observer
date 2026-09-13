@@ -89,11 +89,15 @@ type Model struct {
 
 	// Copilot code review detection (issue #409). PR mode only — run mode
 	// has no reviews object to query. copilotPending gates exit; copilotStale
-	// surfaces a warning. copilotWaitStartTime is set to PRInfoMsg time and
-	// copilotMaxWait bounds the total wall-clock wait before timing out and
-	// proceeding. copilotPollStartTime is set to now + initialDelay and gates
-	// when the first Copilot review poll may fire (gives GitHub time to create
-	// the review request after a push).
+	// surfaces a warning. copilotWaitStartTime is initially set to PRInfoMsg
+	// time (a fallback) and copilotMaxWait bounds the total wall-clock wait
+	// before timing out and proceeding. copilotPollStartTime is initially set
+	// to that fallback time + initialDelay and gates when the first Copilot
+	// review poll may fire (gives GitHub time to create the review request
+	// after a push). Both are re-anchored to the real push time
+	// (m.headPushedTime) in handleChecksUpdate as soon as it's known and no
+	// poll has fired yet, so copilot_max_wait is measured "since push" like
+	// queue latency, not "since gh-observer attached".
 	waitForCopilot        bool
 	copilotMaxWait        time.Duration
 	copilotPollInterval   time.Duration

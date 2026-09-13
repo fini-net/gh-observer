@@ -37,9 +37,11 @@ presumed_averages:
 wait_for_copilot: true
 
 # Maximum total wall-clock time to wait for a Copilot review before timing out
-# and proceeding. Measured from PR-info time (when the head SHA is known), so
-# it includes the initial_delay window below. copilot_max_wait does NOT add to
-# copilot_initial_delay — it bounds the whole wait.
+# and proceeding. Measured from the commit's push time when known (falling
+# back to PR-info time, i.e. when the head SHA is known, only if the push
+# time never arrives), so it includes the initial_delay window below.
+# copilot_max_wait does NOT add to copilot_initial_delay — it bounds the
+# whole wait.
 copilot_max_wait: 180s
 
 # Polling interval for the Copilot review state query (separate from
