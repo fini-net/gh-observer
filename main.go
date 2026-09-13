@@ -259,6 +259,7 @@ func runPRMode(ctx context.Context, token string, parsed runArgs, cfg *config.Co
 		return 1
 	}
 
+	printFinalFrame(finalModel)
 	if m, ok := finalModel.(tui.Model); ok {
 		return m.ExitCode()
 	}
@@ -286,6 +287,7 @@ func runActionsMode(ctx context.Context, token string, parsed runArgs, cfg *conf
 		return 1
 	}
 
+	printFinalFrame(finalModel)
 	if m, ok := finalModel.(tui.RunModel); ok {
 		return m.ExitCode()
 	}
@@ -315,6 +317,8 @@ func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, own
 		return 1
 	}
 
+	printFinalFrame(finalModel)
+
 	// RepoModel.Update can return either a value or pointer RepoModel
 	// (the per-message handlers use pointer receivers), so assert on the
 	// ExitCode method rather than a concrete type to handle both forms.
@@ -326,6 +330,15 @@ func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, own
 	}
 
 	return 0
+}
+
+// printFinalFrame re-renders the final model state to stdout once the
+// program has quit. Alt-screen mode (used to fix #451's stale-frame
+// corruption) restores the pre-launch screen content on exit, so without
+// this the completed run's summary would vanish instead of landing in
+// scrollback.
+func printFinalFrame(finalModel tea.Model) {
+	fmt.Print(finalModel.View().Content)
 }
 
 // runSnapshot prints a one-time snapshot of PR check status (non-interactive mode)

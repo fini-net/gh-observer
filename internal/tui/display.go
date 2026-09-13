@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 	"github.com/fini-net/gh-observer/internal/timing"
 	"github.com/mattn/go-runewidth"
@@ -132,6 +133,33 @@ func GetCopilotReviewIcon(state, status string) string {
 	default:
 		return "?"
 	}
+}
+
+// newAltScreenView wraps content in a tea.View with AltScreen enabled. Every
+// View() return path must use this (not tea.NewView directly) — bubbletea v2
+// diffs AltScreen between frames and toggles terminal mode on any mismatch,
+// so an inconsistent branch would flicker the terminal in and out of the
+// alternate screen buffer instead of fixing issue #451's stale-frame bug.
+func newAltScreenView(content string) tea.View {
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
+}
+
+// stripVariationSelectors removes U+FE0E (text presentation) and U+FE0F
+// (emoji presentation) variation selectors from s. These modifier codepoints
+// attach to a preceding base character (e.g. ☑ U+2611 + VS16 = ☑️) and can
+// cause gh-observer's own width calculation (go-runewidth) to disagree with
+// bubbletea's internal width/grapheme handling, producing off-by-one column
+// errors during partial-line redraw (issue #451). This is a local
+// mitigation, not a fix to either width library.
+func stripVariationSelectors(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '︎' || r == '️' {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // FormatCheckName formats the check name as "Workflow / Job", "App / Job", or just "Job"

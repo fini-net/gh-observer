@@ -141,7 +141,7 @@ func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, 
 			continue
 		}
 		view := PRViewData{
-			Title:          prData.Title,
+			Title:          stripVariationSelectors(prData.Title),
 			CheckRuns:      visible,
 			HeadPushedTime: prData.HeadPushedTime,
 			HeadSHA:        prData.HeadSHA,

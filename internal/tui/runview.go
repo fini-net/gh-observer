@@ -16,7 +16,7 @@ import (
 // View renders the current state for run-watching mode.
 func (m RunModel) View() tea.View {
 	if m.err != nil {
-		return tea.NewView(m.styles.Error.Render(fmt.Sprintf("Error: %v\n", m.err)))
+		return newAltScreenView(m.styles.Error.Render(fmt.Sprintf("Error: %v\n", m.err)))
 	}
 
 	var b strings.Builder
@@ -60,7 +60,7 @@ func (m RunModel) View() tea.View {
 	}
 
 	if len(m.jobs) == 0 {
-		return tea.NewView(b.String() + m.renderRunStartupPhase())
+		return newAltScreenView(b.String() + m.renderRunStartupPhase())
 	}
 
 	widths := CalculateRunColumnWidths(m.jobs, m.jobAverages)
@@ -94,7 +94,7 @@ func (m RunModel) View() tea.View {
 		b.WriteString("\nPress q to quit\n")
 	}
 
-	return tea.NewView(b.String())
+	return newAltScreenView(b.String())
 }
 
 // renderRunStartupPhase shows a message while loading run info.

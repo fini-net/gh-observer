@@ -91,6 +91,7 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.runInfo = msg.RunInfo
+		m.runInfo.DisplayTitle = stripVariationSelectors(m.runInfo.DisplayTitle)
 		m.runInfoLoaded = true
 		// Fold the GraphQL rate-limit observation from the pushedDate
 		// lookup into the model's accounting. Only mark fetchReceived

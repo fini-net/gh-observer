@@ -121,7 +121,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		oldSHA := m.headSHA
 		shaChanged := m.headSHA != "" && m.headSHA != msg.HeadSHA
 
-		m.prTitle = msg.Title
+		m.prTitle = stripVariationSelectors(msg.Title)
 		m.headSHA = msg.HeadSHA
 		m.prCreatedAt = msg.CreatedAt
 
