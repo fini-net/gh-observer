@@ -110,6 +110,12 @@ type Model struct {
 	copilotLastPoll       time.Time
 	copilotNotReqStreak   int
 	copilotReviewComplete bool
+	// copilotTimedOut is set when copilot_max_wait elapses while a review is
+	// still pending (requested but never submitted). Unlike copilotStale (a
+	// review exists but targets a stale commit), this means gh-observer gave
+	// up waiting entirely — it independently caps the poll loop and row
+	// display, not just program exit (issue #442).
+	copilotTimedOut bool
 }
 
 // NewModel creates a new TUI model

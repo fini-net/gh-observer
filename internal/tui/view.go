@@ -445,6 +445,13 @@ func (m Model) buildCopilotCheckRun() *ghclient.CheckRunInfo {
 		// are too long for the name column, so they live here — this
 		// restores the information the pre-refactor status line carried.
 		row.Summary = fmt.Sprintf("Copilot review is stale (HEAD is %s) — refresh or re-request", shortHeadSHA(m.headSHA))
+	case m.copilotTimedOut:
+		// copilot_max_wait elapsed while the review was still pending
+		// (requested but never submitted) — give up and say so, rather than
+		// polling/showing "in progress…" forever (issue #442).
+		row.Status = "completed"
+		row.ReviewState = "timed_out"
+		row.Summary = fmt.Sprintf("Copilot review didn't complete within %s — giving up", timing.FormatDuration(m.copilotMaxWait))
 	case m.copilotPending && !m.copilotReviewComplete:
 		// Pending: either still inside the initial-delay window (queued,
 		// countdown shown in duration column) or actively polling
