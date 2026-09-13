@@ -288,14 +288,14 @@ func NewClient(ctx context.Context) (*github.Client, error) {
     if err != nil {
         return nil, err
     }
-    
+
     ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
     tc := oauth2.NewClient(ctx, ts)
     return github.NewClient(tc), nil
 }
 ```
 
-Uses `google/go-github/v90` library with OAuth2 token authentication.
+Uses `google/go-github/v91` library with OAuth2 token authentication.
 
 ### GraphQL Client Creation (`internal/github/graphql.go`)
 
@@ -460,17 +460,17 @@ type Model struct {
     owner    string
     repo     string
     prNumber int
-    
+
     // PR metadata (populated later)
     prTitle        string
     headSHA        string
     prCreatedAt    time.Time
     headCommitTime time.Time
-    
+
     // Check run data (updated every poll)
     checkRuns []ghclient.CheckRunInfo
     rateLimitRemaining int
-    
+
     // Historical job averages (incrementally updated)
     jobAverages             map[string]time.Duration
     runIDToWorkflowID       map[int64]int64
@@ -483,28 +483,28 @@ type Model struct {
     avgFetchErr             error
     noAvg                   bool
     firstCheckSeenAt        time.Time
-    
+
     // Set when all checks complete; used to defer quit until avgFetchDone
     checksComplete bool
 
     // Premature exit prevention (issue #236)
     expectedCheckCount int
     peakCheckCount     int
-    
+
     // UI state
     spinner         spinner.Model
     startTime       time.Time
     lastUpdate      time.Time
     refreshInterval time.Duration
     styles          Styles
-    
+
     // Exit tracking
     exitCode int
     quitting bool
-    
+
     // Error state
     err error
-    
+
     // Feature flags
     enableLinks bool
 }
@@ -901,7 +901,7 @@ Uses REST API for PR info and commit timestamps:
 ```go
 func FetchPRInfo(ctx context.Context, client *github.Client, owner, repo string, prNumber int) (*PRInfo, error) {
     pr, _, err := client.PullRequests.Get(ctx, owner, repo, prNumber)
-    
+
     return &PRInfo{
         Number:    prNumber,
         Title:     pr.GetTitle(),
@@ -1148,9 +1148,9 @@ Renders the entire UI every frame, including historical averages status and prem
 ```go
 func (m Model) View() tea.View {
     // ... header with PR title and averages status
-    
+
     // ... check run rendering with error boxes
-    
+
     // Premature exit prevention message
     if allChecksComplete(m.checkRuns) && !canTrustCompletion(&m) {
         b.WriteString(m.styles.Queued.Render("  ⏳ Waiting for more checks to appear...\n"))
@@ -1169,7 +1169,7 @@ func (m Model) View() tea.View {
         }
         b.WriteString("\n")
     }
-    
+
     // Rate limit warning
     if m.rateLimitRemaining < minRateLimitForFetch {
         b.WriteString(m.styles.Running.Render(fmt.Sprintf("  [Rate limit: %d remaining]", m.rateLimitRemaining)))
@@ -1554,13 +1554,13 @@ func allChecksComplete(checks []ghclient.CheckRunInfo) bool {
     if len(checks) == 0 {
         return false  // Keep polling if no checks yet
     }
-    
+
     for _, check := range checks {
         if check.Status != "completed" {
             return false
         }
     }
-    
+
     return true
 }
 ```
