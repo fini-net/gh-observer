@@ -260,6 +260,9 @@ func runPRMode(ctx context.Context, token string, parsed runArgs, cfg *config.Co
 	}
 
 	if m, ok := finalModel.(tui.Model); ok {
+		// Alt-screen discards the final frame on exit, so reprint it to the
+		// now-restored normal screen to leave a summary in scrollback (#451).
+		fmt.Print(m.View().Content)
 		return m.ExitCode()
 	}
 
@@ -287,6 +290,9 @@ func runActionsMode(ctx context.Context, token string, parsed runArgs, cfg *conf
 	}
 
 	if m, ok := finalModel.(tui.RunModel); ok {
+		// Alt-screen discards the final frame on exit, so reprint it to the
+		// now-restored normal screen to leave a summary in scrollback (#451).
+		fmt.Print(m.View().Content)
 		return m.ExitCode()
 	}
 
@@ -316,10 +322,18 @@ func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, own
 	}
 
 	// RepoModel.Update can return either a value or pointer RepoModel
-	// (the per-message handlers use pointer receivers), so assert on the
-	// ExitCode method rather than a concrete type to handle both forms.
+	// (the per-message handlers use pointer receivers), so assert on
+	// interfaces rather than a concrete type to handle both forms.
+	type viewer interface {
+		View() tea.View
+	}
 	type exitCoder interface {
 		ExitCode() int
+	}
+	if v, ok := finalModel.(viewer); ok {
+		// Alt-screen discards the final frame on exit, so reprint it to the
+		// now-restored normal screen to leave a summary in scrollback (#451).
+		fmt.Print(v.View().Content)
 	}
 	if ec, ok := finalModel.(exitCoder); ok {
 		return ec.ExitCode()
