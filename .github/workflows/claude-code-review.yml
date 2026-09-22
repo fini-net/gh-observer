@@ -20,14 +20,14 @@ jobs:
       github.event.pull_request.user.login != 'renovate' &&
       github.event.pull_request.user.login != 'dependabot[bot]' &&
       github.event.pull_request.user.login != 'dependabot'
-    
+
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
       issues: read
       id-token: write
-    
+
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -55,12 +55,11 @@ jobs:
             - Performance considerations
             - Security concerns
             - Test coverage
-            
+
             Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
 
             Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
-          
+
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.claude.com/en/docs/claude-code/sdk#command-line for available options
           claude_args: '--allowed-tools "Bash(gh *),Bash(echo *),Bash(cat *),Read,Write"'
-
