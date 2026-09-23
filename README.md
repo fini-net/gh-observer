@@ -1,7 +1,11 @@
 # gh observer
 
+OpenSSF:
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/fini-net/gh-observer/badge)](https://scorecard.dev/viewer/?uri=github.com/fini-net/gh-observer)
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/12633/baseline)](https://www.bestpractices.dev/projects/12633)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12633/badge)](https://www.bestpractices.dev/projects/12633)
+
+GitHub:
 ![GitHub Issues](https://img.shields.io/github/issues/fini-net/gh-observer)
 ![GitHub Pull Requests](https://img.shields.io/github/issues-pr/fini-net/gh-observer)
 ![GitHub License](https://img.shields.io/github/license/fini-net/gh-observer)
