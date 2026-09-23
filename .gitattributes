@@ -96,3 +96,6 @@
 .gitattributes export-ignore
 .gitignore     export-ignore
 .gitkeep       export-ignore
+
+# treat "just" as vendored so it doesn't count toward the source on the github page
+/.just/**  linguist-vendored
