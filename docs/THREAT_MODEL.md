@@ -98,6 +98,33 @@ that the system processes.
 | GitHub GraphQL API responses | Network (TLS) | Yes (MITM / malicious Enterprise) | TLS, `githubv4` typed unmarshaling |
 | Terminal display | N/A (output) | N/A | Lipgloss styling, termenv hyperlinks |
 
+## Secure Design Principles
+
+The design applies the Saltzer-Schroeder principles where each one lands on
+a concrete implementation choice:
+
+- **Least privilege**: the tool requests no OAuth scopes and reads only the
+  ambient `GITHUB_TOKEN` / `gh` CLI token; it runs with the user's normal
+  privileges and installs nothing privileged.
+- **Fail-safe defaults**: unknown check statuses and conclusions render as
+  "?" rather than being treated as success (`GetCheckIcon`,
+  `internal/tui/display.go`); on transient API errors the TUI retains the
+  last good state instead of guessing; snapshot mode exits non-zero only
+  on known failure conclusions, and any error in the snapshot path returns
+  a failing exit code rather than reporting success.
+- **Complete mediation**: every byte from the GitHub API and every CLI
+  argument passes through validated parsing (anchored regexes for PR, run,
+  and repo arguments; typed GraphQL/REST decoding with cross-field checks)
+  before it reaches display logic.
+- **Economy of mechanism**: single binary, no plugins, no network
+  listeners, no eval; the only subprocesses invoked are `gh` (token/auth
+  and PR detection), `git` (remote URL discovery for repo mode), and `jj`
+  (git root discovery in Jujutsu repositories), each with fixed or
+  integer-validated argument lists.
+
+These principles are referenced throughout the critical code paths
+(CP-1 through CP-6) and STRIDE analysis below.
+
 ## Critical Code Paths
 
 These are the code paths where security properties must be preserved. An

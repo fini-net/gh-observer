@@ -111,6 +111,15 @@ in `internal/timing/calculator_test.go`).
 - `gh` - github CLI
 - `bash`
 
+## Coding standards
+
+Go code follows the standard Go conventions: gofmt formatting and the
+style guidance in Effective Go
+(<https://go.dev/doc/effective_go>). Contributions are expected to be
+gofmt-clean; this is enforced automatically by golangci-lint in
+pre-commit and CI, along with a broader linter set. Shell scripts must
+pass shellcheck.
+
 ## Development process
 
 ![dev-process animation](../docs/dev-process.gif)
