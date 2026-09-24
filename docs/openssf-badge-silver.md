@@ -167,48 +167,48 @@ edit):
 
 `test_statement_coverage80` is a MUST with no dodge available — Go has
 FLOSS coverage tooling, and a pure-Go project cannot claim N/A. Current
-numbers from `go test -cover ./...`:
+numbers from `go test -cover ./...` (after the coverage push, 2026-09-24):
 
 | Package | Coverage |
 | --- | --- |
 | `internal/config` | 97.4% |
 | `internal/debug` | 93.6% |
 | `internal/timing` | 97.1% |
-| `internal/github` | 65.9% |
-| `internal/tui` | 54.0% |
-| `main` (root) | 0.0% |
+| `internal/github` | 88.2% |
+| `internal/tui` | 93.1% |
+| `main` (root) | 5.9% |
 
-Statements are not weighted equally across packages, but the TUI layer is
-the bulk of the code, so the honest whole-project number is roughly
-**68%** — well short of 80%. Treat this as **the** blocker for silver:
+Statements are not weighted equally across packages; the whole-project
+number via a merged coverage profile (`go test -coverprofile` across all
+packages, then `go tool cover -func`) is **83.3%** — above the required
+80%. The remaining gap is concentrated in the deliberately-untested
+seams: live TUI program runs, `gh`-CLI subprocess wrappers
+(`GetCurrentPRWithRepo`, `GetCurrentRepo`), and the thin GraphQL client
+constructors whose injectable cores are already covered.
 
-until coverage genuinely clears 80%, this criterion is Unmet, and a MUST
-Unmet means no silver badge.
+The work that closed the gate landed as table-driven tests:
 
-The gap is concentrated and very testable — these are deterministic
-pure-ish functions, not live API calls:
-
-- `internal/tui/repoview.go` — nearly the entire repo-mode render path is
-  at 0%: `renderPRGroup`, `renderRepoCheckRun`, `renderStandaloneRunsSection`,
-  `renderBranchGroup`, `renderBranchRunHeader`, `renderBranchRunJob`,
-  `styleForCheck`, `formatBranchRunDuration`, `formatBranchJobName(Truncate)`,
-  `formatBranchJobDuration`, `calculateBranchRunColumnWidths`,
-  `groupBranchRunsByBranch`, `sortedBranchNames`. All take model state and
-  return strings — table-driven tests, no mocks needed.
-- `internal/tui/runupdate.go` — `handleRunJobsUpdate`,
-  `handleRunWorkflowsDiscovered`, `handleRunJobAveragesPartial` at 0%;
-  construct messages, feed them through `Update`, assert on model state.
-- `internal/tui/model.go:NewModel/ExitCode`, `repomodel.go:ExitCode`,
-  `runmodel.go:NewRunModel/ExitCode` — constructors and exit-code
-  calculation, trivial wins.
-- `internal/github` live-network functions at 0% (`FetchPRInfo`,
-  `FetchRunJobs`, `FetchCheckRunsGraphQL`, etc.) — these hit real
-  endpoints; cover via the existing parse/decode test pattern (feed
-  recorded JSON) rather than live calls. `WorkflowJobInfoToCheckRuns`
-  (`runs.go:276`) is pure translation logic — the cheapest big win in
-  the package.
-- `main` at 0% — thin Cobra wiring; low statement count, but if the
-  numbers are tight after the TUI work, `parseArgs` table tests close it.
+- `internal/tui/repoview_test.go` — the repo-mode render path
+  (`renderPRGroup`, `renderRepoCheckRun`, branch-run rendering, column
+  width calculation, fade/grouping helpers) plus repo-mode `View`
+  branches (rate-limit tiers, fetch-error status lines, quit hint).
+- `internal/tui/runview_test.go` — run-mode formatting/sorting/column
+  helpers (`FormatRunJobName(WithTruncate)`, `FormatRunJobDuration`,
+  `SortRunJobs`, `CalculateRunColumnWidths`, ...) and every `View`
+  branch (pushed/created headers, averages indicators, rate-limit tiers).
+- `internal/tui/runupdate_test.go` — all three run-mode handlers driven
+  through `Update` (discovery dispatch, deferred quit, averages merge,
+  error paths) plus `runJobKey`/`hasNewRunJobs`/`markRunJobsSeen`.
+- `internal/tui/model_test.go`, `repoupdate_dispatch_test.go` —
+  constructors, `ExitCode`s, `renderErrorBox`, `FormatLink`,
+  repo-mode `Update` dispatch (keys, ticks, backoff, spinner).
+- `internal/github/client_test.go` — `WorkflowJobInfoToCheckRuns`,
+  `FailureConclusion`, `GetToken`/`safeGraphQLInt`, `IsJujutsu`, and
+  httptest-backed coverage for `FetchPRInfo`, `FetchCheckRuns`,
+  `FetchRunInfo`, `FetchRunJobs`, `FetchJobAverages` (including cache-hit
+  and already-fetched paths), and `EnrichRepoRunsWithJobs`.
+- `main_test.go` — `parseArgs` URL-form dispatch and
+  `resolveRepoArg` explicit-value parsing.
 
 The other two test criteria in Quality (`regression_tests_added50`,
 `test_policy_mandated`) do not depend on the coverage number and can be
@@ -263,7 +263,7 @@ top of this doc.
 | 22 | `build_preserve_debug` (SHOULD) | N/A | `go build` embeds DWARF debug info in the binary by default; the project never strips it (`no -ldflags "-s -w"` in build or release recipes). | `blob/main/justfile` |
 | 23 | `build_non_recursive` (MUST NOT) | Met | The Go build system is package-based with accurate, compiler-verified dependency information; there is no recursive make-style directory walking. | `blob/main/go.mod` |
 | 24 | `build_repeatable` (MUST) | **Unmet, with justification** | Releases are not bit-for-bit reproducible: the release workflow builds with default settings and Go embeds build metadata (module version, VCS info) in binaries, and different build platforms produce different binaries. Achieving verified reproducible builds (e.g. `-trimpath`, hermetic toolchains) is a known gap; SLSA provenance provides an audit trail for the official builds in the meantime. | (none) |
-| 24b | `test_statement_coverage80` (MUST) | **Unmet — see the coverage gate** | The honest current statement coverage is roughly 68% (`go test -cover ./...`), below the required 80%. This is the active blocker; the work plan above targets the repo-mode render path and run-mode update handlers first. | (none) |
+| 24b | `test_statement_coverage80` (MUST) | **Met** | Whole-project statement coverage is 83.3% (merged `go test -coverprofile` across all packages; per-package: tui 93.1%, github 88.2%, timing 97.1%, config 97.4%, debug 93.6%), above the required 80%. The TUI render paths, run-mode handlers, and REST/GraphQL decode logic are covered by deterministic table-driven and httptest-backed unit tests. | `blob/main/README.md` |
 | 25 | `installation_common` (MUST) | Met | Installation and uninstallation use common conventions: `gh extension install/uninstall` (the gh CLI's package mechanism), `go install` for Go users, and precompiled release binaries for manual installation. | `blob/main/README.md` |
 | 26 | `installation_standard_variables` (MUST) | N/A | Installation is via the gh extension mechanism or `go install`, both of which honor GOBIN/GOPATH conventions for install location; the project performs no custom file installation that would need DESTDIR. | (none) |
 | 27 | `installation_development_quick` (MUST) | Met | A developer gets the full environment with standard commands: `git clone`, `go mod download` (or just `go build` — modules fetch automatically), `just build`, `go test ./...` — all documented in CONTRIBUTING.md's development process and the README. | `blob/main/.github/CONTRIBUTING.md` |
