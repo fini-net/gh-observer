@@ -174,10 +174,9 @@ self-certified, so honesty is the whole product:
 
 Two small repo blemishes that touch criteria in this form:
 
-- **Broken support link.** `README.md` line 531 links to `.github/SUPPORT.md`,
-  which does not exist. Either create the file (issues + security policy +
-  email is a fine 10-line doc) or repoint the link at the issue tracker. This
-  backs up criterion 2 (`interact`), so it is worth 15 minutes.
+- ~~**Broken support link.**~~ Resolved: `.github/SUPPORT.md` was added in
+  PR #476, so the `README.md` "Getting Support" link is now valid. This
+  backs up criterion 2 (`interact`).
 - **The zizmor claim.** CLAUDE.md says CI runs zizmor, and the repo carries
   `.github/zizmor.yml` plus inline `# zizmor: ignore` annotations — but no
   workflow in this repo actually *runs* zizmor. Either add a zizmor step to

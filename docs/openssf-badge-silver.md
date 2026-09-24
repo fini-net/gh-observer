@@ -1,6 +1,6 @@
 # Filling Out the OpenSSF Best Practices Silver Badge
 
-This is the silver-tier companion to [the passing-badge guide](openssf-badge.md)
+This is the silver-tier companion to [the passing-badge guide](openssf-badge-passing.md)
 — same copy-paste format, aimed at
 [bestpractices.dev/projects/12633](https://www.bestpractices.dev/projects/12633).
 The passing badge was achieved (2026-09-23), which satisfies the
@@ -42,7 +42,7 @@ answer, not a dodge.
 
 ## Create these artifacts first
 
-The form requires URLs for real, public files. These five items are
+The form requires URLs for real, public files. These four items are
 prerequisites — the tables below assume they exist.
 
 ### 1. `GOVERNANCE.md` (covers `governance` + `roles_responsibilities`)
@@ -162,14 +162,6 @@ edit):
   listeners; the only subprocess invoked is `gh` for token/auth
   delegation.
 ```
-
-### 5. Fix the broken support link (covers `documentation_current`)
-
-`README.md` line 531 links to `.github/SUPPORT.md`, which does not exist.
-`documentation_current` says known documentation defects MUST be fixed —
-so create it (a 10-line doc pointing at issues, SECURITY.md, and email)
-or repoint the link at the issue tracker. While you are in there, skim
-the README for anything else that has drifted from current behavior.
 
 ## The coverage gate (read before answering Quality)
 
@@ -346,9 +338,9 @@ stays a **TODO**.
   PRs: did the PR add/extend a test or fuzz seed? If yes for half or
   more, answer Met; if a quick audit says otherwise, answer honestly and
   cite the audit.
-- **11 `documentation_current`** — after fixing the SUPPORT.md link,
-  do one full README read-through for drift (flags, output examples,
-  config keys). Fix anything stale before answering.
+- **11 `documentation_current`** — do one full README read-through
+  for drift (flags, output examples, config keys). Fix anything stale
+  before answering.
 - **5 `access_continuity`** — see the TODO section above.
 - **Coverage number freshness** — re-run `go test -cover ./...` before
   answering `test_statement_coverage80`; if you've been landing tests,
