@@ -54,20 +54,7 @@ func TestFindDotJJNotFound(t *testing.T) {
 }
 
 func TestSetGITDirForJJNoJJ(t *testing.T) {
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
-	tmpDir := t.TempDir()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("chdir to temp dir: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(origDir); err != nil {
-			t.Logf("restore cwd: %v", err)
-		}
-	})
-
+	t.Chdir(t.TempDir())
 	resetJJDetection()
 
 	cmd := exec.Command("echo", "test")
@@ -85,20 +72,7 @@ func TestSetGITDirForJJNoJJ(t *testing.T) {
 }
 
 func TestSetGITDirForJJReplacesExistingGITDir(t *testing.T) {
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
-	tmpDir := t.TempDir()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("chdir to temp dir: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(origDir); err != nil {
-			t.Logf("restore cwd: %v", err)
-		}
-	})
-
+	t.Chdir(t.TempDir())
 	resetJJDetection()
 
 	jjOnce.Do(func() {

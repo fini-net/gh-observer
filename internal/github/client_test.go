@@ -671,35 +671,21 @@ func TestEnrichRepoRunsJobsFailureNonFatal(t *testing.T) {
 }
 
 func TestIsJujutsu(t *testing.T) {
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
 	// Run from this repo's root — a plain git repo without .jj.
 	resetJJDetection()
 	if IsJujutsu() {
 		t.Error("IsJujutsu() in a plain git repo should be false")
 	}
-	_ = origDir
 	resetJJDetection()
 }
 
 func TestIsJujutsuWithJJRepo(t *testing.T) {
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
 	tmpDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(tmpDir, ".jj"), 0o755); err != nil {
 		t.Fatalf("mkdir .jj: %v", err)
 	}
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(origDir)
-		resetJJDetection()
-	})
+	t.Chdir(tmpDir)
+	t.Cleanup(resetJJDetection)
 	resetJJDetection()
 
 	// `jj git root` fails (jj binary may not exist), so detection reports
@@ -714,17 +700,7 @@ func TestIsJujutsuWithJJRepo(t *testing.T) {
 }
 
 func TestFindJJGitRootFailsWithoutJJ(t *testing.T) {
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
-	tmpDir := t.TempDir()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(origDir)
-	})
+	t.Chdir(t.TempDir())
 
 	_, found, err := findJJGitRoot()
 	if err != nil {
@@ -736,20 +712,11 @@ func TestFindJJGitRootFailsWithoutJJ(t *testing.T) {
 }
 
 func TestFindJJGitRootEmptyGitRoot(t *testing.T) {
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
 	tmpDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(tmpDir, ".jj"), 0o755); err != nil {
 		t.Fatalf("mkdir .jj: %v", err)
 	}
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(origDir)
-	})
+	t.Chdir(tmpDir)
 
 	// jj on PATH? If not, the command fails and errors. Either way the
 	// function must return an error or found=false with an empty root.

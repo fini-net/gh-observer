@@ -37,7 +37,7 @@ func TestParseArgsInvalidArgument(t *testing.T) {
 	}
 }
 
-func TestParseArgsTooManyArguments(t *testing.T) {
+func TestParseArgsSingleArgContract(t *testing.T) {
 	// parseArgs only inspects args[0]; cobra's MaximumNArgs(1) handles the
 	// count at the CLI layer, so a single-element slice is the contract.
 	// Here we verify the first element still parses when called directly.
