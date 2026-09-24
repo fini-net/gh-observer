@@ -40,23 +40,24 @@ Pre-commit hooks via `.pre-commit-config.yaml`: `golangci-lint`, `shellcheck`, `
 
 gh-observer follows a clean architecture with distinct layers:
 
-1. **`main.go`** - Cobra CLI, config loading, mode selection. `parseArgs()` detects PR number, PR URL, or Actions run URL → sets `runMode` enum (`modePR` or `modeRun`)
+1. **`main.go`** - Cobra CLI, config loading, mode selection. `--repo` is validated and dispatched to `runRepoMode()` before argument parsing; otherwise `parseArgs()` detects PR number, PR URL, or Actions run URL → sets `runMode` enum (`modePR`, `modeRun`, or `modeRepo`)
 2. **`internal/github/`** - GitHub API (REST + GraphQL). Covers checks, PRs, runs, repos, GraphQL queries, and history fetching
-3. **`internal/tui/`** - Bubbletea TUI (Elm Architecture). PR mode: `model.go`/`update.go`/`view.go`. Run mode: `runmodel.go`/`runupdate.go`/`runview.go`. Shared: `display.go`, `styles.go`, `messages.go`, `constants.go`
+3. **`internal/tui/`** - Bubbletea TUI (Elm Architecture). PR mode: `model.go`/`update.go`/`view.go`. Run mode: `runmodel.go`/`runupdate.go`/`runview.go`. Repo mode: `repomodel.go`/`repoupdate.go`/`repoview.go`. Shared: `display.go`, `styles.go`, `messages.go`, `constants.go`
 4. **`internal/config/`** - Viper config from `~/.config/gh-observer/config.yaml`; see `.config.example.yaml`
 5. **`internal/timing/`** - Queue latency, runtime, and duration calculations
 6. **`internal/debug/`** - `slog`-based debug logging to `os.TempDir()/gh-observer-debug/` (enabled via `--debug`/`-d`)
 
-### Two orthogonal execution modes
+### Execution modes
 
-**Input type** (from `parseArgs()`):
+**Input type**:
 
-- **PR mode** - Watches checks on a PR; accepts PR number, PR URL, or auto-detects from current branch
-- **Run mode** - Watches jobs in a standalone Actions run URL. No queue latency column (run-mode rows have no commit push event to reference). The "Pushed Xs ago" header uses `RunInfo.HeadPushedTime`, sourced from a GraphQL `Repository.object(oid:) ... on Commit` `pushedDate` lookup (with `committedDate` and REST `head_commit.timestamp` fallbacks) — see issue #349.
+- **PR mode** (from `parseArgs()`) - Watches checks on a PR; accepts PR number, PR URL, or auto-detects from current branch
+- **Run mode** (from `parseArgs()`) - Watches jobs in a standalone Actions run URL. No queue latency column (run-mode rows have no commit push event to reference). The "Pushed Xs ago" header uses `RunInfo.HeadPushedTime`, sourced from a GraphQL `Repository.object(oid:) ... on Commit` `pushedDate` lookup (with `committedDate` and REST `head_commit.timestamp` fallbacks) — see issue #349.
+- **Repo mode** (from `--repo` flag, dispatched before `parseArgs()`) - Persistent dashboard watching all active PRs' checks plus standalone branch runs; completed checks fade out after `fade_success`/`fade_failure`. Never auto-quits (only `q`/`ctrl+c`); `ExitCode()` always returns 0. Interactive-only (no snapshot). Polls on its own `repo_refresh_interval` (default 30s).
 
 **Output type** (from `term.IsTerminal(os.Stdout.Fd())`):
 
-- **Interactive** (terminal) - Bubbletea TUI, live updates, auto-quits when all checks complete
+- **Interactive** (terminal) - Bubbletea TUI, live updates, auto-quits when all checks complete (repo mode is the exception: persistent)
 - **Snapshot** (piped/CI) - Single-shot plain text output, exits with check status code
 
 ### TUI message flow
