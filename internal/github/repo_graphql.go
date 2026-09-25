@@ -7,7 +7,6 @@ import (
 
 	"github.com/fini-net/gh-observer/internal/debug"
 	"github.com/shurcooL/githubv4"
-	"golang.org/x/oauth2"
 )
 
 // maxPRsPerQuery caps the number of open PRs fetched per repo query.
@@ -119,10 +118,9 @@ type repoPRQuery struct {
 // GitHub's GraphQL query cost limit on high-traffic repos. Repo mode never
 // renders inline error annotations (only single-PR mode does), so CheckRunInfo
 // entries from this path have an empty Annotations slice.
-func FetchRepoCheckRunsGraphQL(ctx context.Context, token, owner, repo string) (map[int]PRCheckData, int, error) {
-	src := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	httpClient := oauth2.NewClient(ctx, src)
-	client := githubv4.NewClient(httpClient)
+func FetchRepoCheckRunsGraphQL(ctx context.Context, token, host, owner, repo string) (map[int]PRCheckData, int, error) {
+	httpClient := newAuthenticatedHTTPClient(ctx, token)
+	client := newGraphQLClient(host, httpClient)
 	return fetchRepoCheckRunsGraphQL(ctx, client, owner, repo)
 }
 

@@ -8,7 +8,6 @@ import (
 
 	"github.com/fini-net/gh-observer/internal/debug"
 	"github.com/shurcooL/githubv4"
-	"golang.org/x/oauth2"
 )
 
 type BigInt int64
@@ -238,10 +237,11 @@ func contextNodesToCheckRuns(nodes []contextNode) []CheckRunInfo {
 // (possibly stale) commit time. The push time is populated from the first
 // page only; if the PR has no commits or the first page errors, the zero
 // value is returned and callers must fall back.
-func FetchCheckRunsGraphQL(ctx context.Context, token, owner, repo string, prNumber int) ([]CheckRunInfo, time.Time, int, error) {
-	src := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	httpClient := oauth2.NewClient(ctx, src)
-	client := githubv4.NewClient(httpClient)
+// The host selects the GraphQL endpoint: "" or github.com uses the public
+// endpoint; any other host uses the derived enterprise endpoint.
+func FetchCheckRunsGraphQL(ctx context.Context, token, host, owner, repo string, prNumber int) ([]CheckRunInfo, time.Time, int, error) {
+	httpClient := newAuthenticatedHTTPClient(ctx, token)
+	client := newGraphQLClient(host, httpClient)
 	return fetchCheckRunsGraphQL(ctx, client, owner, repo, prNumber)
 }
 

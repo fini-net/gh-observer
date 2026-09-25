@@ -358,6 +358,7 @@ func makeRepoModelForRender() RepoModel {
 	m := NewRepoModel(
 		context.Background(),
 		"test-token",
+		"github.com",
 		"owner",
 		"repo",
 		30*time.Second,

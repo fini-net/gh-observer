@@ -42,7 +42,7 @@ const repoFlagAutoSentinel = "_"
 func init() {
 	rootCmd.Flags().BoolVarP(&quickFlag, "quick", "q", false, "Skip fetching historical average runtimes")
 	rootCmd.Flags().BoolVarP(&debugFlag, "debug", "d", false, "Log suppressed errors and internal state to a file")
-	rootCmd.Flags().StringVar(&repoFlag, "repo", "", "Watch all active workflows on a repo persistently (owner/repo or URL; bare --repo auto-detects from current git remote)")
+	rootCmd.Flags().StringVar(&repoFlag, "repo", "", "Watch all active workflows on a repo persistently (owner/repo, host/owner/repo, or URL; bare --repo auto-detects from current git remote)")
 	// Allow `--repo` with no value: pflag fills repoFlag with this sentinel
 	// so resolveRepoArg can distinguish "no value given (auto-detect)" from
 	// "value given explicitly". The sentinel must be not parseable as
@@ -65,10 +65,20 @@ Supports watching checks on external repositories by passing a full PR URL:
 Also supports watching GitHub Actions runs by passing a run URL:
   gh observer https://github.com/owner/repo/actions/runs/123456789
 
+GitHub Enterprise URLs work with any hostname (issue #479). Authenticate first
+with 'gh auth login --hostname <host>' or set GH_ENTERPRISE_TOKEN:
+  gh observer https://github.example.com/owner/repo/pull/123
+  gh observer https://github.example.com/owner/repo/actions/runs/123456789
+
 Use --repo to persistently watch all active workflows on a repository:
   gh observer --repo              # auto-detect from current git remote
   gh observer --repo owner/repo
+  gh observer --repo host/owner/repo
   gh observer --repo https://github.com/owner/repo
+  gh observer --repo https://github.example.com/owner/repo
+
+Hosts without an explicit URL or remote are resolved from GH_HOST (like the
+gh CLI), defaulting to github.com.
 
 If installed via go install rather than as a gh extension, replace
 "gh observer" with "gh-observer" in the examples above.`,
@@ -91,6 +101,7 @@ const (
 // runArgs holds the parsed arguments for either mode.
 type runArgs struct {
 	mode     runMode
+	host     string
 	owner    string
 	repo     string
 	prNumber int
@@ -153,12 +164,21 @@ func run(cmd *cobra.Command, args []string) int {
 
 	// Handle repo mode up front: it has its own arg resolution and entry point.
 	if repoMode {
-		owner, repo, err := resolveRepoArg(repoFlag)
+		host, owner, repo, err := resolveRepoArg(repoFlag)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%v\n", err)
 			return 1
 		}
-		return runRepoMode(ctx, cfg, styles, owner, repo)
+		if host == "" {
+			host = ghclient.DefaultHost()
+		}
+		// Early token check: fail fast on hosts without credentials (e.g.
+		// a typo'd enterprise hostname) instead of failing mid-poll.
+		if _, err := ghclient.GetTokenForHost(host); err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			return 1
+		}
+		return runRepoMode(ctx, cfg, styles, host, owner, repo)
 	}
 
 	// Parse arguments
@@ -168,8 +188,10 @@ func run(cmd *cobra.Command, args []string) int {
 		return 1
 	}
 
-	// Get GitHub token
-	token, err := ghclient.GetToken()
+	// Get GitHub token for the resolved host. This also serves as an early
+	// check: a host we can't authenticate against (typo'd enterprise
+	// hostname, host without credentials) fails fast before the TUI starts.
+	token, err := ghclient.GetTokenForHost(parsed.host)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get GitHub token: %v\n", err)
 		return 1
@@ -186,54 +208,56 @@ func run(cmd *cobra.Command, args []string) int {
 	}
 }
 
-// resolveRepoArg resolves the owner/repo from the --repo flag value.
-// If the value is empty or the auto-detect sentinel (passed by pflag when
-// --repo is given with no value), it auto-detects the current repo from the
-// git remote. Otherwise it parses the value as owner/repo or a GitHub URL.
-func resolveRepoArg(val string) (string, string, error) {
+// resolveRepoArg resolves the host, owner, and repo from the --repo flag
+// value. If the value is empty or the auto-detect sentinel (passed by pflag
+// when --repo is given with no value), it auto-detects the current repo from
+// the git remote. Otherwise it parses the value as owner/repo,
+// host/owner/repo, or a GitHub URL. The returned host is empty when the
+// argument carried no host; the caller fills it from DefaultHost().
+func resolveRepoArg(val string) (string, string, string, error) {
 	if val != "" && val != repoFlagAutoSentinel {
 		return ghclient.ParseRepoArg(val)
 	}
-	owner, repo, err := ghclient.GetCurrentRepo()
+	host, owner, repo, err := ghclient.GetCurrentRepo()
 	if err != nil {
-		return "", "", fmt.Errorf("failed to detect current repo: %v\nUse --repo owner/repo to specify explicitly", err)
+		return "", "", "", fmt.Errorf("failed to detect current repo: %v\nUse --repo owner/repo to specify explicitly", err)
 	}
-	return owner, repo, nil
+	return host, owner, repo, nil
 }
 
 // parseArgs determines whether the argument is a PR number, PR URL, or Actions run URL.
 func parseArgs(args []string) (runArgs, error) {
 	if len(args) == 0 {
 		// Auto-detect PR from current branch
-		prNumber, owner, repo, err := ghclient.GetCurrentPRWithRepo()
+		prNumber, owner, repo, host, err := ghclient.GetCurrentPRWithRepo()
 		if err != nil {
 			if ghclient.IsJujutsu() {
 				return runArgs{}, fmt.Errorf("failed to detect PR in jj (Jujutsu) repo: %v\n\nHint: In a jj repo, you may need to:\n  1. Pass an explicit PR number: gh observer 123\n  2. Pass a PR URL: gh observer https://github.com/owner/repo/pull/123\n  3. Enable colocated mode: jj git colocation enable", err)
 			}
 			return runArgs{}, fmt.Errorf("failed to detect PR: %v\nMake sure you're on a PR branch or provide a PR number or URL", err)
 		}
-		return runArgs{mode: modePR, owner: owner, repo: repo, prNumber: prNumber}, nil
+		return runArgs{mode: modePR, host: host, owner: owner, repo: repo, prNumber: prNumber}, nil
 	}
 
 	arg := args[0]
 
 	// Try PR URL first
-	if owner, repo, prNumber, err := ghclient.ParsePRURL(arg); err == nil {
-		return runArgs{mode: modePR, owner: owner, repo: repo, prNumber: prNumber}, nil
+	if host, owner, repo, prNumber, err := ghclient.ParsePRURL(arg); err == nil {
+		return runArgs{mode: modePR, host: host, owner: owner, repo: repo, prNumber: prNumber}, nil
 	}
 
 	// Try Actions run URL
-	if owner, repo, runID, err := ghclient.ParseActionsRunURL(arg); err == nil {
-		return runArgs{mode: modeRun, owner: owner, repo: repo, runID: runID}, nil
+	if host, owner, repo, runID, err := ghclient.ParseActionsRunURL(arg); err == nil {
+		return runArgs{mode: modeRun, host: host, owner: owner, repo: repo, runID: runID}, nil
 	}
 
 	// Try numeric PR number
 	if n, convErr := strconv.Atoi(arg); convErr == nil {
-		prNumber, owner, repo, err := ghclient.GetPRWithRepo(n)
+		prNumber, owner, repo, host, err := ghclient.GetPRWithRepo(n)
 		if err != nil {
 			return runArgs{}, fmt.Errorf("failed to get PR #%d: %v", n, err)
 		}
-		return runArgs{mode: modePR, owner: owner, repo: repo, prNumber: prNumber}, nil
+		return runArgs{mode: modePR, host: host, owner: owner, repo: repo, prNumber: prNumber}, nil
 	}
 
 	return runArgs{}, fmt.Errorf("invalid PR number, PR URL, or Actions run URL: %s", arg)
@@ -241,15 +265,15 @@ func parseArgs(args []string) (runArgs, error) {
 
 // runPRMode handles watching a PR's checks.
 func runPRMode(ctx context.Context, token string, parsed runArgs, cfg *config.Config, styles tui.Styles) int {
-	owner, repo, prNumber := parsed.owner, parsed.repo, parsed.prNumber
+	host, owner, repo, prNumber := parsed.host, parsed.owner, parsed.repo, parsed.prNumber
 
 	// Check if running in a terminal
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		return runSnapshot(ctx, token, owner, repo, prNumber, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations(), cfg.WaitForCopilot)
+		return runSnapshot(ctx, token, host, owner, repo, prNumber, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations(), cfg.WaitForCopilot)
 	}
 
 	// Create model
-	model := tui.NewModel(ctx, token, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations(), cfg.WaitForCopilot, cfg.CopilotMaxWait, cfg.CopilotPollInterval, cfg.CopilotInitialDelay)
+	model := tui.NewModel(ctx, token, host, owner, repo, prNumber, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations(), cfg.WaitForCopilot, cfg.CopilotMaxWait, cfg.CopilotPollInterval, cfg.CopilotInitialDelay)
 
 	// Run TUI
 	p := tea.NewProgram(model)
@@ -269,15 +293,15 @@ func runPRMode(ctx context.Context, token string, parsed runArgs, cfg *config.Co
 
 // runActionsMode handles watching an Actions workflow run.
 func runActionsMode(ctx context.Context, token string, parsed runArgs, cfg *config.Config, styles tui.Styles) int {
-	owner, repo, runID := parsed.owner, parsed.repo, parsed.runID
+	host, owner, repo, runID := parsed.host, parsed.owner, parsed.repo, parsed.runID
 
 	// Check if running in a terminal
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		return runRunSnapshot(ctx, owner, repo, runID, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations())
+		return runRunSnapshot(ctx, token, host, owner, repo, runID, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations())
 	}
 
 	// Create run model
-	model := tui.NewRunModel(ctx, token, owner, repo, runID, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations())
+	model := tui.NewRunModel(ctx, token, host, owner, repo, runID, cfg.RefreshInterval, styles, cfg.EnableLinks, quickFlag, cfg.PresumedAveragesDurations())
 
 	// Run TUI
 	p := tea.NewProgram(model)
@@ -297,15 +321,15 @@ func runActionsMode(ctx context.Context, token string, parsed runArgs, cfg *conf
 
 // runRepoMode handles persistent watching of all active workflows on a repo.
 // It is always interactive (snapshot mode is rejected earlier in run()).
-func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, owner, repo string) int {
-	token, err := ghclient.GetToken()
+func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, host, owner, repo string) int {
+	token, err := ghclient.GetTokenForHost(host)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get GitHub token: %v\n", err)
 		return 1
 	}
 
 	model := tui.NewRepoModel(
-		ctx, token, owner, repo,
+		ctx, token, host, owner, repo,
 		cfg.RepoRefreshInterval, styles, cfg.EnableLinks,
 		cfg.FadeSuccess, cfg.FadeFailure,
 	)
@@ -342,8 +366,8 @@ func printFinalFrame(finalModel tea.Model) {
 }
 
 // runSnapshot prints a one-time snapshot of PR check status (non-interactive mode)
-func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, enableLinks bool, quick bool, presumedAverages map[string]time.Duration, waitForCopilot bool) int {
-	client, err := ghclient.NewClient(ctx)
+func runSnapshot(ctx context.Context, token, host, owner, repo string, prNumber int, enableLinks bool, quick bool, presumedAverages map[string]time.Duration, waitForCopilot bool) int {
+	client, err := ghclient.NewClientFromToken(token, host)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create GitHub client: %v\n", err)
 		return 1
@@ -355,7 +379,7 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 		return 1
 	}
 
-	checkRuns, headPushedTime, _, err := ghclient.FetchCheckRunsGraphQL(ctx, token, owner, repo, prNumber)
+	checkRuns, headPushedTime, _, err := ghclient.FetchCheckRunsGraphQL(ctx, token, host, owner, repo, prNumber)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to fetch check runs: %v\n", err)
 		return 1
@@ -376,12 +400,9 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 
 	var jobAverages map[string]time.Duration
 	if !quick {
-		client, err := ghclient.NewClient(ctx)
+		avgs, _, _, err := ghclient.FetchJobAverages(ctx, client, owner, repo, checkRuns, nil, nil)
 		if err == nil {
-			avgs, _, _, err := ghclient.FetchJobAverages(ctx, client, owner, repo, checkRuns, nil, nil)
-			if err == nil {
-				jobAverages = avgs
-			}
+			jobAverages = avgs
 		}
 	}
 
@@ -416,7 +437,7 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 
 	// Copilot review snapshot (issue #409)
 	if waitForCopilot {
-		review, _, copilotErr := ghclient.FetchCopilotReview(ctx, token, owner, repo, prNumber, prInfo.HeadSHA)
+		review, _, copilotErr := ghclient.FetchCopilotReview(ctx, token, host, owner, repo, prNumber, prInfo.HeadSHA)
 		if copilotErr != nil {
 			fmt.Printf("Copilot: unavailable (%v)\n", copilotErr)
 		} else if review.NotRequested && !review.Stale {
@@ -437,19 +458,14 @@ func runSnapshot(ctx context.Context, token, owner, repo string, prNumber int, e
 }
 
 // runRunSnapshot prints a one-time snapshot of Actions run status (non-interactive mode)
-func runRunSnapshot(ctx context.Context, owner, repo string, runID int64, enableLinks bool, quick bool, presumedAverages map[string]time.Duration) int {
-	token, err := ghclient.GetToken()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to get GitHub token: %v\n", err)
-		return 1
-	}
-	client, err := ghclient.NewClientFromToken(token)
+func runRunSnapshot(ctx context.Context, token, host, owner, repo string, runID int64, enableLinks bool, quick bool, presumedAverages map[string]time.Duration) int {
+	client, err := ghclient.NewClientFromToken(token, host)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create GitHub client: %v\n", err)
 		return 1
 	}
 
-	runInfo, _, err := ghclient.FetchRunInfo(ctx, client, token, owner, repo, runID)
+	runInfo, _, err := ghclient.FetchRunInfo(ctx, client, token, host, owner, repo, runID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to fetch run info: %v\n", err)
 		return 1

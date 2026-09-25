@@ -64,7 +64,7 @@ func canTrustCompletion(m *Model) bool {
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
-		fetchPRInfo(m.ctx, m.token, m.owner, m.repo, m.prNumber),
+		fetchPRInfo(m.ctx, m.token, m.host, m.owner, m.repo, m.prNumber),
 		tick(m.refreshInterval),
 	)
 }
@@ -95,7 +95,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		cmds := []tea.Cmd{
-			fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber),
+			fetchCheckRuns(m.ctx, m.token, m.host, m.owner, m.repo, m.prNumber),
 			tick(m.refreshInterval),
 		}
 
@@ -123,7 +123,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rateLimitRemaining >= minRateLimitForFetch &&
 			!m.copilotPollStartTime.IsZero() && time.Now().After(m.copilotPollStartTime) &&
 			(m.copilotLastPoll.IsZero() || time.Since(m.copilotLastPoll) >= m.copilotPollInterval) {
-			cmds = append(cmds, fetchCopilotReview(m.ctx, m.token, m.owner, m.repo, m.prNumber, m.headSHA))
+			cmds = append(cmds, fetchCopilotReview(m.ctx, m.token, m.host, m.owner, m.repo, m.prNumber, m.headSHA))
 		}
 
 		return m, tea.Batch(cmds...)
@@ -142,7 +142,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prCreatedAt = msg.CreatedAt
 
 		cmds := []tea.Cmd{
-			fetchCheckRuns(m.ctx, m.token, m.owner, m.repo, m.prNumber),
+			fetchCheckRuns(m.ctx, m.token, m.host, m.owner, m.repo, m.prNumber),
 		}
 
 		// Start Copilot review polling once headSHA is known (issue #409).
@@ -212,7 +212,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.dispatchedWorkflowFetch[wfID] {
 					m.pendingWorkflowFetch[wfID] = true
 					m.dispatchedWorkflowFetch[wfID] = true
-					workflowCmds = append(workflowCmds, fetchWorkflowHistory(m.ctx, m.owner, m.repo, wfID))
+					workflowCmds = append(workflowCmds, fetchWorkflowHistory(m.ctx, m.token, m.host, m.owner, m.repo, wfID))
 				}
 			}
 			// Also discover AdvSec workflows by name matching
@@ -232,7 +232,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.dispatchedWorkflowFetch[wfID] {
 					m.pendingWorkflowFetch[wfID] = true
 					m.dispatchedWorkflowFetch[wfID] = true
-					workflowCmds = append(workflowCmds, fetchWorkflowHistory(m.ctx, m.owner, m.repo, wfID))
+					workflowCmds = append(workflowCmds, fetchWorkflowHistory(m.ctx, m.token, m.host, m.owner, m.repo, wfID))
 				}
 			}
 			// If no new fetches, discovery phase is complete
@@ -402,7 +402,7 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	if reDiscover {
 		m.avgFetchPending = true
 		m.avgFetchStartTime = time.Now()
-		cmds = append(cmds, discoverWorkflows(m.ctx, m.owner, m.repo, msg.CheckRuns, m.runIDToWorkflowID, m.fetchedWorkflowIDs))
+		cmds = append(cmds, discoverWorkflows(m.ctx, m.token, m.host, m.owner, m.repo, msg.CheckRuns, m.runIDToWorkflowID, m.fetchedWorkflowIDs))
 	}
 
 	if readyForHistory && !m.avgFetchPending && m.rateLimitRemaining >= minRateLimitForFetch {
@@ -448,7 +448,7 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 				if !m.dispatchedWorkflowFetch[wfID] {
 					m.pendingWorkflowFetch[wfID] = true
 					m.dispatchedWorkflowFetch[wfID] = true
-					cmds = append(cmds, fetchWorkflowHistory(m.ctx, m.owner, m.repo, wfID))
+					cmds = append(cmds, fetchWorkflowHistory(m.ctx, m.token, m.host, m.owner, m.repo, wfID))
 				}
 			}
 		}
@@ -456,7 +456,7 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 		if needsDiscovery {
 			m.avgFetchPending = true
 			m.avgFetchStartTime = time.Now()
-			cmds = append(cmds, discoverWorkflows(m.ctx, m.owner, m.repo, msg.CheckRuns, m.runIDToWorkflowID, m.fetchedWorkflowIDs))
+			cmds = append(cmds, discoverWorkflows(m.ctx, m.token, m.host, m.owner, m.repo, msg.CheckRuns, m.runIDToWorkflowID, m.fetchedWorkflowIDs))
 		}
 	}
 
@@ -575,10 +575,10 @@ func tick(d time.Duration) tea.Cmd {
 }
 
 // fetchPRInfo fetches PR metadata
-func fetchPRInfo(ctx context.Context, token, owner, repo string, prNumber int) tea.Cmd {
+func fetchPRInfo(ctx context.Context, token, host, owner, repo string, prNumber int) tea.Cmd {
 	return func() tea.Msg {
 		// Create temporary client for PR info (REST API)
-		client, err := ghclient.NewClient(ctx)
+		client, err := ghclient.NewClientFromToken(token, host)
 		if err != nil {
 			return PRInfoMsg{Err: err}
 		}
@@ -606,9 +606,9 @@ func fetchPRInfo(ctx context.Context, token, owner, repo string, prNumber int) t
 }
 
 // discoverWorkflows resolves run IDs to workflow IDs and returns which workflows need history fetches.
-func discoverWorkflows(ctx context.Context, owner, repo string, checkRuns []ghclient.CheckRunInfo, knownRunIDToWorkflowID map[int64]int64, knownFetchedWorkflowIDs map[int64]bool) tea.Cmd {
+func discoverWorkflows(ctx context.Context, token, host, owner, repo string, checkRuns []ghclient.CheckRunInfo, knownRunIDToWorkflowID map[int64]int64, knownFetchedWorkflowIDs map[int64]bool) tea.Cmd {
 	return func() tea.Msg {
-		client, err := ghclient.NewClient(ctx)
+		client, err := ghclient.NewClientFromToken(token, host)
 		if err != nil {
 			return WorkflowsDiscoveredMsg{Err: err}
 		}
@@ -624,9 +624,9 @@ func discoverWorkflows(ctx context.Context, owner, repo string, checkRuns []ghcl
 }
 
 // fetchWorkflowHistory fetches historical job durations for a single workflow.
-func fetchWorkflowHistory(ctx context.Context, owner, repo string, workflowID int64) tea.Cmd {
+func fetchWorkflowHistory(ctx context.Context, token, host, owner, repo string, workflowID int64) tea.Cmd {
 	return func() tea.Msg {
-		client, err := ghclient.NewClient(ctx)
+		client, err := ghclient.NewClientFromToken(token, host)
 		if err != nil {
 			return JobAveragesPartialMsg{WorkflowID: workflowID, Err: err}
 		}
@@ -642,9 +642,9 @@ func fetchWorkflowHistory(ctx context.Context, owner, repo string, workflowID in
 }
 
 // fetchCheckRuns fetches check runs using GraphQL
-func fetchCheckRuns(ctx context.Context, token, owner, repo string, prNumber int) tea.Cmd {
+func fetchCheckRuns(ctx context.Context, token, host, owner, repo string, prNumber int) tea.Cmd {
 	return func() tea.Msg {
-		checkRuns, headPushedTime, rateLimit, err := ghclient.FetchCheckRunsGraphQL(ctx, token, owner, repo, prNumber)
+		checkRuns, headPushedTime, rateLimit, err := ghclient.FetchCheckRunsGraphQL(ctx, token, host, owner, repo, prNumber)
 		if err != nil {
 			return ChecksUpdateMsg{Err: err}
 		}
@@ -660,9 +660,9 @@ func fetchCheckRuns(ctx context.Context, token, owner, repo string, prNumber int
 // fetchCopilotReview fetches the Copilot code review state via GraphQL
 // (issue #409). This is a second query path alongside fetchCheckRuns, hitting
 // PullRequest.reviews instead of StatusCheckRollup.Contexts.
-func fetchCopilotReview(ctx context.Context, token, owner, repo string, prNumber int, headSHA string) tea.Cmd {
+func fetchCopilotReview(ctx context.Context, token, host, owner, repo string, prNumber int, headSHA string) tea.Cmd {
 	return func() tea.Msg {
-		review, rateLimit, err := ghclient.FetchCopilotReview(ctx, token, owner, repo, prNumber, headSHA)
+		review, rateLimit, err := ghclient.FetchCopilotReview(ctx, token, host, owner, repo, prNumber, headSHA)
 		if err != nil {
 			return CopilotReviewMsg{Err: err, RateLimitRemaining: rateLimit}
 		}

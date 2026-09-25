@@ -182,6 +182,39 @@ This works for any GitHub PR URL and is useful for:
 - Monitoring upstream dependencies before merging
 - Following CI status on projects you don't have cloned locally
 
+### GitHub Enterprise support
+
+GitHub Enterprise URLs work with any hostname (issue #479):
+
+```bash
+# PR on a GitHub Enterprise instance
+gh observer https://github.example.com/owner/repo/pull/123
+
+# Actions run on a GitHub Enterprise instance
+gh observer https://github.example.com/owner/repo/actions/runs/456
+
+# Repo mode with host/owner/repo or URL form
+gh observer --repo github.example.com/owner/repo
+gh observer --repo https://github.example.com/owner/repo
+```
+
+Running `gh observer` inside an enterprise checkout auto-detects the host from
+the `gh pr view` URL, and `gh observer --repo` (bare) detects it from the git
+remote. For host-less arguments (a bare PR number or `owner/repo` slug), the
+host comes from the `GH_HOST` environment variable (like the `gh` CLI),
+defaulting to github.com.
+
+Authentication follows the gh CLI's resolution order:
+
+1. `GH_TOKEN` / `GITHUB_TOKEN` for github.com (or the `GH_HOST` host)
+2. `GH_ENTERPRISE_TOKEN` / `GITHUB_ENTERPRISE_TOKEN` for enterprise hosts
+3. `gh auth token --host <host>` (log in once with `gh auth login --hostname`)
+
+Limitations: API endpoints are derived using the `api.<host>` subdomain
+convention (`https://api.<host>/` and `https://api.<host>/graphql`), so
+path-style enterprise installs (`<host>/api/v3`) are not yet supported.
+Hostnames with ports are also not supported.
+
 ### Watch an Actions workflow run
 
 You can also watch any GitHub Actions workflow run by passing its URL. This is
