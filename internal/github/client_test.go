@@ -17,6 +17,7 @@ import (
 )
 
 func TestGetTokenFromEnv(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "env-token-123")
 
 	token, err := GetToken()
@@ -30,6 +31,7 @@ func TestGetTokenFromEnv(t *testing.T) {
 
 func TestGetTokenMissingFails(t *testing.T) {
 	// Clear the env var and sabotage the gh CLI fallback so both paths fail.
+	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("PATH", t.TempDir()) // empty dir: `gh` not found
 
@@ -43,7 +45,7 @@ func TestGetTokenMissingFails(t *testing.T) {
 }
 
 func TestNewClientFromToken(t *testing.T) {
-	client, err := NewClientFromToken("test-token")
+	client, err := NewClientFromToken("test-token", "")
 	if err != nil {
 		t.Fatalf("NewClientFromToken() error: %v", err)
 	}
@@ -53,10 +55,11 @@ func TestNewClientFromToken(t *testing.T) {
 }
 
 func TestNewClientWithoutTokenFails(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("PATH", t.TempDir())
 
-	client, err := NewClient(context.Background())
+	client, err := NewClient(context.Background(), "")
 	if err == nil {
 		t.Fatal("NewClient() should fail without credentials")
 	}
@@ -390,7 +393,7 @@ func TestFetchRunInfoREST(t *testing.T) {
 	client := newTestClient(t, handler)
 
 	// Empty token: GraphQL lookup skipped, REST fallback used.
-	info, rateLimit, err := FetchRunInfo(context.Background(), client, "", "owner", "repo", 12345)
+	info, rateLimit, err := FetchRunInfo(context.Background(), client, "", "", "owner", "repo", 12345)
 	if err != nil {
 		t.Fatalf("FetchRunInfo() error: %v", err)
 	}
@@ -425,7 +428,7 @@ func TestFetchRunInfoRESTNameFallback(t *testing.T) {
 	})
 	client := newTestClient(t, handler)
 
-	info, _, err := FetchRunInfo(context.Background(), client, "", "owner", "repo", 1)
+	info, _, err := FetchRunInfo(context.Background(), client, "", "", "owner", "repo", 1)
 	if err != nil {
 		t.Fatalf("FetchRunInfo() error: %v", err)
 	}
@@ -440,7 +443,7 @@ func TestFetchRunInfoRESTError(t *testing.T) {
 	})
 	client := newTestClient(t, handler)
 
-	info, _, err := FetchRunInfo(context.Background(), client, "", "owner", "repo", 1)
+	info, _, err := FetchRunInfo(context.Background(), client, "", "", "owner", "repo", 1)
 	if err == nil {
 		t.Fatal("FetchRunInfo() should fail on 404")
 	}

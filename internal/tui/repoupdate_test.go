@@ -700,7 +700,7 @@ func TestRepoRunsUpdateRateLimitMinAcrossSources(t *testing.T) {
 func TestRepoModelFetchReceivedGatesRateLimit(t *testing.T) {
 	// Verify the fetchReceived flag starts false on a fresh model.
 	m := NewRepoModel(
-		context.Background(), "tok", "o", "r",
+		context.Background(), "tok", "github.com", "o", "r",
 		30*time.Second, NewStyles(10, 9, 11, 8), true,
 		15*time.Minute, 30*time.Minute,
 	)

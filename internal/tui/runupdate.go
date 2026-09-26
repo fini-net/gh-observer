@@ -53,7 +53,7 @@ type RunErrorMsg struct {
 func (m RunModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
-		fetchRunInfo(m.ctx, m.client, m.token, m.owner, m.repo, m.runID),
+		fetchRunInfo(m.ctx, m.client, m.token, m.host, m.owner, m.repo, m.runID),
 		runTick(m.refreshInterval),
 	)
 }
@@ -243,9 +243,9 @@ func runTick(d time.Duration) tea.Cmd {
 }
 
 // fetchRunInfo fetches workflow run metadata.
-func fetchRunInfo(ctx context.Context, client *github.Client, token, owner, repo string, runID int64) tea.Cmd {
+func fetchRunInfo(ctx context.Context, client *github.Client, token, host, owner, repo string, runID int64) tea.Cmd {
 	return func() tea.Msg {
-		runInfo, rateLimit, err := ghclient.FetchRunInfo(ctx, client, token, owner, repo, runID)
+		runInfo, rateLimit, err := ghclient.FetchRunInfo(ctx, client, token, host, owner, repo, runID)
 		if err != nil {
 			return RunInfoMsg{Err: err}
 		}

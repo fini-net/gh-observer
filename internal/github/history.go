@@ -412,13 +412,14 @@ func DiscoverAdvSecWorkflows(
 }
 
 // githubHostedURLRegexp matches DetailsURLs that point at a GitHub-hosted
-// Actions run (either a full run page or a specific job). AdvSec checks use
+// Actions run (either a full run page or a specific job), on any host
+// (public github.com or GitHub Enterprise — issue #479). AdvSec checks use
 // /runs/<id> URLs, and some Actions checks use /actions/runs/<id> without the
 // trailing /job/<id>. Both are GitHub-hosted, so they are not "external app"
 // checks even when ParseRunIDFromURL (which requires /job/) cannot recover a
 // run ID from them. Treating them as external would let a user-supplied
 // presumed average shadow the real history that AdvSec aliasing later writes.
-var githubHostedURLRegexp = regexp.MustCompile(`^https?://github\.com/[^/]+/[^/]+/(actions/runs/|runs/)`)
+var githubHostedURLRegexp = regexp.MustCompile(`^https?://([a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?)/[^/]+/[^/]+/(actions/runs/|runs/)`)
 
 // IsExternalAppCheck reports whether a check run is from an external (non-GitHub
 // Actions) app — i.e., it has no WorkflowRunID and no WorkflowID, but has both

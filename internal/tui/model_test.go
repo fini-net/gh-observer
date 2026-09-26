@@ -14,6 +14,7 @@ func TestNewModelAndExitCode(t *testing.T) {
 	m := NewModel(
 		context.Background(),
 		"test-token",
+		"github.com",
 		"owner",
 		"repo",
 		42,
@@ -49,6 +50,7 @@ func TestNewRepoModelAndExitCode(t *testing.T) {
 	m := NewRepoModel(
 		context.Background(),
 		"test-token",
+		"github.com",
 		"owner",
 		"repo",
 		30*time.Second,

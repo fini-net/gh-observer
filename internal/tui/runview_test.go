@@ -18,6 +18,7 @@ func makeRunModelForRender() RunModel {
 	return NewRunModel(
 		context.Background(),
 		"test-token",
+		"github.com",
 		"owner",
 		"repo",
 		12345,
@@ -546,6 +547,7 @@ func TestNewRunModelExitCode(t *testing.T) {
 	m := NewRunModel(
 		context.Background(),
 		"test-token",
+		"github.com",
 		"owner",
 		"repo",
 		99,
