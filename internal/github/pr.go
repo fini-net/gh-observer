@@ -40,7 +40,9 @@ type PRInfo struct {
 
 // parsePRViewWithRepo parses JSON output from 'gh pr view --json number,url'.
 // The host is extracted from the PR URL, so watching a PR from inside an
-// enterprise checkout resolves against the enterprise instance.
+// enterprise checkout resolves against the enterprise instance. Returns
+// (number, host, owner, repo, err) — host before owner, matching the
+// package's other parsers.
 func parsePRViewWithRepo(jsonOutput []byte) (int, string, string, string, error) {
 	var result struct {
 		Number int    `json:"number"`
@@ -59,8 +61,8 @@ func parsePRViewWithRepo(jsonOutput []byte) (int, string, string, string, error)
 		return 0, "", "", "", fmt.Errorf("PR URL is missing")
 	}
 
-	// Parse owner/repo/host from URL like https://github.com/owner/repo/pull/123
-	owner, repo, host, prNum, err := ParsePRURL(result.URL)
+	// Parse host/owner/repo from URL like https://github.com/owner/repo/pull/123
+	host, owner, repo, prNum, err := ParsePRURL(result.URL)
 	if err != nil {
 		return 0, "", "", "", fmt.Errorf("failed to parse PR URL: %w", err)
 	}
@@ -70,15 +72,15 @@ func parsePRViewWithRepo(jsonOutput []byte) (int, string, string, string, error)
 		return 0, "", "", "", fmt.Errorf("PR number mismatch: URL has %d, JSON has %d", prNum, result.Number)
 	}
 
-	return result.Number, owner, repo, host, nil
+	return result.Number, host, owner, repo, nil
 }
 
-// GetCurrentPRWithRepo auto-detects PR number, repository, and host from
-// current branch. This correctly handles forked repos by getting owner/repo
-// from the PR URL rather than from the local git remote. In jj (Jujutsu)
-// repos, sets GIT_DIR so that gh pr view can locate the git repository.
-// The host comes from the PR URL, so enterprise checkouts resolve against
-// the enterprise instance.
+// GetCurrentPRWithRepo auto-detects the PR number, host, and repository from
+// the current branch. This correctly handles forked repos by getting
+// owner/repo from the PR URL rather than from the local git remote. In jj
+// (Jujutsu) repos, sets GIT_DIR so that gh pr view can locate the git
+// repository. The host comes from the PR URL, so enterprise checkouts resolve
+// against the enterprise instance. Returns (number, host, owner, repo, err).
 func GetCurrentPRWithRepo() (int, string, string, string, error) {
 	cmd := exec.Command("gh", "pr", "view", "--json", "number,url")
 	SetGITDirForJJ(cmd)
@@ -90,10 +92,11 @@ func GetCurrentPRWithRepo() (int, string, string, string, error) {
 	return parsePRViewWithRepo(output)
 }
 
-// GetPRWithRepo fetches PR number, repository, and host for an explicit PR
-// number. This correctly handles forked repos by getting owner/repo from the
-// PR URL. In jj (Jujutsu) repos, sets GIT_DIR so that gh pr view can locate
-// the git repository. The host comes from the PR URL.
+// GetPRWithRepo fetches the PR number, host, and repository for an explicit
+// PR number. This correctly handles forked repos by getting owner/repo from
+// the PR URL. In jj (Jujutsu) repos, sets GIT_DIR so that gh pr view can
+// locate the git repository. The host comes from the PR URL. Returns
+// (number, host, owner, repo, err).
 func GetPRWithRepo(prNumber int) (int, string, string, string, error) {
 	cmd := exec.Command("gh", "pr", "view", strconv.Itoa(prNumber), "--json", "number,url")
 	SetGITDirForJJ(cmd)

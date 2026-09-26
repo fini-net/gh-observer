@@ -229,7 +229,7 @@ func resolveRepoArg(val string) (string, string, string, error) {
 func parseArgs(args []string) (runArgs, error) {
 	if len(args) == 0 {
 		// Auto-detect PR from current branch
-		prNumber, owner, repo, host, err := ghclient.GetCurrentPRWithRepo()
+		prNumber, host, owner, repo, err := ghclient.GetCurrentPRWithRepo()
 		if err != nil {
 			if ghclient.IsJujutsu() {
 				return runArgs{}, fmt.Errorf("failed to detect PR in jj (Jujutsu) repo: %v\n\nHint: In a jj repo, you may need to:\n  1. Pass an explicit PR number: gh observer 123\n  2. Pass a PR URL: gh observer https://github.com/owner/repo/pull/123\n  3. Enable colocated mode: jj git colocation enable", err)
@@ -253,7 +253,7 @@ func parseArgs(args []string) (runArgs, error) {
 
 	// Try numeric PR number
 	if n, convErr := strconv.Atoi(arg); convErr == nil {
-		prNumber, owner, repo, host, err := ghclient.GetPRWithRepo(n)
+		prNumber, host, owner, repo, err := ghclient.GetPRWithRepo(n)
 		if err != nil {
 			return runArgs{}, fmt.Errorf("failed to get PR #%d: %v", n, err)
 		}
