@@ -677,6 +677,7 @@ func TestIsExternalAppCheck(t *testing.T) {
 	tests := []struct {
 		name string
 		cr   CheckRunInfo
+		host string
 		want bool
 	}{
 		{
@@ -686,6 +687,7 @@ func TestIsExternalAppCheck(t *testing.T) {
 				AppName:    "DCO",
 				DetailsURL: "https://probot.github.io/apps/dco/",
 			},
+			host: "github.com",
 			want: true,
 		},
 		{
@@ -695,6 +697,7 @@ func TestIsExternalAppCheck(t *testing.T) {
 				WorkflowID: 789,
 				DetailsURL: "https://github.com/owner/repo/actions/runs/123/job/456",
 			},
+			host: "github.com",
 			want: false,
 		},
 		{
@@ -704,6 +707,7 @@ func TestIsExternalAppCheck(t *testing.T) {
 				WorkflowRunID: 123,
 				DetailsURL:    "https://github.com/owner/repo/actions/runs/123/job/456",
 			},
+			host: "github.com",
 			want: false,
 		},
 		{
@@ -713,6 +717,7 @@ func TestIsExternalAppCheck(t *testing.T) {
 				AppName:    "GitHub Advanced Security",
 				DetailsURL: "https://github.com/owner/repo/actions/runs/12345678/job/987654321",
 			},
+			host: "github.com",
 			want: false,
 		},
 		{
@@ -722,6 +727,7 @@ func TestIsExternalAppCheck(t *testing.T) {
 				AppName:    "GitHub Advanced Security",
 				DetailsURL: "https://github.com/owner/repo/runs/73263098935",
 			},
+			host: "github.com",
 			want: false,
 		},
 		{
@@ -731,6 +737,65 @@ func TestIsExternalAppCheck(t *testing.T) {
 				AppName:    "GitHub Actions",
 				DetailsURL: "https://github.com/owner/repo/actions/runs/12345678",
 			},
+			host: "github.com",
+			want: false,
+		},
+		{
+			// Claude review of PR #480: the path shape alone must not
+			// classify a URL as GitHub-hosted. A third-party app whose
+			// DetailsURL mimics the Actions path shape on an unrelated
+			// host is external even while watching github.com.
+			name: "mirror-host Actions-shaped URL is external while watching github.com",
+			cr: CheckRunInfo{
+				Name:       "Worfload",
+				AppName:    "Worfload",
+				DetailsURL: "https://mirror.example/owner/repo/actions/runs/1",
+			},
+			host: "github.com",
+			want: true,
+		},
+		{
+			name: "mirror-host /runs/ URL is external while watching github.com",
+			cr: CheckRunInfo{
+				Name:       "Worfload",
+				AppName:    "Worfload",
+				DetailsURL: "https://mirror.example/owner/repo/runs/73263098935",
+			},
+			host: "github.com",
+			want: true,
+		},
+		{
+			// The enterprise counterpart: the same path shape on the
+			// watched enterprise host is GitHub-hosted (issue #479).
+			name: "AdvSec /runs/ URL on watched enterprise host is not external",
+			cr: CheckRunInfo{
+				Name:       "CodeQL",
+				AppName:    "GitHub Advanced Security",
+				DetailsURL: "https://github.example.com/owner/repo/runs/73263098935",
+			},
+			host: "github.example.com",
+			want: false,
+		},
+		{
+			name: "github.com URL is external while watching an enterprise host",
+			cr: CheckRunInfo{
+				Name:       "Worfload",
+				AppName:    "Worfload",
+				DetailsURL: "https://github.com/owner/repo/runs/73263098935",
+			},
+			host: "github.example.com",
+			want: true,
+		},
+		{
+			// Hostnames arrive from URLs and may be mixed-case; the
+			// comparison must not miss on case differences.
+			name: "host comparison is case-insensitive",
+			cr: CheckRunInfo{
+				Name:       "CodeQL",
+				AppName:    "GitHub Advanced Security",
+				DetailsURL: "https://GITHUB.COM/owner/repo/runs/73263098935",
+			},
+			host: "github.com",
 			want: false,
 		},
 		{
@@ -738,6 +803,7 @@ func TestIsExternalAppCheck(t *testing.T) {
 			cr: CheckRunInfo{
 				Name: "lint",
 			},
+			host: "github.com",
 			want: false,
 		},
 		{
@@ -746,15 +812,16 @@ func TestIsExternalAppCheck(t *testing.T) {
 				Name:    "DCO",
 				AppName: "DCO",
 			},
+			host: "github.com",
 			want: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := IsExternalAppCheck(tt.cr)
+			got := IsExternalAppCheck(tt.cr, tt.host)
 			if got != tt.want {
-				t.Errorf("IsExternalAppCheck() = %v, want %v", got, tt.want)
+				t.Errorf("IsExternalAppCheck(%+v, host %q) = %v, want %v", tt.cr, tt.host, got, tt.want)
 			}
 		})
 	}
@@ -777,19 +844,35 @@ func TestApplyPresumedAverages(t *testing.T) {
 		AppName:    "GitHub Advanced Security",
 		DetailsURL: "https://github.com/owner/repo/runs/73263098935",
 	}
-	// external-but-not-in-map uses an off-site URL so IsExternalAppCheck
-	// classifies it as external (GitHub-hosted /runs/ URLs are non-external
-	// after the githubHostedURLRegexp fix).
+	// externalNotInMap uses an off-site URL so IsExternalAppCheck
+	// classifies it as external (GitHub-hosted /runs/ URLs on the watched
+	// host are non-external after the githubHostedURLRegexp fix).
 	externalNotInMap := CheckRunInfo{
 		Name:       "Worfload Bot",
 		AppName:    "Worfload",
 		DetailsURL: "https://example.com/worfload/status",
 	}
+	// mirrorAdvSec mimics the AdvSec /runs/ path shape on an unrelated
+	// host. Claude review of PR #480: while watching github.com this is an
+	// external app check, so a presumed average for it applies.
+	mirrorAdvSec := CheckRunInfo{
+		Name:       "CodeQL",
+		AppName:    "GitHub Advanced Security",
+		DetailsURL: "https://mirror.example/owner/repo/runs/73263098935",
+	}
+	// enterpriseAdvSec is the same shape on the watched enterprise host:
+	// GitHub-hosted (issue #479), so aliasing owns it, not presumed
+	// averages.
+	enterpriseAdvSec := CheckRunInfo{
+		Name:       "CodeQL",
+		AppName:    "GitHub Advanced Security",
+		DetailsURL: "https://github.example.com/owner/repo/runs/73263098935",
+	}
 
 	t.Run("injects presumed average for DCO", func(t *testing.T) {
 		jobAverages := map[string]time.Duration{}
 		presumed := map[string]time.Duration{"DCO": 1 * time.Second}
-		ApplyPresumedAverages(jobAverages, []CheckRunInfo{dco, build}, presumed)
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{dco, build}, presumed, "github.com")
 		if jobAverages["DCO"] != 1*time.Second {
 			t.Errorf("jobAverages[DCO] = %v, want 1s", jobAverages["DCO"])
 		}
@@ -801,7 +884,7 @@ func TestApplyPresumedAverages(t *testing.T) {
 	t.Run("does not overwrite existing real history", func(t *testing.T) {
 		jobAverages := map[string]time.Duration{"DCO": 5 * time.Second}
 		presumed := map[string]time.Duration{"DCO": 1 * time.Second}
-		ApplyPresumedAverages(jobAverages, []CheckRunInfo{dco}, presumed)
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{dco}, presumed, "github.com")
 		if jobAverages["DCO"] != 5*time.Second {
 			t.Errorf("jobAverages[DCO] = %v, want 5s (should not overwrite existing)", jobAverages["DCO"])
 		}
@@ -811,7 +894,7 @@ func TestApplyPresumedAverages(t *testing.T) {
 		jobAverages := map[string]time.Duration{}
 		presumed := map[string]time.Duration{"DCO": 1 * time.Second}
 		// externalNotInMap is external but not in the presumed map
-		ApplyPresumedAverages(jobAverages, []CheckRunInfo{externalNotInMap}, presumed)
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{externalNotInMap}, presumed, "github.com")
 		if _, present := jobAverages["Worfload Bot"]; present {
 			t.Errorf("jobAverages[Worfload Bot] should not be set, got %v", jobAverages["Worfload Bot"])
 		}
@@ -819,7 +902,7 @@ func TestApplyPresumedAverages(t *testing.T) {
 
 	t.Run("no-op when presumed map is empty", func(t *testing.T) {
 		jobAverages := map[string]time.Duration{}
-		ApplyPresumedAverages(jobAverages, []CheckRunInfo{dco}, nil)
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{dco}, nil, "github.com")
 		if len(jobAverages) != 0 {
 			t.Errorf("jobAverages should be empty, got %v", jobAverages)
 		}
@@ -828,13 +911,13 @@ func TestApplyPresumedAverages(t *testing.T) {
 	t.Run("no-op when jobAverages is nil", func(t *testing.T) {
 		presumed := map[string]time.Duration{"DCO": 1 * time.Second}
 		// Should not panic
-		ApplyPresumedAverages(nil, []CheckRunInfo{dco}, presumed)
+		ApplyPresumedAverages(nil, []CheckRunInfo{dco}, presumed, "github.com")
 	})
 
 	t.Run("no-op when no external app checks present", func(t *testing.T) {
 		jobAverages := map[string]time.Duration{}
 		presumed := map[string]time.Duration{"DCO": 1 * time.Second}
-		ApplyPresumedAverages(jobAverages, []CheckRunInfo{build}, presumed)
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{build}, presumed, "github.com")
 		if len(jobAverages) != 0 {
 			t.Errorf("jobAverages should be empty, got %v", jobAverages)
 		}
@@ -846,9 +929,27 @@ func TestApplyPresumedAverages(t *testing.T) {
 		// AdvSec /runs/ URL is GitHub-hosted and should be handled by AdvSec
 		// aliasing instead, not presumed averages.
 		presumed := map[string]time.Duration{"CodeQL": 30 * time.Second}
-		ApplyPresumedAverages(jobAverages, []CheckRunInfo{codeQLAdvSec}, presumed)
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{codeQLAdvSec}, presumed, "github.com")
 		if _, present := jobAverages["CodeQL"]; present {
 			t.Errorf("jobAverages[CodeQL] should not be set for AdvSec /runs/ URL, got %v", jobAverages["CodeQL"])
+		}
+	})
+
+	t.Run("mirror-host /runs/ URL is external while watching github.com, presumed average applies", func(t *testing.T) {
+		jobAverages := map[string]time.Duration{}
+		presumed := map[string]time.Duration{"CodeQL": 30 * time.Second}
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{mirrorAdvSec}, presumed, "github.com")
+		if jobAverages["CodeQL"] != 30*time.Second {
+			t.Errorf("jobAverages[CodeQL] = %v, want 30s (mirror host is external)", jobAverages["CodeQL"])
+		}
+	})
+
+	t.Run("AdvSec /runs/ URL on watched enterprise host is not external, presumed average does not apply", func(t *testing.T) {
+		jobAverages := map[string]time.Duration{}
+		presumed := map[string]time.Duration{"CodeQL": 30 * time.Second}
+		ApplyPresumedAverages(jobAverages, []CheckRunInfo{enterpriseAdvSec}, presumed, "github.example.com")
+		if _, present := jobAverages["CodeQL"]; present {
+			t.Errorf("jobAverages[CodeQL] should not be set for enterprise-hosted /runs/ URL, got %v", jobAverages["CodeQL"])
 		}
 	})
 }

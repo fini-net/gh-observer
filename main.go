@@ -409,7 +409,7 @@ func runSnapshot(ctx context.Context, token, host, owner, repo string, prNumber 
 	if jobAverages == nil {
 		jobAverages = make(map[string]time.Duration)
 	}
-	ghclient.ApplyPresumedAverages(jobAverages, checkRuns, presumedAverages)
+	ghclient.ApplyPresumedAverages(jobAverages, checkRuns, presumedAverages, host)
 
 	widths := tui.CalculateColumnWidths(checkRuns, headPushedTime, jobAverages)
 
@@ -507,7 +507,7 @@ func runRunSnapshot(ctx context.Context, token, host, owner, repo string, runID 
 	if jobAverages == nil {
 		jobAverages = make(map[string]time.Duration)
 	}
-	ghclient.ApplyPresumedAverages(jobAverages, ghclient.WorkflowJobInfoToCheckRuns(jobs), presumedAverages)
+	ghclient.ApplyPresumedAverages(jobAverages, ghclient.WorkflowJobInfoToCheckRuns(jobs), presumedAverages, host)
 
 	widths := tui.CalculateRunColumnWidths(jobs, jobAverages)
 

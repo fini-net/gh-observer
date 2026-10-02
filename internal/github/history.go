@@ -419,22 +419,41 @@ func DiscoverAdvSecWorkflows(
 // checks even when ParseRunIDFromURL (which requires /job/) cannot recover a
 // run ID from them. Treating them as external would let a user-supplied
 // presumed average shadow the real history that AdvSec aliasing later writes.
+// The host is captured so isGitHubHostedURL can anchor the match to the host
+// actually being watched (Claude review of PR #480): a third-party app whose
+// DetailsURL merely mimics the path shape on another host must not be
+// misclassified as GitHub-hosted.
 var githubHostedURLRegexp = regexp.MustCompile(`^https?://([a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?)/[^/]+/[^/]+/(actions/runs/|runs/)`)
+
+// isGitHubHostedURL reports whether detailsURL points at a GitHub-hosted
+// Actions or AdvSec run on the given host. Only a URL whose host matches the
+// host being watched counts (case-insensitive): the path shape alone is not
+// enough, since an external app could construct a DetailsURL mimicking it on
+// an unrelated host.
+func isGitHubHostedURL(detailsURL, host string) bool {
+	matches := githubHostedURLRegexp.FindStringSubmatch(detailsURL)
+	if matches == nil {
+		return false
+	}
+	return strings.EqualFold(matches[1], host)
+}
 
 // IsExternalAppCheck reports whether a check run is from an external (non-GitHub
 // Actions) app — i.e., it has no WorkflowRunID and no WorkflowID, but has both
 // an AppName and a DetailsURL that does not point at a GitHub-hosted Actions or
-// AdvSec run. The DCO app provided by Probot is the canonical example; its
-// DetailsURL points off-site (https://probot.github.io/apps/dco/) so neither
-// ParseRunIDFromURL nor githubHostedURLRegexp can recover a run ID and history
-// can never be fetched for it. Such checks are candidates for a presumed
-// average (see ApplyPresumedAverages).
+// AdvSec run on the watched host. The DCO app provided by Probot is the
+// canonical example; its DetailsURL points off-site
+// (https://probot.github.io/apps/dco/) so neither ParseRunIDFromURL nor
+// githubHostedURLRegexp can recover a run ID and history can never be fetched
+// for it. Such checks are candidates for a presumed average (see
+// ApplyPresumedAverages).
 //
 // GitHub-hosted URLs (actions/runs/<id>, actions/runs/<id>/job/<id>, and AdvSec
-// runs/<id>) are treated as non-external so that AdvSec aliasing in the TUI
-// (which writes real history into jobAverages keyed by the check name) is not
-// blocked by a presumed average having already taken the slot.
-func IsExternalAppCheck(cr CheckRunInfo) bool {
+// runs/<id>, on the watched host) are treated as non-external so that AdvSec
+// aliasing in the TUI (which writes real history into jobAverages keyed by the
+// check name) is not blocked by a presumed average having already taken the
+// slot.
+func IsExternalAppCheck(cr CheckRunInfo, host string) bool {
 	if cr.WorkflowRunID > 0 || cr.WorkflowID > 0 {
 		return false
 	}
@@ -444,7 +463,7 @@ func IsExternalAppCheck(cr CheckRunInfo) bool {
 	if _, err := ParseRunIDFromURL(cr.DetailsURL); err == nil {
 		return false
 	}
-	if githubHostedURLRegexp.MatchString(cr.DetailsURL) {
+	if isGitHubHostedURL(cr.DetailsURL, host) {
 		return false
 	}
 	return true
@@ -454,8 +473,9 @@ func IsExternalAppCheck(cr CheckRunInfo) bool {
 // can never have real history (external GitHub App checks like DCO that have no
 // Actions workflow run). For each check Name in presumedAverages that (a) is
 // not already present in jobAverages and (b) appears in checkRuns as an
-// external app check, the presumed duration is written into jobAverages. The
-// jobAverages map is mutated in place; if it is nil it is left untouched.
+// external app check on the given host, the presumed duration is written into
+// jobAverages. The jobAverages map is mutated in place; if it is nil it is left
+// untouched.
 //
 // Matching is case-insensitive on the check Name to absorb viper's automatic
 // lowercasing of map keys (the default "DCO" is stored as "dco"). The
@@ -468,6 +488,7 @@ func ApplyPresumedAverages(
 	jobAverages map[string]time.Duration,
 	checkRuns []CheckRunInfo,
 	presumedAverages map[string]time.Duration,
+	host string,
 ) {
 	if len(presumedAverages) == 0 || jobAverages == nil {
 		return
@@ -479,7 +500,7 @@ func ApplyPresumedAverages(
 		lower[strings.ToLower(name)] = dur
 	}
 	for _, cr := range checkRuns {
-		if !IsExternalAppCheck(cr) {
+		if !IsExternalAppCheck(cr, host) {
 			continue
 		}
 		if _, exists := jobAverages[cr.Name]; exists {

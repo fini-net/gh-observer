@@ -137,7 +137,7 @@ func (m *RunModel) handleRunJobsUpdate(msg RunJobsUpdateMsg) (tea.Model, tea.Cmd
 	// Inject presumed historical durations for external GitHub App checks
 	// (e.g. DCO). Run mode jobs are almost always real Actions jobs, but we
 	// apply the same logic for consistency. Idempotent — real history wins.
-	ghclient.ApplyPresumedAverages(m.jobAverages, ghclient.WorkflowJobInfoToCheckRuns(msg.Jobs), m.presumedAverages)
+	ghclient.ApplyPresumedAverages(m.jobAverages, ghclient.WorkflowJobInfoToCheckRuns(msg.Jobs), m.presumedAverages, m.host)
 
 	debug.Log("run jobs update", "count", len(msg.Jobs), "rate_limit_remaining", msg.RateLimitRemaining)
 

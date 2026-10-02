@@ -377,7 +377,7 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	// (e.g. DCO) that have no Actions workflow run to fetch history for. This
 	// is idempotent — it only writes when the job name is absent from
 	// m.jobAverages, so real history fetched later always wins.
-	ghclient.ApplyPresumedAverages(m.jobAverages, m.checkRuns, m.presumedAverages)
+	ghclient.ApplyPresumedAverages(m.jobAverages, m.checkRuns, m.presumedAverages, m.host)
 
 	if len(msg.CheckRuns) > m.peakCheckCount {
 		m.peakCheckCount = len(msg.CheckRuns)
