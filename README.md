@@ -210,6 +210,13 @@ Authentication follows the gh CLI's resolution order:
 2. `GH_ENTERPRISE_TOKEN` / `GITHUB_ENTERPRISE_TOKEN` for enterprise hosts
 3. `gh auth token --host <host>` (log in once with `gh auth login --hostname`)
 
+Caveat: `GH_ENTERPRISE_TOKEN` / `GITHUB_ENTERPRISE_TOKEN` are host-agnostic —
+the value is sent as a Bearer credential to *any* non-github.com host, not just
+the enterprise host you configured it for. This mirrors go-gh's own env-var
+semantics, but since hosts can come from arbitrary pasted URLs, avoid exporting
+these env vars on machines where untrusted URLs get pasted; prefer
+`gh auth login --hostname`, which binds credentials to a specific host.
+
 Limitations: API endpoints are derived using the `api.<host>` subdomain
 convention (`https://api.<host>/` and `https://api.<host>/graphql`), so
 path-style enterprise installs (`<host>/api/v3`) are not yet supported.
