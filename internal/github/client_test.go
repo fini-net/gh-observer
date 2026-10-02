@@ -16,28 +16,15 @@ import (
 	"github.com/google/go-github/v92/github"
 )
 
-func TestGetTokenFromEnv(t *testing.T) {
-	t.Setenv("GH_TOKEN", "")
-	t.Setenv("GITHUB_TOKEN", "env-token-123")
-
-	token, err := GetToken()
-	if err != nil {
-		t.Fatalf("GetToken() error: %v", err)
-	}
-	if token != "env-token-123" {
-		t.Errorf("GetToken() = %q, want %q", token, "env-token-123")
-	}
-}
-
-func TestGetTokenMissingFails(t *testing.T) {
-	// Clear the env var and sabotage the gh CLI fallback so both paths fail.
+func TestGetTokenForHostMissingFails(t *testing.T) {
+	// Clear the env vars and sabotage the gh CLI fallback so both paths fail.
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("PATH", t.TempDir()) // empty dir: `gh` not found
 
-	_, err := GetToken()
+	_, err := GetTokenForHost("github.com")
 	if err == nil {
-		t.Fatal("GetToken() should fail without token or gh CLI")
+		t.Fatal("GetTokenForHost() should fail without token or gh CLI")
 	}
 	if !strings.Contains(err.Error(), "authentication failed") {
 		t.Errorf("error = %v, want authentication-failed message", err)
@@ -51,20 +38,6 @@ func TestNewClientFromToken(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("NewClientFromToken() returned nil client")
-	}
-}
-
-func TestNewClientWithoutTokenFails(t *testing.T) {
-	t.Setenv("GH_TOKEN", "")
-	t.Setenv("GITHUB_TOKEN", "")
-	t.Setenv("PATH", t.TempDir())
-
-	client, err := NewClient(context.Background(), "")
-	if err == nil {
-		t.Fatal("NewClient() should fail without credentials")
-	}
-	if client != nil {
-		t.Error("NewClient() should return nil client on error")
 	}
 }
 

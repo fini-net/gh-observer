@@ -104,13 +104,6 @@ func getTokenForEnterpriseHost(host string) (string, error) {
 	return token, nil
 }
 
-// GetToken retrieves the GitHub token for the default host (github.com or
-// GH_HOST). Retained for callers that don't know a host; new code should
-// prefer GetTokenForHost.
-func GetToken() (string, error) {
-	return GetTokenForHost(DefaultHost())
-}
-
 // tokenFromGhCLI shells out to `gh auth token` for the default host token.
 func tokenFromGhCLI() (string, error) {
 	cmd := exec.Command("gh", "auth", "token")
@@ -155,20 +148,12 @@ func NewClientFromToken(token, host string) (*github.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid enterprise API URL for host %s: %w", host, err)
 	}
+	// Upload URL is unused by gh-observer (it never hits upload
+	// endpoints), so the same base URL is passed for both arguments.
 	return github.NewClient(
 		github.WithAuthToken(token),
 		github.WithEnterpriseURLs(baseURL.String(), baseURL.String()),
 	)
-}
-
-// NewClient creates a GitHub API client for the given host using
-// GITHUB_TOKEN/GH_TOKEN env vars or the gh CLI (see GetTokenForHost).
-func NewClient(ctx context.Context, host string) (*github.Client, error) {
-	token, err := GetTokenForHost(host)
-	if err != nil {
-		return nil, err
-	}
-	return NewClientFromToken(token, host)
 }
 
 // newGraphQLClient builds a shurcooL/githubv4 client for the given host.
