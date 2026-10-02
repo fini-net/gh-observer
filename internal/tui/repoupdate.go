@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/fini-net/gh-observer/internal/debug"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
-	"github.com/google/go-github/v92/github"
 )
 
 // RepoTickMsg is sent on each repo-mode poll interval.
@@ -33,8 +32,8 @@ type RepoRunsUpdateMsg struct {
 func (m RepoModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
-		fetchRepoCheckRuns(m.ctx, m.token, m.owner, m.repo),
-		fetchRepoRuns(m.ctx, m.token, m.owner, m.repo, m.fadeWindow()),
+		fetchRepoCheckRuns(m.ctx, m.token, m.host, m.owner, m.repo),
+		fetchRepoRuns(m.ctx, m.token, m.host, m.owner, m.repo, m.fadeWindow()),
 		repoTick(m.refreshInterval),
 	)
 }
@@ -64,8 +63,8 @@ func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, repoTick(m.refreshInterval * 3)
 		}
 		cmds := []tea.Cmd{
-			fetchRepoCheckRuns(m.ctx, m.token, m.owner, m.repo),
-			fetchRepoRuns(m.ctx, m.token, m.owner, m.repo, m.fadeWindow()),
+			fetchRepoCheckRuns(m.ctx, m.token, m.host, m.owner, m.repo),
+			fetchRepoRuns(m.ctx, m.token, m.host, m.owner, m.repo, m.fadeWindow()),
 			repoTick(m.refreshInterval),
 		}
 		return m, tea.Batch(cmds...)
@@ -243,9 +242,9 @@ func repoTick(d time.Duration) tea.Cmd {
 }
 
 // fetchRepoCheckRuns issues the batched GraphQL query for all open PRs.
-func fetchRepoCheckRuns(ctx context.Context, token, owner, repo string) tea.Cmd {
+func fetchRepoCheckRuns(ctx context.Context, token, host, owner, repo string) tea.Cmd {
 	return func() tea.Msg {
-		prData, rateLimit, err := ghclient.FetchRepoCheckRunsGraphQL(ctx, token, owner, repo)
+		prData, rateLimit, err := ghclient.FetchRepoCheckRunsGraphQL(ctx, token, host, owner, repo)
 		return RepoChecksUpdateMsg{
 			PRData:             prData,
 			RateLimitRemaining: rateLimit,
@@ -257,9 +256,9 @@ func fetchRepoCheckRuns(ctx context.Context, token, owner, repo string) tea.Cmd 
 // fetchRepoRuns fetches standalone (non-PR) workflow runs and enriches them
 // with per-run jobs in a single command. Job enrichment failure is non-fatal:
 // runs are still returned with empty Jobs so their headers can render.
-func fetchRepoRuns(ctx context.Context, token, owner, repo string, fadeWindow time.Duration) tea.Cmd {
+func fetchRepoRuns(ctx context.Context, token, host, owner, repo string, fadeWindow time.Duration) tea.Cmd {
 	return func() tea.Msg {
-		client, err := github.NewClient(github.WithAuthToken(token))
+		client, err := ghclient.NewClientFromToken(token, host)
 		if err != nil {
 			return RepoRunsUpdateMsg{Err: err}
 		}

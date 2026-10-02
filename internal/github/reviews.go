@@ -6,7 +6,6 @@ import (
 
 	"github.com/fini-net/gh-observer/internal/debug"
 	"github.com/shurcooL/githubv4"
-	"golang.org/x/oauth2"
 )
 
 // copilotReviewerLogin is the GitHub App login for Copilot code reviews.
@@ -74,10 +73,11 @@ type copilotReviewQuery struct {
 // FetchCopilotReview fetches the Copilot code review state for a PR,
 // comparing the review's commit OID against headSHA to detect stale reviews.
 // Returns the review state, the GraphQL rate limit remaining, and any error.
-func FetchCopilotReview(ctx context.Context, token, owner, repo string, prNumber int, headSHA string) (CopilotReview, int, error) {
-	src := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	httpClient := oauth2.NewClient(ctx, src)
-	client := githubv4.NewClient(httpClient)
+// The host selects the GraphQL endpoint ("" or github.com = public; else
+// enterprise).
+func FetchCopilotReview(ctx context.Context, token, host, owner, repo string, prNumber int, headSHA string) (CopilotReview, int, error) {
+	httpClient := newAuthenticatedHTTPClient(ctx, token)
+	client := newGraphQLClient(host, httpClient)
 	return fetchCopilotReview(ctx, client, owner, repo, prNumber, headSHA)
 }
 

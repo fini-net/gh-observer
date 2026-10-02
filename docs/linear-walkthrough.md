@@ -246,19 +246,19 @@ if err != nil {
 
 Returns a `runArgs` value with `mode` set to `modePR` or `modeRun`.
 
-#### Step 7: Authentication (`main.go:171-176`)
+#### Step 7: Authentication (`main.go`)
 
 ```go
-token, err := ghclient.GetToken()
+token, err := ghclient.GetTokenForHost(parsed.host)
 ```
 
-Located at `internal/github/client.go`. Token acquisition strategy:
+Token acquisition strategy (`GetTokenForHost`):
 
-1. **First**: Check `GITHUB_TOKEN` environment variable
-2. **Fallback**: Run `gh auth token` command
-3. **Error**: Return message if both fail
+1. **github.com (or `GH_HOST`) host**: `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`
+2. **Any other (enterprise) host**: `GH_ENTERPRISE_TOKEN`, then `GITHUB_ENTERPRISE_TOKEN`, then `gh auth token --host <host>`
+3. **Error**: Return message if all fail
 
-#### Step 8: Mode Selection (`main.go:178-186`)
+#### Step 8: Mode Selection (`main.go`)
 
 ```go
 switch parsed.mode {
@@ -278,24 +278,31 @@ case modeRun:
 
 ## 2. GitHub Authentication & Setup
 
-### REST API Client Creation (`internal/github/client.go`)
+### REST API Client Creation (`internal/github/host.go`)
 
 Both snapshot mode and PR info fetching use REST API:
 
 ```go
-func NewClient(ctx context.Context) (*github.Client, error) {
-    token, err := GetToken()
+func NewClientFromToken(token, host string) (*github.Client, error) {
+    restURL, _ := APIURLsForHost(host)
+    if restURL == "" {
+        return github.NewClient(github.WithAuthToken(token)), nil
+    }
+    baseURL, err := url.Parse(restURL)
     if err != nil {
         return nil, err
     }
-
-    ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-    tc := oauth2.NewClient(ctx, ts)
-    return github.NewClient(tc), nil
+    return github.NewClient(
+        github.WithAuthToken(token),
+        github.WithEnterpriseURLs(baseURL.String(), baseURL.String()),
+    ), nil
 }
 ```
 
-Uses `google/go-github/v91` library with OAuth2 token authentication.
+Uses `google/go-github` with token authentication. The token itself is
+resolved by `GetTokenForHost(host)`: env vars first (`GH_TOKEN` /
+`GITHUB_TOKEN`, or the enterprise equivalents for non-github.com hosts),
+then `gh auth token [--host <host>]`.
 
 ### GraphQL Client Creation (`internal/github/graphql.go`)
 
@@ -323,7 +330,7 @@ Snapshot mode runs when stdout is not a terminal (e.g., scripts, CI, redirected 
 #### Step 1: Fetch PR Metadata
 
 ```go
-client, err := ghclient.NewClient(ctx)
+client, err := ghclient.NewClientFromToken(token, host)
 prInfo, err := ghclient.FetchPRInfo(ctx, client, owner, repo, prNumber)
 ```
 
@@ -356,7 +363,7 @@ if len(checkRuns) == 0 {
 ```go
 var jobAverages map[string]time.Duration
 if !quick {
-    client, err := ghclient.NewClient(ctx)
+    client, err := ghclient.NewClientFromToken(token, host)
     if err == nil {
         avgs, _, _, err := ghclient.FetchJobAverages(ctx, client, owner, repo, checkRuns, nil, nil)
         if err == nil {
@@ -1331,15 +1338,15 @@ main.go run()
     │   └── Auto: ghclient.GetCurrentPRWithRepo()
     │       └── Runs: gh pr view --json number,url (GIT_DIR set for jj)
     │
-    ├── ghclient.GetToken()
+    ├── ghclient.GetTokenForHost(host)
     │
     ├── runPRMode → Check terminal: term.IsTerminal()
     │   └── FALSE: runSnapshot()                        [main.go:331]
     │
     └── runSnapshot()
         │
-        ├── ghclient.NewClient()
-        │   └── Creates REST API client with OAuth2
+        ├── ghclient.NewClientFromToken(token, host)
+        │   └── Creates REST API client (enterprise URLs derived from host)
         │
         ├── ghclient.FetchPRInfo()                      [internal/github/pr.go]
         │   └── Returns: PRInfo{Title, HeadSHA, CreatedAt}
@@ -1470,7 +1477,7 @@ main.go run() with --repo
     │
     └── runRepoMode()                                [main.go:296]
         │
-        ├── ghclient.GetToken()
+        ├── ghclient.GetTokenForHost(host)
         ├── tui.NewRepoModel(refresh=cfg.RepoRefreshInterval,
         │                  fadeSuccess, fadeFailure)
         ├── tea.NewProgram(model)

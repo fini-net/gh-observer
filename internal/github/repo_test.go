@@ -8,6 +8,7 @@ import (
 func TestParseRepoArg(t *testing.T) {
 	tests := []struct {
 		input     string
+		wantHost  string
 		wantOwner string
 		wantRepo  string
 		wantErr   bool
@@ -19,26 +20,31 @@ func TestParseRepoArg(t *testing.T) {
 		},
 		{
 			input:     "https://github.com/owner/repo",
+			wantHost:  "github.com",
 			wantOwner: "owner",
 			wantRepo:  "repo",
 		},
 		{
 			input:     "https://github.com/owner/repo.name",
+			wantHost:  "github.com",
 			wantOwner: "owner",
 			wantRepo:  "repo.name",
 		},
 		{
 			input:     "http://github.com/owner/repo",
+			wantHost:  "github.com",
 			wantOwner: "owner",
 			wantRepo:  "repo",
 		},
 		{
 			input:     "https://github.com/owner/repo.git",
+			wantHost:  "github.com",
 			wantOwner: "owner",
 			wantRepo:  "repo",
 		},
 		{
 			input:     "https://github.com/owner/repo.git/",
+			wantHost:  "github.com",
 			wantOwner: "owner",
 			wantRepo:  "repo",
 		},
@@ -50,8 +56,43 @@ func TestParseRepoArg(t *testing.T) {
 		},
 		{
 			input:     "https://github.com/my_org/my_repo",
+			wantHost:  "github.com",
 			wantOwner: "my_org",
 			wantRepo:  "my_repo",
+		},
+		{
+			// GitHub Enterprise forms (issue #479): host/owner/repo slug and URL.
+			input:     "github.example.com/fini-net/gh-observer",
+			wantHost:  "github.example.com",
+			wantOwner: "fini-net",
+			wantRepo:  "gh-observer",
+		},
+		{
+			input:     "https://github.example.com/fini-net/gh-observer",
+			wantHost:  "github.example.com",
+			wantOwner: "fini-net",
+			wantRepo:  "gh-observer",
+		},
+		{
+			// Host is lowercased on capture.
+			input:     "https://GitHub.Example.Com/owner/repo",
+			wantHost:  "github.example.com",
+			wantOwner: "owner",
+			wantRepo:  "repo",
+		},
+		{
+			// Non-GitHub hosts parse; auth fails later with a helpful error.
+			input:     "https://gitlab.com/owner/repo",
+			wantHost:  "gitlab.com",
+			wantOwner: "owner",
+			wantRepo:  "repo",
+		},
+		{
+			// 3 segments without a dot in the first can't be a host — the
+			// host-slug branch requires a dot so this stays an error rather
+			// than silently parsing "org" as a hostname.
+			input:   "org/team/repo",
+			wantErr: true,
 		},
 		{
 			input:   "",
@@ -63,10 +104,6 @@ func TestParseRepoArg(t *testing.T) {
 		},
 		{
 			input:   "owner/repo/extra",
-			wantErr: true,
-		},
-		{
-			input:   "https://gitlab.com/owner/repo",
 			wantErr: true,
 		},
 		{
@@ -109,17 +146,28 @@ func TestParseRepoArg(t *testing.T) {
 			input:   "https://github.com/owner/_",
 			wantErr: true,
 		},
+		{
+			input:   "github.example.com/_/repo",
+			wantErr: true,
+		},
+		{
+			input:   "github.example.com/owner/_",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			owner, repo, err := ParseRepoArg(tt.input)
+			host, owner, repo, err := ParseRepoArg(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseRepoArg(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
 				return
 			}
 			if tt.wantErr {
 				return
+			}
+			if host != tt.wantHost {
+				t.Errorf("ParseRepoArg(%q) host = %q, want %q", tt.input, host, tt.wantHost)
 			}
 			if owner != tt.wantOwner {
 				t.Errorf("ParseRepoArg(%q) owner = %q, want %q", tt.input, owner, tt.wantOwner)
@@ -147,10 +195,13 @@ func FuzzParseRepoArg(f *testing.F) {
 		"https://github.com/owner/repo.git/",
 		"my_org/my_repo",
 		"https://github.com/my_org/my_repo",
+		"github.example.com/fini-net/gh-observer",
+		"https://github.example.com/fini-net/gh-observer",
+		"https://GitHub.Example.Com/owner/repo",
 		"",
 		"owner",
+		"org/team/repo",
 		"owner/repo/extra",
-		"https://gitlab.com/owner/repo",
 		"https://github.com/owner/repo/pull/123",
 		"https://github.com/owner/repo/actions/runs/456",
 		"_",
@@ -160,12 +211,14 @@ func FuzzParseRepoArg(f *testing.F) {
 		"__/__",
 		"https://github.com/_/repo",
 		"https://github.com/owner/_",
+		"github.example.com/_/repo",
+		"github.example.com/owner/_",
 	}
 	for _, s := range seeds {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, arg string) {
-		owner, repo, err := ParseRepoArg(arg)
+		host, owner, repo, err := ParseRepoArg(arg)
 		if err != nil {
 			return
 		}
@@ -173,18 +226,22 @@ func FuzzParseRepoArg(f *testing.F) {
 		if isAllUnderscoreSegment(owner) || isAllUnderscoreSegment(repo) {
 			t.Errorf("ParseRepoArg(%q) accepted all-underscore segment (owner=%q, repo=%q)", arg, owner, repo)
 		}
+		if host != "" {
+			assertValidHost(t, "ParseRepoArg("+arg+")", host)
+		}
 		// A plain "owner/repo" slug must reconstruct the input exactly;
-		// URL forms may legitimately differ (.git suffix, trailing slash).
-		if !strings.Contains(arg, "://") && owner+"/"+repo != arg {
+		// URL and host-slug forms may legitimately differ (.git suffix,
+		// trailing slash, lowercased host).
+		if !strings.Contains(arg, "://") && strings.Count(arg, "/") == 1 && owner+"/"+repo != arg {
 			t.Errorf("ParseRepoArg(%q) segments %q + %q do not reconstruct input", arg, owner, repo)
 		}
 		// Whatever the input form, the parsed slugs must re-parse as a
 		// valid slug argument and yield the same owner/repo.
-		reOwner, reRepo, err := ParseRepoArg(owner + "/" + repo)
+		reHost, reOwner, reRepo, err := ParseRepoArg(owner + "/" + repo)
 		if err != nil {
 			t.Errorf("ParseRepoArg(%q): re-parsed %q/%q rejected: %v", arg, owner, repo, err)
-		} else if reOwner != owner || reRepo != repo {
-			t.Errorf("ParseRepoArg(%q): re-parse gave %q/%q, want %q/%q", arg, reOwner, reRepo, owner, repo)
+		} else if reHost != "" || reOwner != owner || reRepo != repo {
+			t.Errorf("ParseRepoArg(%q): re-parse gave %q/%q/%q, want \"\"/%q/%q", arg, reHost, reOwner, reRepo, owner, repo)
 		}
 	})
 }

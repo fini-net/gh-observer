@@ -12,6 +12,7 @@ import (
 type Model struct {
 	ctx      context.Context
 	token    string
+	host     string
 	owner    string
 	repo     string
 	prNumber int
@@ -119,12 +120,13 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, token, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool, presumedAverages map[string]time.Duration, waitForCopilot bool, copilotMaxWait, copilotPollInterval, copilotInitialDelay time.Duration) Model {
+func NewModel(ctx context.Context, token, host, owner, repo string, prNumber int, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool, presumedAverages map[string]time.Duration, waitForCopilot bool, copilotMaxWait, copilotPollInterval, copilotInitialDelay time.Duration) Model {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	return Model{
 		ctx:                     ctx,
 		token:                   token,
+		host:                    host,
 		owner:                   owner,
 		repo:                    repo,
 		prNumber:                prNumber,

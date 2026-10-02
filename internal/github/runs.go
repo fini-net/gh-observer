@@ -9,7 +9,6 @@ import (
 	"github.com/fini-net/gh-observer/internal/debug"
 	"github.com/google/go-github/v92/github"
 	"github.com/shurcooL/githubv4"
-	"golang.org/x/oauth2"
 )
 
 // WorkflowJobInfo contains status data for a single job within a workflow run.
@@ -115,14 +114,14 @@ func fetchCommitPushedTimeWithClient(ctx context.Context, client graphqlQuerier,
 // fetchCommitPushedTime builds an authenticated GraphQL client from token
 // and delegates to fetchCommitPushedTimeWithClient. A missing token yields
 // the zero time and a 0 rate limit (callers fall back to the REST
-// timestamp and keep their existing rate-limit value).
-func fetchCommitPushedTime(ctx context.Context, token, owner, repo, sha string) (time.Time, int) {
+// timestamp and keep their existing rate-limit value). The host selects
+// the GraphQL endpoint ("" or github.com = public; else enterprise).
+func fetchCommitPushedTime(ctx context.Context, token, host, owner, repo, sha string) (time.Time, int) {
 	if token == "" {
 		return time.Time{}, 0
 	}
-	src := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	httpClient := oauth2.NewClient(ctx, src)
-	client := githubv4.NewClient(httpClient)
+	httpClient := newAuthenticatedHTTPClient(ctx, token)
+	client := newGraphQLClient(host, httpClient)
 	return fetchCommitPushedTimeWithClient(ctx, client, owner, repo, sha)
 }
 
@@ -132,8 +131,10 @@ func fetchCommitPushedTime(ctx context.Context, token, owner, repo, sha string) 
 // REST head_commit.timestamp so the "Pushed Xs ago" header still renders.
 // A non-empty token is required for the GraphQL path; without it the REST
 // fallback is used directly. Callers that already hold a token should pass
-// it here rather than letting this function re-derive it via GetToken()
-// (which may shell out to `gh auth token`).
+// it here rather than letting this function re-derive it via GetTokenForHost
+// (which may shell out to `gh auth token`). The host selects the GraphQL
+// endpoint for that lookup ("" or github.com = public; else enterprise); the
+// REST client must already be configured for the same host.
 //
 // The second return value is the GitHub API rate limit remaining after the
 // GraphQL lookup (or 5000 — the REST default — when the lookup is skipped
@@ -142,7 +143,7 @@ func fetchCommitPushedTime(ctx context.Context, token, owner, repo, sha string) 
 // fold it into their rate-limit accounting; when the GraphQL call
 // succeeds its observed value is returned, which may be lower than the
 // REST-side reality and is intentionally conservative.
-func FetchRunInfo(ctx context.Context, client *github.Client, token, owner, repo string, runID int64) (*RunInfo, int, error) {
+func FetchRunInfo(ctx context.Context, client *github.Client, token, host, owner, repo string, runID int64) (*RunInfo, int, error) {
 	run, _, err := client.Actions.GetWorkflowRunByID(ctx, owner, repo, runID)
 	if err != nil {
 		return nil, 5000, fmt.Errorf("failed to fetch workflow run %d: %w", runID, err)
@@ -196,7 +197,7 @@ func FetchRunInfo(ctx context.Context, client *github.Client, token, owner, repo
 	// returned by the lookup is surfaced to the caller even on timestamp
 	// miss so the app's backoff accounting sees this one-shot call.
 	if info.HeadSHA != "" {
-		pushed, rl := fetchCommitPushedTime(ctx, token, owner, repo, info.HeadSHA)
+		pushed, rl := fetchCommitPushedTime(ctx, token, host, owner, repo, info.HeadSHA)
 		if rl > 0 {
 			rateLimitRemaining = rl
 		}

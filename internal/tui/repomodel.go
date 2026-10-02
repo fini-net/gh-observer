@@ -34,6 +34,7 @@ type PRViewData struct {
 type RepoModel struct {
 	ctx   context.Context
 	token string
+	host  string
 	owner string
 	repo  string
 
@@ -80,6 +81,7 @@ type RepoModel struct {
 func NewRepoModel(
 	ctx context.Context,
 	token string,
+	host string,
 	owner, repo string,
 	refreshInterval time.Duration,
 	styles Styles,
@@ -91,6 +93,7 @@ func NewRepoModel(
 	return RepoModel{
 		ctx:             ctx,
 		token:           token,
+		host:            host,
 		owner:           owner,
 		repo:            repo,
 		prs:             make(map[int]PRViewData),

@@ -11,12 +11,13 @@ import (
 
 // RunModel holds the application state for watching a workflow run.
 type RunModel struct {
-	ctx   context.Context
-	token string
+	ctx    context.Context
+	token  string
 	client *github.Client
-	owner string
-	repo  string
-	runID int64
+	host   string
+	owner  string
+	repo   string
+	runID  int64
 
 	// Run metadata
 	runInfo       ghclient.RunInfo
@@ -41,9 +42,9 @@ type RunModel struct {
 	styles          Styles
 
 	// Exit tracking
-	exitCode      int
-	quitting      bool
-	jobsComplete  bool
+	exitCode     int
+	quitting     bool
+	jobsComplete bool
 
 	// Error state
 	err error
@@ -78,15 +79,16 @@ type RunModel struct {
 }
 
 // NewRunModel creates a new TUI model for watching a workflow run.
-func NewRunModel(ctx context.Context, token, owner, repo string, runID int64, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool, presumedAverages map[string]time.Duration) RunModel {
+func NewRunModel(ctx context.Context, token, host, owner, repo string, runID int64, refreshInterval time.Duration, styles Styles, enableLinks bool, noAvg bool, presumedAverages map[string]time.Duration) RunModel {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot))
 
-	client, _ := ghclient.NewClientFromToken(token)
+	client, _ := ghclient.NewClientFromToken(token, host)
 
 	return RunModel{
 		ctx:                     ctx,
 		token:                   token,
 		client:                  client,
+		host:                    host,
 		owner:                   owner,
 		repo:                    repo,
 		runID:                   runID,

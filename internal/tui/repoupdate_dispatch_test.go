@@ -106,6 +106,7 @@ func TestModelInit(t *testing.T) {
 	m := NewModel(
 		nil,
 		"token",
+		"github.com",
 		"owner",
 		"repo",
 		1,
