@@ -39,7 +39,7 @@ type BranchRunData struct {
 //
 // Returns the deduplicated run list and the minimum rate-limit remaining observed.
 func FetchRepoWorkflowRuns(ctx context.Context, client *github.Client, owner, repo string, fadeWindow time.Duration) ([]BranchRunData, int, error) {
-	rateLimitRemaining := unknownRateLimit
+	rateLimitRemaining := UnknownRateLimit
 
 	inProgress := &github.ListWorkflowRunsOptions{
 		ExcludePullRequests: true,
@@ -102,7 +102,7 @@ func FetchRepoWorkflowRuns(ctx context.Context, client *github.Client, owner, re
 // persistent repo-watch view — the fade-out window means older runs would
 // disappear from the display soon anyway.
 func fetchRepoRunPage(ctx context.Context, client *github.Client, owner, repo string, opts *github.ListWorkflowRunsOptions) ([]BranchRunData, int, error) {
-	rateLimitRemaining := unknownRateLimit
+	rateLimitRemaining := UnknownRateLimit
 
 	runs, resp, err := client.Actions.ListRepositoryWorkflowRuns(ctx, owner, repo, opts)
 	if err != nil {
@@ -151,7 +151,7 @@ func convertBranchRun(run *github.WorkflowRun) BranchRunData {
 // Failures on individual runs are non-fatal: the run is kept with an empty
 // Jobs slice so the TUI can still render its header.
 func EnrichRepoRunsWithJobs(ctx context.Context, client *github.Client, owner, repo string, runs []BranchRunData) ([]BranchRunData, int, error) {
-	rateLimitRemaining := unknownRateLimit
+	rateLimitRemaining := UnknownRateLimit
 	for i := range runs {
 		jobs, rl, err := FetchRunJobs(ctx, client, owner, repo, runs[i].RunID)
 		if err != nil {

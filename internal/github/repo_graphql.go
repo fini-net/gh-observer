@@ -136,7 +136,7 @@ func fetchRepoCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner
 	err := client.Query(ctx, &query, variables)
 	if err != nil {
 		debug.Log("repo graphql query failed", "owner", owner, "repo", repo, "err", err)
-		return nil, unknownRateLimit, err
+		return nil, UnknownRateLimit, err
 	}
 
 	debug.Log("repo graphql query success", "owner", owner, "repo", repo,

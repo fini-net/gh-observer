@@ -86,7 +86,7 @@ func fetchCopilotReview(ctx context.Context, client graphqlQuerier, owner, repo 
 	var query copilotReviewQuery
 	prNum, err := safeGraphQLInt(prNumber)
 	if err != nil {
-		return CopilotReview{}, unknownRateLimit, err
+		return CopilotReview{}, UnknownRateLimit, err
 	}
 	variables := map[string]any{
 		"owner":    githubv4.String(owner),
@@ -96,7 +96,7 @@ func fetchCopilotReview(ctx context.Context, client graphqlQuerier, owner, repo 
 
 	if err := client.Query(ctx, &query, variables); err != nil {
 		debug.Log("copilot review query failed", "owner", owner, "repo", repo, "pr", prNumber, "err", err)
-		return CopilotReview{}, unknownRateLimit, err
+		return CopilotReview{}, UnknownRateLimit, err
 	}
 
 	debug.Log("copilot review query success", "owner", owner, "repo", repo, "pr", prNumber,

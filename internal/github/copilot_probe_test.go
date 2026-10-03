@@ -66,32 +66,37 @@ func TestCopilotReviewerExistsOnClient(t *testing.T) {
 		})
 		client := newTestClient(t, handler)
 		_ = copilotReviewerExistsOnClient(context.Background(), client)
-		if !strings.Contains(gotPath, "/users/copilot-pull-request-reviewer") {
-			t.Errorf("probe path = %q, want it to target the copilot-pull-request-reviewer user", gotPath)
-		}
-		if !strings.Contains(gotPath, "[bot]") {
-			t.Errorf("probe path = %q, want the [bot]-suffixed REST login", gotPath)
+		// go-github passes the login through unescaped, so the raw [bot]
+		// suffix arrives intact in r.URL.Path (verified: github.com serves
+		// both this and the %5Bbot%5D form).
+		if !strings.Contains(gotPath, "/users/copilot-pull-request-reviewer[bot]") {
+			t.Errorf("probe path = %q, want /users/copilot-pull-request-reviewer[bot]", gotPath)
 		}
 	})
 }
 
 // TestNormalizeRateLimit locks in the enterprise rate-limit semantics
 // (issue #442): GitHub Enterprise Server with rate limiting disabled
-// returns rateLimit: null (zero-value Rate), which must normalize to the
-// unknown default instead of a spurious "0 remaining" that pins the app in
-// permanent backoff.
+// provides no rate-limit data (GraphQL rateLimit: null, REST without
+// X-RateLimit-* headers), which must normalize to the unknown default
+// instead of a spurious "0 remaining" that pins the app in permanent
+// backoff. The limit field is the discriminator: absent data has limit 0;
+// a real quota always carries a positive limit, and a real 0 remaining
+// (the request that consumed the last quota point) must be preserved so
+// backoff engages for the requests that follow.
 func TestNormalizeRateLimit(t *testing.T) {
 	tests := []struct {
-		name           string
-		limit          int
-		remaining      int
-		want           int
-		wantUnknownMsg string
+		name      string
+		limit     int
+		remaining int
+		want      int
 	}{
-		{"null rateLimit (GHES, rate limiting disabled)", 0, 0, unknownRateLimit, ""},
-		{"real quota with remaining 0 on a successful query is implausible", 5000, 0, unknownRateLimit, ""},
-		{"normal observation passes through", 5000, 4321, 4321, ""},
-		{"low observation passes through", 5000, 5, 5, ""},
+		{"null rateLimit (GHES, rate limiting disabled)", 0, 0, UnknownRateLimit},
+		{"REST without X-RateLimit headers (limit 0)", 0, 0, UnknownRateLimit},
+		{"absent data with stray remaining", 0, 42, UnknownRateLimit},
+		{"real quota with remaining 0 is preserved (last-point request)", 5000, 0, 0},
+		{"real quota near-exhaustion is preserved", 5000, 5, 5},
+		{"normal observation passes through", 5000, 4321, 4321},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

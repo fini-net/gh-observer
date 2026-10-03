@@ -1532,6 +1532,33 @@ func TestTickMsg_CopilotTimeout(t *testing.T) {
 		}
 	})
 
+	t.Run("zero-value rate limit before first fetch does not fire the timeout", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.copilotMaxWait = 100 * time.Millisecond
+		m.copilotWaitStartTime = time.Now().Add(-200 * time.Millisecond)
+		m.copilotPollStartTime = time.Now().Add(-100 * time.Millisecond)
+		m.copilotLastPoll = time.Time{}  // no poll has fired yet
+		m.fetchReceived = false          // no successful response yet
+		m.rateLimitRemaining = 0         // pre-first-fetch zero value
+
+		model, _ := m.Update(TickMsg(time.Now()))
+		result := model.(Model)
+
+		// The rate-limit arm of the timeout disjunct must not treat the
+		// zero-value default as a genuinely low quota: before the first
+		// response arrives, no timeout — the gate stays pending so the
+		// first real poll can run (mirrors the backoff gate's own
+		// fetchReceived guard).
+		if result.copilotTimedOut {
+			t.Error("timeout must not fire on the pre-first-fetch zero rate limit")
+		}
+		if !result.copilotPending {
+			t.Error("gate should stay pending before any poll or fetch response")
+		}
+	})
+
 	t.Run("stale review is not re-marked timed out", func(t *testing.T) {
 		m := makeModel()
 		m.waitForCopilot = true

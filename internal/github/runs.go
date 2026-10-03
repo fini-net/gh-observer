@@ -147,7 +147,7 @@ func fetchCommitPushedTime(ctx context.Context, token, host, owner, repo, sha st
 func FetchRunInfo(ctx context.Context, client *github.Client, token, host, owner, repo string, runID int64) (*RunInfo, int, error) {
 	run, _, err := client.Actions.GetWorkflowRunByID(ctx, owner, repo, runID)
 	if err != nil {
-		return nil, unknownRateLimit, fmt.Errorf("failed to fetch workflow run %d: %w", runID, err)
+		return nil, UnknownRateLimit, fmt.Errorf("failed to fetch workflow run %d: %w", runID, err)
 	}
 
 	info := &RunInfo{
@@ -189,7 +189,7 @@ func FetchRunInfo(ctx context.Context, client *github.Client, token, host, owner
 	// Conservative default: matches FetchRunJobs's sentinel when no
 	// GraphQL rate-limit observation is available. The GraphQL lookup
 	// below replaces it with the real observed value when it succeeds.
-	rateLimitRemaining := unknownRateLimit
+	rateLimitRemaining := UnknownRateLimit
 
 	// Best-effort GraphQL lookup of pushedDate: if it succeeds, replace
 	// the REST fallback with the real push time. A failure leaves the
@@ -221,7 +221,7 @@ func FetchRunJobs(ctx context.Context, client *github.Client, owner, repo string
 	}
 
 	var allJobs []WorkflowJobInfo
-	rateLimitRemaining := unknownRateLimit
+	rateLimitRemaining := UnknownRateLimit
 
 	for {
 		jobs, resp, err := client.Actions.ListWorkflowJobs(ctx, owner, repo, runID, opts)

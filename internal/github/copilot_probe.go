@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/google/go-github/v92/github"
 )
@@ -18,7 +19,9 @@ const copilotReviewerBotLogin = "copilot-pull-request-reviewer[bot]"
 // Copilot reviewer user lookup. Anything else (5xx, network, auth) is NOT
 // treated as absence: the probe must only disable Copilot detection on a
 // definitive "this user does not exist on this host" answer, never on a
-// flaky or mis-permissioned network.
+// flaky or mis-permissioned network. Note some enterprise setups can 404
+// for SSO/token-scope reasons; if that turns out to bite, the per-PR scan
+// (two-consecutive-not-requested) is the fallback that self-resolves.
 func copilotReviewerUnavailable(err error) bool {
 	var ghErr *github.ErrorResponse
 	if !errors.As(err, &ghErr) {
@@ -39,6 +42,11 @@ func copilotReviewerUnavailable(err error) bool {
 // gh-observer keeps polling per-PR rather than silently disabling a
 // feature the user may rely on.
 func copilotReviewerExistsOnClient(ctx context.Context, client *github.Client) bool {
+	// Short timeout: this is a startup capability probe, not a data path.
+	// A slow host must not hold up the Copilot gate arming; timing out
+	// leaves detection enabled (conservative default).
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	_, _, err := client.Users.Get(ctx, copilotReviewerBotLogin)
 	if copilotReviewerUnavailable(err) {
 		return false
@@ -49,16 +57,8 @@ func copilotReviewerExistsOnClient(ctx context.Context, client *github.Client) b
 }
 
 // CopilotReviewerExistsOnHost reports whether the Copilot code review
-// GitHub App exists on host. GitHub Enterprise Server instances that lack
-// Copilot code review have no copilot-pull-request-reviewer[bot] user at
-// all, so this definitively distinguishes "Copilot cannot exist here"
-// from "Copilot not enabled for this repo" (which the per-PR
-// review-request scan already handles via the two-consecutive-
-// not-requested rule, self-resolving in ~25s).
-//
-// When the lookup errors with anything other than 404, the probe
-// conservatively reports true — gh-observer keeps polling per-PR rather
-// than silently disabling a feature the user may rely on.
+// GitHub App exists on host, using a client built for that host.
+// See copilotReviewerExistsOnClient for the detection semantics.
 func CopilotReviewerExistsOnHost(ctx context.Context, token, host string) bool {
 	client, err := NewClientFromToken(token, host)
 	if err != nil {

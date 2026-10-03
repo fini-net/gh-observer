@@ -27,7 +27,7 @@ func FetchCheckRuns(ctx context.Context, client *github.Client, owner, repo, sha
 	// zero-value rate (enterprise host with rate limiting disabled, or a
 	// nil response) to the unknown default instead of a spurious
 	// "0 remaining" (see normalizeRateLimit).
-	remaining := unknownRateLimit
+	remaining := UnknownRateLimit
 	if resp != nil {
 		remaining = normalizeRateLimit(resp.Rate.Limit, resp.Rate.Remaining)
 	}

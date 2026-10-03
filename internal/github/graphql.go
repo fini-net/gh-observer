@@ -250,7 +250,7 @@ func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, re
 	var allCheckRuns []CheckRunInfo
 	var headPushedTime time.Time
 	var cursor *githubv4.String
-	rateLimitRemaining := unknownRateLimit
+	rateLimitRemaining := UnknownRateLimit
 
 	prNum, err := safeGraphQLInt(prNumber)
 	if err != nil {

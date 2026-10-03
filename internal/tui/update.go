@@ -95,40 +95,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case TickMsg:
 		// Independently cap the Copilot poll loop/row on copilot_max_wait,
-		// regardless of check completion (issue #442). Without this, a
-		// review that's requested but never submitted (copilotPending stays
-		// true forever, distinct from the two-consecutive-not-requested case
-		// below) polls and shows "in progress…" indefinitely — copilotGateSatisfied
-		// only bounds program exit, not this loop. Clearing copilotPending
-		// here also disarms the poll-dispatch condition below this same tick.
+		// regardless of check completion (issue #442). This runs BEFORE the
+		// rate-limit backoff return below: it is a pure local state
+		// transition with no API cost, so it must never be starved by
+		// backoff (the #442 GHES report — "192h elapsed" — was exactly this
+		// starvation: backoff early-returned on every tick).
 		//
-		// This block deliberately runs BEFORE the rate-limit backoff return
-		// below: it is a pure local state transition with no API cost, so it
-		// must not be starved by backoff — that is precisely the condition
-		// under which the timeout is most needed. The #442 follow-up report
-		// (GHES host, "192h elapsed") was caused by exactly this starvation:
-		// every tick took the backoff early-return before reaching this
-		// block, so the timeout never fired.
+		// The poll/rate-limit disjunct keeps the timeout from firing before a
+		// single Copilot poll has resolved anything. When the push predates
+		// copilot_max_wait (attaching to an old PR), the budget is already
+		// spent on arrival, and firing immediately would preempt the polls
+		// that distinguish the real cases: a long-completed review (show its
+		// state), a never-submitted request (show "giving up"), and no
+		// Copilot at all (resolve silently). The rate-limit arm (gated on
+		// fetchReceived so the pre-first-response zero value doesn't count)
+		// preserves starvation-proofing: when polls are suppressed by a
+		// genuinely low quota, the timeout fires anyway.
 		//
-		// The last-poll/rate-limit disjunct keeps the timeout from firing
-		// before a single Copilot poll has resolved anything. When the push
-		// predates copilot_max_wait (attaching to an old PR), the budget is
-		// already spent on arrival, and firing immediately would preempt the
-		// very polls that distinguish the real cases: a review that completed
-		// long ago (show its state), a request that never submitted (show
-		// "giving up"), and no Copilot at all (resolve silently). The
-		// rate-limit arm preserves starvation-proofing: when polls are
-		// suppressed by a genuinely low quota, the timeout fires anyway
-		// rather than spinning forever.
-		//
-		// copilotTimedOut is only set when Copilot was actually seen
-		// (copilotEvidenceSeen): "giving up" is meaningful for a review
-		// request that never completed, but for a repo that simply doesn't
-		// use Copilot it reproduces the #442 confusion — a Copilot row for a
-		// repo with no Copilot. No evidence + spent budget resolves silently.
+		// copilotTimedOut is only set when Copilot was actually seen: "giving
+		// up" is meaningful for a request that never completed, but for a repo
+		// without Copilot it reproduces the #442 confusion. No evidence +
+		// spent budget resolves silently.
 		if m.waitForCopilot && m.copilotPending && !m.copilotReviewComplete &&
 			!m.copilotStale && copilotMaxWaitElapsed(&m) &&
-			(!m.copilotLastPoll.IsZero() || m.rateLimitRemaining < minRateLimitForFetch) {
+			(!m.copilotLastPoll.IsZero() || (m.fetchReceived && m.rateLimitRemaining < minRateLimitForFetch)) {
 			m.copilotPending = false
 			m.copilotReviewComplete = true
 			m.copilotTimedOut = m.copilotEvidenceSeen
@@ -446,14 +436,6 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.rateLimitRemaining = msg.RateLimitRemaining
-	// A successful response must never read as "0 remaining": genuine
-	// exhaustion fails the request instead (see normalizeRateLimit). This
-	// guard is defensive symmetry with handleCopilotReview's >0 check, in
-	// case a future code path threads a raw zero through.
-	if m.rateLimitRemaining <= 0 {
-		m.rateLimitRemaining = ghclient.UnknownRateLimit
-		debug.Log("zero rate limit observed on successful response; treating as unknown")
-	}
 	m.fetchReceived = true
 	m.lastUpdate = time.Now()
 	m.err = nil
@@ -605,6 +587,11 @@ func (m *Model) handleCopilotReview(msg CopilotReviewMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Fold the Copilot query's rate-limit observation into the model's
+	// accounting, taking the minimum. The >0 guard keeps error-path zeros
+	// (no response was received) from spuriously engaging backoff; a real
+	// 0 from a successful query is preserved by the source-layer
+	// normalization only when absent (see normalizeRateLimit).
 	if msg.RateLimitRemaining > 0 && msg.RateLimitRemaining < m.rateLimitRemaining {
 		m.rateLimitRemaining = msg.RateLimitRemaining
 	}

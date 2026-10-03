@@ -247,8 +247,8 @@ func TestFetchCheckRunsForRef(t *testing.T) {
 	// disabled): the zero-value Rate must normalize to the unknown default,
 	// not read as "0 remaining" — a spurious 0 would pin the app in
 	// permanent rate-limit backoff (issue #442).
-	if result.RateLimitRemaining != unknownRateLimit {
-		t.Errorf("RateLimitRemaining = %d, want %d (unknown default; no rate headers sent)", result.RateLimitRemaining, unknownRateLimit)
+	if result.RateLimitRemaining != UnknownRateLimit {
+		t.Errorf("RateLimitRemaining = %d, want %d (unknown default; no rate headers sent)", result.RateLimitRemaining, UnknownRateLimit)
 	}
 }
 
@@ -329,8 +329,8 @@ func TestFetchRunJobsREST(t *testing.T) {
 	// No X-RateLimit headers (e.g. enterprise host with rate limiting
 	// disabled): normalize to the unknown default, not "0 remaining"
 	// (issue #442).
-	if rateLimit != unknownRateLimit {
-		t.Errorf("rateLimit = %d, want %d (unknown default; no rate headers sent)", rateLimit, unknownRateLimit)
+	if rateLimit != UnknownRateLimit {
+		t.Errorf("rateLimit = %d, want %d (unknown default; no rate headers sent)", rateLimit, UnknownRateLimit)
 	}
 }
 
@@ -629,8 +629,8 @@ func TestEnrichRepoRunsWithJobs(t *testing.T) {
 	// disabled): FetchRunJobs normalizes to the unknown default, which
 	// EnrichRepoRunsWithJobs takes as the minimum observed — NOT a spurious
 	// "0 remaining" that would pin the app in permanent backoff (issue #442).
-	if rateLimit != unknownRateLimit {
-		t.Errorf("rateLimit = %d, want %d (unknown default; no rate headers sent)", rateLimit, unknownRateLimit)
+	if rateLimit != UnknownRateLimit {
+		t.Errorf("rateLimit = %d, want %d (unknown default; no rate headers sent)", rateLimit, UnknownRateLimit)
 	}
 }
 
