@@ -294,6 +294,7 @@ func TestFetchCommitPushedTime_PushedDateWins(t *testing.T) {
 	resp := commitPushedDateQuery{}
 	resp.Repository.Object.Commit.PushedDate.Time = pushed
 	resp.Repository.Object.Commit.CommittedDate.Time = committed
+	resp.RateLimit.Limit = 5000
 	resp.RateLimit.Remaining = 4999
 
 	mock := &mockPushedDateQuerier{responses: []commitPushedDateQuery{resp}}
@@ -313,6 +314,7 @@ func TestFetchCommitPushedTime_FallsBackToCommittedDate(t *testing.T) {
 
 	resp := commitPushedDateQuery{}
 	resp.Repository.Object.Commit.CommittedDate.Time = committed
+	resp.RateLimit.Limit = 5000
 	resp.RateLimit.Remaining = 4998
 
 	mock := &mockPushedDateQuerier{responses: []commitPushedDateQuery{resp}}
@@ -330,6 +332,7 @@ func TestFetchCommitPushedTime_FallsBackToCommittedDate(t *testing.T) {
 // while the rate limit is still surfaced for the caller's accounting.
 func TestFetchCommitPushedTime_ZeroWhenAbsent(t *testing.T) {
 	resp := commitPushedDateQuery{}
+	resp.RateLimit.Limit = 5000
 	resp.RateLimit.Remaining = 4997
 	mock := &mockPushedDateQuerier{responses: []commitPushedDateQuery{resp}}
 	got, rl := fetchCommitPushedTimeWithClient(context.Background(), mock, "owner", "repo", "deadbeef")

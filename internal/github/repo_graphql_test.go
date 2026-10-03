@@ -262,6 +262,7 @@ func makeRepoPRQuery(prNumber int, title, headSHA, checkName, workflowName strin
 	startedAt.Time = time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 
 	q := &repoPRQuery{}
+	q.RateLimit.Limit = 5000
 	q.RateLimit.Remaining = rateLimit
 
 	pr := struct {

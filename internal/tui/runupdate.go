@@ -130,6 +130,11 @@ func (m *RunModel) handleRunJobsUpdate(msg RunJobsUpdateMsg) (tea.Model, tea.Cmd
 	m.jobs = msg.Jobs
 	SortRunJobs(m.jobs)
 	m.rateLimitRemaining = msg.RateLimitRemaining
+	// A raw zero from a successful fetch means "unknown" (enterprise host
+	// with rate limiting disabled), not exhausted — normalize it (issue #442).
+	if m.rateLimitRemaining <= 0 {
+		m.rateLimitRemaining = ghclient.UnknownRateLimit
+	}
 	m.fetchReceived = true
 	m.lastUpdate = time.Now()
 	m.err = nil

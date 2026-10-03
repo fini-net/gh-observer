@@ -373,6 +373,11 @@ func (m Model) renderCopilotStatusLine() string {
 	if m.copilotWaitStartTime.IsZero() {
 		return ""
 	}
+	// Hosts the capability probe found incapable never show a Copilot status
+	// line (issue #442) — Copilot code review cannot exist there at all.
+	if m.copilotHostChecked && !m.copilotHostCapable {
+		return ""
+	}
 	if m.copilotPending && !m.copilotStale {
 		remaining := time.Until(m.copilotPollStartTime)
 		if remaining > 0 {
@@ -382,9 +387,31 @@ func (m Model) renderCopilotStatusLine() string {
 			return fmt.Sprintf("%s %s\n", m.spinner.View(),
 				m.styles.Running.Render(fmt.Sprintf("Copilot review queued, polling in %s…", timing.FormatDuration(remaining))))
 		}
-		elapsed := time.Since(m.copilotPollStartTime)
+		// Pre-evidence (issue #442): polls are running but nothing has
+		// positively identified Copilot on this PR yet (requests empty, no
+		// reviews). Show a neutral "checking" line instead of "in
+		// progress" — the overwhelming majority of repos don't use Copilot
+		// and would otherwise read "in progress" as a real review running.
+		// The two-consecutive-not-requested rule resolves this within ~2
+		// polls; the give-up countdown appears once evidence is seen.
+		if !m.copilotEvidenceSeen {
+			return fmt.Sprintf("%s %s\n", m.spinner.View(),
+				m.styles.Running.Render("Checking for Copilot review…"))
+		}
+		// Once polling has started, show what the wait budget actually is:
+		// a give-up countdown to copilot_max_wait (issue #442). The elapsed
+		// time since copilotPollStartTime is the commit's push age when the
+		// gate was re-anchored, not the review's runtime — displaying
+		// "192h elapsed" for a freshly-attached watch was actively
+		// misleading. The countdown communicates both elapsed time and how
+		// much longer gh-observer will wait.
+		giveUpIn := time.Until(m.copilotWaitStartTime.Add(m.copilotMaxWait))
+		if giveUpIn > 0 {
+			return fmt.Sprintf("%s %s\n", m.spinner.View(),
+				m.styles.Running.Render(fmt.Sprintf("Copilot review in progress… (giving up in %s)", timing.FormatDuration(giveUpIn))))
+		}
 		return fmt.Sprintf("%s %s\n", m.spinner.View(),
-			m.styles.Running.Render(fmt.Sprintf("Copilot review in progress… (%s elapsed)", timing.FormatDuration(elapsed))))
+			m.styles.Running.Render("Copilot review in progress…"))
 	}
 	return ""
 }
@@ -418,6 +445,22 @@ func (m Model) buildCopilotCheckRun() *ghclient.CheckRunInfo {
 	}
 	// Only render once the Copilot gate has been armed by PRInfoMsg.
 	if m.copilotWaitStartTime.IsZero() {
+		return nil
+	}
+	// Hosts the capability probe found incapable never show the row
+	// (issue #442): the Copilot reviewer app doesn't exist there at all.
+	if m.copilotHostChecked && !m.copilotHostCapable {
+		return nil
+	}
+	// Evidence gating (issue #442): hide the row until a poll has positively
+	// seen Copilot on this PR (request, review, or stale review). Repos that
+	// never use Copilot would otherwise see a phantom queued/in-progress row
+	// for the whole two-consecutive-not-requested window; the neutral
+	// "checking…" status line covers the pre-evidence gap instead. Once a
+	// request is seen the row appears immediately and stays through the
+	// pending and terminal states.
+	if !m.copilotEvidenceSeen && !m.copilotStale && !m.copilotTimedOut &&
+		!m.copilotReviewComplete {
 		return nil
 	}
 

@@ -117,6 +117,21 @@ type Model struct {
 	// up waiting entirely — it independently caps the poll loop and row
 	// display, not just program exit (issue #442).
 	copilotTimedOut bool
+	// copilotEvidenceSeen is true once any poll has seen positive evidence
+	// of Copilot on this PR (a review request or a review, including stale
+	// ones). Until then the synthetic Copilot row stays hidden — non-Copilot
+	// repos see a "checking for Copilot…" status line instead of a phantom
+	// queued/in-progress row (issue #442). The two-consecutive-
+	// not-requested rule resolves the gate on the same schedule either way;
+	// this only affects what is displayed pre-evidence.
+	copilotEvidenceSeen bool
+	// copilotHostChecked is true once the host capability probe has
+	// resolved. copilotHostCapable is its result: false means the host has no
+	// Copilot reviewer app at all (e.g. GitHub Enterprise Server without
+	// Copilot code review), so the gate is never armed, no probe fetches
+	// fire, and no Copilot row renders (issue #442).
+	copilotHostChecked bool
+	copilotHostCapable bool
 }
 
 // NewModel creates a new TUI model

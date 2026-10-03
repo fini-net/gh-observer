@@ -136,6 +136,7 @@ type pullRequestQuery struct {
 		} `graphql:"pullRequest(number: $prNumber)"`
 	} `graphql:"repository(owner: $owner, name: $repo)"`
 	RateLimit struct {
+		Limit     int
 		Remaining int
 	}
 }
@@ -249,7 +250,7 @@ func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, re
 	var allCheckRuns []CheckRunInfo
 	var headPushedTime time.Time
 	var cursor *githubv4.String
-	rateLimitRemaining := 5000
+	rateLimitRemaining := unknownRateLimit
 
 	prNum, err := safeGraphQLInt(prNumber)
 	if err != nil {
@@ -277,8 +278,12 @@ func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, re
 
 		debug.Log("graphql query success", "owner", owner, "repo", repo, "pr", prNumber, "rate_limit_remaining", query.RateLimit.Remaining)
 
-		if query.RateLimit.Remaining < rateLimitRemaining {
-			rateLimitRemaining = query.RateLimit.Remaining
+		// Normalize per-page: an enterprise host with rate limiting disabled
+		// returns null here (zero-value struct), which must not look like a
+		// "0 remaining" quota (see normalizeRateLimit).
+		remaining := normalizeRateLimit(query.RateLimit.Limit, query.RateLimit.Remaining)
+		if remaining < rateLimitRemaining {
+			rateLimitRemaining = remaining
 		}
 
 		if len(query.Repository.PullRequest.Commits.Nodes) == 0 {

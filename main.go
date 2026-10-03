@@ -435,21 +435,28 @@ func runSnapshot(ctx context.Context, token, host, owner, repo string, prNumber 
 		}
 	}
 
-	// Copilot review snapshot (issue #409)
+	// Copilot review snapshot (issue #409). The host capability probe runs
+	// first: an incapable host (e.g. GitHub Enterprise Server without
+	// Copilot code review) prints a single explanatory line instead of
+	// querying for reviews that cannot exist there (issue #442).
 	if waitForCopilot {
-		review, _, copilotErr := ghclient.FetchCopilotReview(ctx, token, host, owner, repo, prNumber, prInfo.HeadSHA)
-		if copilotErr != nil {
-			fmt.Printf("Copilot: unavailable (%v)\n", copilotErr)
-		} else if review.NotRequested && !review.Stale {
-			fmt.Println("Copilot: not requested")
-		} else if review.Stale {
-			fmt.Println("Copilot: stale (review targets old commit)")
-		} else if review.Pending {
-			fmt.Println("Copilot: in progress")
+		if !ghclient.CopilotReviewerExistsOnHost(ctx, token, host) {
+			fmt.Println("Copilot: not available on this host")
 		} else {
-			fmt.Printf("Copilot: %s\n", review.State)
-			if ghclient.CopilotReviewFails(review.State) {
-				exitCode = 1
+			review, _, copilotErr := ghclient.FetchCopilotReview(ctx, token, host, owner, repo, prNumber, prInfo.HeadSHA)
+			if copilotErr != nil {
+				fmt.Printf("Copilot: unavailable (%v)\n", copilotErr)
+			} else if review.NotRequested && !review.Stale {
+				fmt.Println("Copilot: not requested")
+			} else if review.Stale {
+				fmt.Println("Copilot: stale (review targets old commit)")
+			} else if review.Pending {
+				fmt.Println("Copilot: in progress")
+			} else {
+				fmt.Printf("Copilot: %s\n", review.State)
+				if ghclient.CopilotReviewFails(review.State) {
+					exitCode = 1
+				}
 			}
 		}
 	}

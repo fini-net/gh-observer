@@ -34,10 +34,41 @@ func TestBuildCopilotCheckRun(t *testing.T) {
 		}
 	})
 
-	t.Run("initial delay window: queued + pending", func(t *testing.T) {
+	// Evidence gating (issue #442): before any poll has positively seen
+	// Copilot on this PR, the row stays hidden — non-Copilot repos see the
+	// neutral "checking…" status line instead of a phantom row.
+	t.Run("no evidence yet returns nil (row hidden)", func(t *testing.T) {
 		m := &Model{
 			waitForCopilot:       true,
 			copilotPending:       true,
+			copilotWaitStartTime: now,
+			copilotPollStartTime: now.Add(-5 * time.Second), // polling active
+		}
+		if got := m.buildCopilotCheckRun(); got != nil {
+			t.Errorf("expected nil before evidence seen, got %+v", got)
+		}
+	})
+
+	t.Run("incapable host returns nil even with evidence", func(t *testing.T) {
+		m := &Model{
+			waitForCopilot:       true,
+			copilotHostChecked:   true,
+			copilotHostCapable:   false,
+			copilotEvidenceSeen:  true,
+			copilotPending:       true,
+			copilotWaitStartTime: now,
+			copilotPollStartTime: now.Add(-5 * time.Second),
+		}
+		if got := m.buildCopilotCheckRun(); got != nil {
+			t.Errorf("expected nil on incapable host, got %+v", got)
+		}
+	})
+
+	t.Run("initial delay window: queued + pending (evidence seen)", func(t *testing.T) {
+		m := &Model{
+			waitForCopilot:       true,
+			copilotPending:       true,
+			copilotEvidenceSeen:  true,
 			copilotWaitStartTime: now,
 			copilotPollStartTime: now.Add(15 * time.Second),
 			copilotInitialDelay:  15 * time.Second,
@@ -63,11 +94,12 @@ func TestBuildCopilotCheckRun(t *testing.T) {
 		}
 	})
 
-	t.Run("polling in progress: in_progress + StartedAt set", func(t *testing.T) {
+	t.Run("polling in progress: in_progress + StartedAt set (evidence seen)", func(t *testing.T) {
 		pollStart := now.Add(-30 * time.Second) // polling started 30s ago
 		m := &Model{
 			waitForCopilot:       true,
 			copilotPending:       true,
+			copilotEvidenceSeen:  true,
 			copilotWaitStartTime: now.Add(-45 * time.Second),
 			copilotPollStartTime: pollStart,
 		}
@@ -398,9 +430,10 @@ func TestBuildCopilotCheckRun_TimedOut(t *testing.T) {
 // return before the call site — see the comment in View() for the tradeoff.
 func TestRenderCopilotStatusLine_PendingCountdown(t *testing.T) {
 	m := &Model{
-		styles:               stylesForTest(),
-		waitForCopilot:       true,
-		copilotPending:       true,
+		styles:              stylesForTest(),
+		waitForCopilot:      true,
+		copilotPending:      true,
+		copilotEvidenceSeen: true,
 		copilotWaitStartTime: time.Now(),
 		copilotPollStartTime: time.Now().Add(15 * time.Second),
 	}
@@ -410,6 +443,79 @@ func TestRenderCopilotStatusLine_PendingCountdown(t *testing.T) {
 	}
 	if !strings.Contains(line, "Copilot review queued, polling in") {
 		t.Errorf("status line should show countdown while in initial-delay window, got %q", line)
+	}
+}
+
+// TestRenderCopilotStatusLine_GiveUpCountdown verifies the post-initial-delay
+// status line shows how much longer gh-observer will wait (a countdown to
+// copilot_max_wait) instead of elapsed time. The elapsed form displayed the
+// commit's push age when the gate was re-anchored — "192h elapsed" on a
+// freshly-attached watch — which read as a review that had been running for
+// a week (issue #442).
+func TestRenderCopilotStatusLine_GiveUpCountdown(t *testing.T) {
+	m := &Model{
+		styles:               stylesForTest(),
+		waitForCopilot:       true,
+		copilotPending:       true,
+		copilotEvidenceSeen:  true,
+		copilotWaitStartTime: time.Now().Add(-30 * time.Second),
+		copilotPollStartTime: time.Now().Add(-15 * time.Second),
+		copilotMaxWait:       3 * time.Minute,
+	}
+	line := m.renderCopilotStatusLine()
+	if line == "" {
+		t.Fatal("expected non-empty status line while polling in progress")
+	}
+	if !strings.Contains(line, "giving up in") {
+		t.Errorf("status line should show the give-up countdown, got %q", line)
+	}
+	if strings.Contains(line, "elapsed") {
+		t.Errorf("status line must not show elapsed push-age, got %q", line)
+	}
+}
+
+// TestRenderCopilotStatusLine_CheckingPreEvidence verifies the neutral
+// pre-evidence line: once polling has started but nothing has positively
+// identified Copilot on this PR, users see "Checking for Copilot review…"
+// instead of "Copilot review in progress…" — most repos don't use Copilot,
+// and "in progress" implies a review is actually running (issue #442).
+func TestRenderCopilotStatusLine_CheckingPreEvidence(t *testing.T) {
+	m := &Model{
+		styles:               stylesForTest(),
+		waitForCopilot:       true,
+		copilotPending:       true,
+		copilotEvidenceSeen:  false,
+		copilotWaitStartTime: time.Now().Add(-30 * time.Second),
+		copilotPollStartTime: time.Now().Add(-15 * time.Second),
+		copilotMaxWait:       3 * time.Minute,
+	}
+	line := m.renderCopilotStatusLine()
+	if line == "" {
+		t.Fatal("expected non-empty status line while checking pre-evidence")
+	}
+	if !strings.Contains(line, "Checking for Copilot review") {
+		t.Errorf("status line should show neutral checking text pre-evidence, got %q", line)
+	}
+	if strings.Contains(line, "in progress") {
+		t.Errorf("pre-evidence status line must not claim a review is in progress, got %q", line)
+	}
+}
+
+// TestRenderCopilotStatusLine_IncapableHostReturnsEmpty verifies the status
+// line is suppressed on hosts the capability probe found incapable — no
+// Copilot reviewer app exists there at all (issue #442).
+func TestRenderCopilotStatusLine_IncapableHostReturnsEmpty(t *testing.T) {
+	m := &Model{
+		styles:              stylesForTest(),
+		waitForCopilot:      true,
+		copilotPending:      true,
+		copilotHostChecked:  true,
+		copilotHostCapable:  false,
+		copilotWaitStartTime: time.Now(),
+		copilotPollStartTime: time.Now().Add(-5 * time.Second),
+	}
+	if got := m.renderCopilotStatusLine(); got != "" {
+		t.Errorf("status line should be empty on an incapable host, got %q", got)
 	}
 }
 

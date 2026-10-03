@@ -102,9 +102,14 @@ func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, 
 	// so the zero default doesn't pin rateLimitRemaining at 0 forever (which
 	// would trigger permanent rate-limit backoff and show "0 remaining").
 	// Mirrors handleRepoRunsUpdate so neither source can raise the value
-	// past what the other already observed.
+	// past what the other already observed. A raw zero from a successful
+	// fetch means "unknown" (enterprise host with rate limiting disabled),
+	// not exhausted — normalize it (issue #442).
 	if !m.fetchReceived || msg.RateLimitRemaining < m.rateLimitRemaining {
 		m.rateLimitRemaining = msg.RateLimitRemaining
+	}
+	if m.rateLimitRemaining <= 0 {
+		m.rateLimitRemaining = ghclient.UnknownRateLimit
 	}
 	m.lastUpdate = time.Now()
 	m.fetchErrChecks = nil
@@ -189,8 +194,13 @@ func (m *RepoModel) handleRepoRunsUpdate(msg RepoRunsUpdateMsg) (tea.Model, tea.
 	// Take the minimum across sources, but accept the first observed value
 	// so the zero default doesn't pin rateLimitRemaining at 0 forever (which
 	// would trigger permanent rate-limit backoff and show "0 remaining").
+	// A raw zero from a successful fetch means "unknown" (enterprise host
+	// with rate limiting disabled), not exhausted — normalize it (issue #442).
 	if !m.fetchReceived || msg.RateLimitRemaining < m.rateLimitRemaining {
 		m.rateLimitRemaining = msg.RateLimitRemaining
+	}
+	if m.rateLimitRemaining <= 0 {
+		m.rateLimitRemaining = ghclient.UnknownRateLimit
 	}
 	m.lastUpdate = time.Now()
 	m.fetchErrRuns = nil
