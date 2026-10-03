@@ -34,6 +34,20 @@ presumed_averages:
 # wait_for_copilot.sh. Copilot reviews don't appear in StatusCheckRollup, so
 # without this gh-observer would quit "green" while Copilot is still reviewing.
 # Set wait_for_copilot: false for repos that don't use Copilot.
+#
+# Host capability (issue #442): at startup gh-observer checks whether the
+# Copilot reviewer app exists on the host at all. Hosts without it (e.g.
+# GitHub Enterprise Server without Copilot code review) never arm the gate,
+# never render the Copilot row, and don't query for reviews. Only a
+# definitive 404 for the reviewer disables detection; any other error
+# (network, auth, 5xx) keeps it enabled. Note: on enterprise setups where
+# SSO or token scope can produce 404s for existing users, detection may be
+# disabled conservatively — the per-PR scan self-resolves either way, and
+# if you hit this, please open an issue.
+#
+# The synthetic Copilot row only appears once a poll has positively seen a
+# Copilot review request or review on the PR; until then a neutral
+# "Checking for Copilot review…" line shows instead.
 wait_for_copilot: true
 
 # Maximum total wall-clock time to wait for a Copilot review before giving up:
@@ -51,5 +65,8 @@ copilot_poll_interval: 10s
 
 # Initial delay before the first Copilot review poll, giving GitHub time to
 # create the review request after a push. Bounded by copilot_max_wait above
-# (the delay counts toward the total wait, it does not add to it).
+# (the delay counts toward the total wait, it does not add to it). Skipped
+# when the PR's latest push already predates this window (e.g. attaching to
+# an old PR): any review request already exists by then, so polling starts
+# immediately.
 copilot_initial_delay: 15s

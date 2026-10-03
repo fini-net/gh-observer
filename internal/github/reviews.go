@@ -66,6 +66,7 @@ type copilotReviewQuery struct {
 		} `graphql:"pullRequest(number: $prNumber)"`
 	} `graphql:"repository(owner: $owner, name: $repo)"`
 	RateLimit struct {
+		Limit     int
 		Remaining int
 	}
 }
@@ -85,7 +86,7 @@ func fetchCopilotReview(ctx context.Context, client graphqlQuerier, owner, repo 
 	var query copilotReviewQuery
 	prNum, err := safeGraphQLInt(prNumber)
 	if err != nil {
-		return CopilotReview{}, 5000, err
+		return CopilotReview{}, UnknownRateLimit, err
 	}
 	variables := map[string]any{
 		"owner":    githubv4.String(owner),
@@ -95,7 +96,7 @@ func fetchCopilotReview(ctx context.Context, client graphqlQuerier, owner, repo 
 
 	if err := client.Query(ctx, &query, variables); err != nil {
 		debug.Log("copilot review query failed", "owner", owner, "repo", repo, "pr", prNumber, "err", err)
-		return CopilotReview{}, 5000, err
+		return CopilotReview{}, UnknownRateLimit, err
 	}
 
 	debug.Log("copilot review query success", "owner", owner, "repo", repo, "pr", prNumber,
@@ -104,7 +105,7 @@ func fetchCopilotReview(ctx context.Context, client graphqlQuerier, owner, repo 
 		"reviews", len(query.Repository.PullRequest.Reviews.Nodes))
 
 	review := parseCopilotReview(&query, headSHA)
-	return review, query.RateLimit.Remaining, nil
+	return review, normalizeRateLimit(query.RateLimit.Limit, query.RateLimit.Remaining), nil
 }
 
 // parseCopilotReview extracts the Copilot review state from a GraphQL response,

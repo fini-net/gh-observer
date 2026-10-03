@@ -665,7 +665,10 @@ func makeContextNodeCheckRun(name, status, conclusion string) contextNode {
 
 func makeTestQuery(checkRunNames []string, hasNextPage bool, endCursor string, rateLimitRemaining int) *pullRequestQuery {
 	q := &pullRequestQuery{
-		RateLimit: struct{ Remaining int }{Remaining: rateLimitRemaining},
+		RateLimit: struct {
+			Limit     int
+			Remaining int
+		}{Limit: 5000, Remaining: rateLimitRemaining},
 	}
 
 	var nodes []contextNode
@@ -753,7 +756,10 @@ func TestFetchCheckRunsGraphQL_MultiPagePagination(t *testing.T) {
 
 func TestFetchCheckRunsGraphQL_EmptyCommits(t *testing.T) {
 	q := &pullRequestQuery{
-		RateLimit: struct{ Remaining int }{Remaining: 4999},
+		RateLimit: struct {
+			Limit     int
+			Remaining int
+		}{Limit: 5000, Remaining: 4999},
 	}
 	mock := &mockQuerier{
 		responses: []mockResponse{{query: q}},

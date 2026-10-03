@@ -102,7 +102,10 @@ func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, 
 	// so the zero default doesn't pin rateLimitRemaining at 0 forever (which
 	// would trigger permanent rate-limit backoff and show "0 remaining").
 	// Mirrors handleRepoRunsUpdate so neither source can raise the value
-	// past what the other already observed.
+	// past what the other already observed. Absent rate limits (enterprise
+	// hosts with rate limiting disabled) are normalized at the source layer
+	// (see normalizeRateLimit), so a 0 reaching here is a real exhausted
+	// quota and is honored.
 	if !m.fetchReceived || msg.RateLimitRemaining < m.rateLimitRemaining {
 		m.rateLimitRemaining = msg.RateLimitRemaining
 	}
@@ -189,6 +192,9 @@ func (m *RepoModel) handleRepoRunsUpdate(msg RepoRunsUpdateMsg) (tea.Model, tea.
 	// Take the minimum across sources, but accept the first observed value
 	// so the zero default doesn't pin rateLimitRemaining at 0 forever (which
 	// would trigger permanent rate-limit backoff and show "0 remaining").
+	// Absent rate limits (enterprise hosts with rate limiting disabled) are
+	// normalized at the source layer (see normalizeRateLimit), so a 0
+	// reaching here is a real exhausted quota and is honored.
 	if !m.fetchReceived || msg.RateLimitRemaining < m.rateLimitRemaining {
 		m.rateLimitRemaining = msg.RateLimitRemaining
 	}

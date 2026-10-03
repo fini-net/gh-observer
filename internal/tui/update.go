@@ -62,11 +62,20 @@ func canTrustCompletion(m *Model) bool {
 
 // Init initializes the model
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.spinner.Tick,
 		fetchPRInfo(m.ctx, m.token, m.host, m.owner, m.repo, m.prNumber),
 		tick(m.refreshInterval),
-	)
+	}
+	// One-shot host capability probe (issue #442): check that the Copilot
+	// reviewer app exists on this host before arming any Copilot state. On
+	// hosts without it (e.g. GitHub Enterprise Server without Copilot code
+	// review) this prevents the gate from ever arming and the row from ever
+	// rendering.
+	if m.waitForCopilot {
+		cmds = append(cmds, fetchCopilotProbe(m.ctx, m.token, m.host))
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update handles messages
@@ -85,6 +94,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case TickMsg:
+		// Independently cap the Copilot poll loop/row on copilot_max_wait,
+		// regardless of check completion (issue #442). This runs BEFORE the
+		// rate-limit backoff return below: it is a pure local state
+		// transition with no API cost, so it must never be starved by
+		// backoff (the #442 GHES report — "192h elapsed" — was exactly this
+		// starvation: backoff early-returned on every tick).
+		//
+		// The poll/rate-limit disjunct keeps the timeout from firing before a
+		// single Copilot poll has resolved anything. When the push predates
+		// copilot_max_wait (attaching to an old PR), the budget is already
+		// spent on arrival, and firing immediately would preempt the polls
+		// that distinguish the real cases: a long-completed review (show its
+		// state), a never-submitted request (show "giving up"), and no
+		// Copilot at all (resolve silently). The rate-limit arm (gated on
+		// fetchReceived so the pre-first-response zero value doesn't count)
+		// preserves starvation-proofing: when polls are suppressed by a
+		// genuinely low quota, the timeout fires anyway.
+		//
+		// copilotTimedOut is only set when Copilot was actually seen: "giving
+		// up" is meaningful for a request that never completed, but for a repo
+		// without Copilot it reproduces the #442 confusion. No evidence +
+		// spent budget resolves silently.
+		if m.waitForCopilot && m.copilotPending && !m.copilotReviewComplete &&
+			!m.copilotStale && copilotMaxWaitElapsed(&m) &&
+			(!m.copilotLastPoll.IsZero() || (m.fetchReceived && m.rateLimitRemaining < minRateLimitForFetch)) {
+			m.copilotPending = false
+			m.copilotReviewComplete = true
+			m.copilotTimedOut = m.copilotEvidenceSeen
+			m.copilotState = ""
+			debug.Log("copilot poll timed out", "max_wait", m.copilotMaxWait, "evidence_seen", m.copilotEvidenceSeen)
+		}
+
 		// Check rate limit before polling. Gate on fetchReceived so the
 		// zero-value rateLimitRemaining (0) before the first successful
 		// response doesn't suppress the fetch that would clear that state.
@@ -99,27 +140,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tick(m.refreshInterval),
 		}
 
-		// Independently cap the Copilot poll loop/row on copilot_max_wait,
-		// regardless of check completion (issue #442). Without this, a
-		// review that's requested but never submitted (copilotPending stays
-		// true forever, distinct from the two-consecutive-not-requested case
-		// below) polls and shows "in progress…" indefinitely — copilotGateSatisfied
-		// only bounds program exit, not this loop. Clearing copilotPending
-		// here also disarms the poll-dispatch condition below this same tick.
-		if m.waitForCopilot && m.copilotPending && !m.copilotReviewComplete &&
-			!m.copilotStale && copilotMaxWaitElapsed(&m) {
-			m.copilotPending = false
-			m.copilotReviewComplete = true
-			m.copilotTimedOut = true
-			m.copilotState = ""
-			debug.Log("copilot poll timed out", "max_wait", m.copilotMaxWait)
-		}
-
 		// Poll Copilot review on its own cadence, gated on rate limit and
 		// the initial delay window (issue #409). copilotPollStartTime is
 		// PRInfoMsg-time + copilotInitialDelay; the first poll may fire only
 		// after that instant so GitHub has time to create the review request.
+		// Hosts the probe found incapable never poll (issue #442).
 		if m.waitForCopilot && m.copilotPending && !m.quitting &&
+			(!m.copilotHostChecked || m.copilotHostCapable) &&
 			m.rateLimitRemaining >= minRateLimitForFetch &&
 			!m.copilotPollStartTime.IsZero() && time.Now().After(m.copilotPollStartTime) &&
 			(m.copilotLastPoll.IsZero() || time.Since(m.copilotLastPoll) >= m.copilotPollInterval) {
@@ -161,34 +188,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The reset is kept for forward compatibility if PR info is ever
 		// re-polled (e.g. to detect force-pushes mid-watch).
 		if m.waitForCopilot {
-			if shaChanged {
-				m.copilotState = ""
-				m.copilotStale = false
+			// Do not arm the gate on hosts where the capability probe already
+			// determined the Copilot reviewer app doesn't exist (issue #442).
+			// While the probe is still in flight, arm optimistically — the
+			// probe result (CopilotProbeMsg) disarms below, and the
+			// two-consecutive-not-requested rule bounds the wait either way.
+			probeBlocks := m.copilotHostChecked && !m.copilotHostCapable
+			if !probeBlocks {
+				if shaChanged {
+					m.copilotState = ""
+					m.copilotStale = false
+					m.copilotReviewComplete = false
+					m.copilotNotReqStreak = 0
+					m.copilotTimedOut = false
+					debug.Log("copilot state reset on head SHA change", "old", oldSHA, "new", msg.HeadSHA)
+				}
+				m.copilotPending = true
 				m.copilotReviewComplete = false
-				m.copilotNotReqStreak = 0
-				m.copilotTimedOut = false
-				debug.Log("copilot state reset on head SHA change", "old", oldSHA, "new", msg.HeadSHA)
+				// copilotWaitStartTime bounds the total wall-clock wait for a
+				// Copilot review (copilot_max_wait); copilotPollStartTime is the
+				// initial-delay gate: the first poll may fire only after this
+				// instant, giving GitHub time to create the review request after a
+				// push. See copilotGateSatisfied and the TickMsg poll gate below.
+				//
+				// Both are provisional here, anchored to PR-info time (now) as a
+				// fallback in case the real push time never arrives. handleChecksUpdate
+				// re-anchors them to the actual push time (m.headPushedTime) as soon
+				// as it's known, so copilot_max_wait means "since push" like queue
+				// latency does, not "since gh-observer attached".
+				m.copilotWaitStartTime = time.Now()
+				m.copilotPollStartTime = time.Now().Add(m.copilotInitialDelay)
+				debug.Log("copilot gate armed",
+					"wait_start", m.copilotWaitStartTime,
+					"poll_start", m.copilotPollStartTime,
+					"max_wait", m.copilotMaxWait,
+					"initial_delay", m.copilotInitialDelay)
 			}
-			m.copilotPending = true
-			m.copilotReviewComplete = false
-			// copilotWaitStartTime bounds the total wall-clock wait for a
-			// Copilot review (copilot_max_wait); copilotPollStartTime is the
-			// initial-delay gate: the first poll may fire only after this
-			// instant, giving GitHub time to create the review request after a
-			// push. See copilotGateSatisfied and the TickMsg poll gate below.
-			//
-			// Both are provisional here, anchored to PR-info time (now) as a
-			// fallback in case the real push time never arrives. handleChecksUpdate
-			// re-anchors them to the actual push time (m.headPushedTime) as soon
-			// as it's known, so copilot_max_wait means "since push" like queue
-			// latency does, not "since gh-observer attached".
-			m.copilotWaitStartTime = time.Now()
-			m.copilotPollStartTime = time.Now().Add(m.copilotInitialDelay)
-			debug.Log("copilot gate armed",
-				"wait_start", m.copilotWaitStartTime,
-				"poll_start", m.copilotPollStartTime,
-				"max_wait", m.copilotMaxWait,
-				"initial_delay", m.copilotInitialDelay)
 		}
 
 		return m, tea.Batch(cmds...)
@@ -198,6 +233,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case CopilotReviewMsg:
 		return m.handleCopilotReview(msg)
+
+	case CopilotProbeMsg:
+		// One-shot host capability result (issue #442). An incapable host
+		// disarms the gate entirely: stop pending, hide the row, never poll.
+		m.copilotHostChecked = true
+		m.copilotHostCapable = msg.Capable
+		if !msg.Capable {
+			debug.Log("copilot reviewer absent on host; disabling copilot detection")
+			m.copilotPending = false
+			m.copilotReviewComplete = true
+			m.copilotState = ""
+			m.copilotStale = false
+			m.copilotTimedOut = false
+			m.copilotNotReqStreak = 0
+			m.copilotWaitStartTime = time.Time{}
+			m.copilotPollStartTime = time.Time{}
+		}
+		return m, nil
 
 	case WorkflowsDiscoveredMsg:
 		if msg.Err != nil {
@@ -361,11 +414,25 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 		// already older than the budget on attach doesn't get a fresh
 		// timeout. Only before the first poll, so the countdown/elapsed text
 		// never jumps mid-poll.
+		//
+		// The initial-delay window is also skipped when the push is already
+		// older than copilotInitialDelay (issue #442): the delay exists to
+		// give GitHub time to create the review request after a push, but a
+		// push that long predates the watch means any request already exists
+		// (or will never exist) — waiting the delay only delays the
+		// two-consecutive-not-requested resolution for repos that don't use
+		// Copilot, the vast majority case.
 		if firstPushTime && m.waitForCopilot && !m.copilotWaitStartTime.IsZero() && m.copilotLastPoll.IsZero() {
 			m.copilotWaitStartTime = msg.HeadPushedTime
-			m.copilotPollStartTime = msg.HeadPushedTime.Add(m.copilotInitialDelay)
-			debug.Log("copilot gate re-anchored to push time",
-				"wait_start", m.copilotWaitStartTime, "poll_start", m.copilotPollStartTime)
+			if time.Since(msg.HeadPushedTime) > m.copilotInitialDelay {
+				m.copilotPollStartTime = time.Now()
+				debug.Log("copilot gate re-anchored to push time (initial delay skipped; push already older)",
+					"wait_start", m.copilotWaitStartTime, "poll_start", m.copilotPollStartTime)
+			} else {
+				m.copilotPollStartTime = msg.HeadPushedTime.Add(m.copilotInitialDelay)
+				debug.Log("copilot gate re-anchored to push time",
+					"wait_start", m.copilotWaitStartTime, "poll_start", m.copilotPollStartTime)
+			}
 		}
 	}
 	m.rateLimitRemaining = msg.RateLimitRemaining
@@ -520,6 +587,11 @@ func (m *Model) handleCopilotReview(msg CopilotReviewMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Fold the Copilot query's rate-limit observation into the model's
+	// accounting, taking the minimum. The >0 guard keeps error-path zeros
+	// (no response was received) from spuriously engaging backoff; a real
+	// 0 from a successful query is preserved by the source-layer
+	// normalization only when absent (see normalizeRateLimit).
 	if msg.RateLimitRemaining > 0 && msg.RateLimitRemaining < m.rateLimitRemaining {
 		m.rateLimitRemaining = msg.RateLimitRemaining
 	}
@@ -541,6 +613,12 @@ func (m *Model) handleCopilotReview(msg CopilotReviewMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.copilotNotReqStreak = 0
+
+	// Any state here is positive evidence of Copilot on this PR — a request,
+	// a review, or a stale review from a previous commit. Used to gate the
+	// synthetic row's visibility (issue #442): repos that never use Copilot
+	// see "checking…" rather than a phantom queued/in-progress row.
+	m.copilotEvidenceSeen = true
 
 	m.copilotState = msg.State
 	m.copilotStale = msg.Stale
@@ -673,6 +751,16 @@ func fetchCopilotReview(ctx context.Context, token, host, owner, repo string, pr
 			NotRequested:       review.NotRequested,
 			RateLimitRemaining: rateLimit,
 		}
+	}
+}
+
+// fetchCopilotProbe runs the one-shot host capability probe (issue #442):
+// does the Copilot reviewer GitHub App exist on this host at all? Dispatched
+// from Init alongside fetchPRInfo so the result typically lands before the
+// initial-delay window closes and the first Copilot poll would fire.
+func fetchCopilotProbe(ctx context.Context, token, host string) tea.Cmd {
+	return func() tea.Msg {
+		return CopilotProbeMsg{Capable: ghclient.CopilotReviewerExistsOnHost(ctx, token, host)}
 	}
 }
 

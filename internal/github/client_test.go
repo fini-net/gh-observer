@@ -243,9 +243,12 @@ func TestFetchCheckRunsForRef(t *testing.T) {
 	if len(result.CheckRuns) != 2 {
 		t.Errorf("CheckRuns = %d, want 2", len(result.CheckRuns))
 	}
-	// No X-RateLimit headers: go-github decodes Rate.Remaining as 0.
-	if result.RateLimitRemaining != 0 {
-		t.Errorf("RateLimitRemaining = %d, want 0 (no rate headers sent)", result.RateLimitRemaining)
+	// No X-RateLimit headers (e.g. an enterprise host with rate limiting
+	// disabled): the zero-value Rate must normalize to the unknown default,
+	// not read as "0 remaining" — a spurious 0 would pin the app in
+	// permanent rate-limit backoff (issue #442).
+	if result.RateLimitRemaining != UnknownRateLimit {
+		t.Errorf("RateLimitRemaining = %d, want %d (unknown default; no rate headers sent)", result.RateLimitRemaining, UnknownRateLimit)
 	}
 }
 
@@ -323,9 +326,11 @@ func TestFetchRunJobsREST(t *testing.T) {
 	if jobs[2].Name != "lint" {
 		t.Errorf("jobs[2].Name = %q, want %q", jobs[2].Name, "lint")
 	}
-	// No X-RateLimit headers: go-github decodes Rate.Remaining as 0.
-	if rateLimit != 0 {
-		t.Errorf("rateLimit = %d, want 0 (no rate headers sent)", rateLimit)
+	// No X-RateLimit headers (e.g. enterprise host with rate limiting
+	// disabled): normalize to the unknown default, not "0 remaining"
+	// (issue #442).
+	if rateLimit != UnknownRateLimit {
+		t.Errorf("rateLimit = %d, want %d (unknown default; no rate headers sent)", rateLimit, UnknownRateLimit)
 	}
 }
 
@@ -620,10 +625,12 @@ func TestEnrichRepoRunsWithJobs(t *testing.T) {
 	if len(enriched[1].Jobs) != 0 {
 		t.Errorf("run 2 jobs = %d, want 0", len(enriched[1].Jobs))
 	}
-	// No X-RateLimit headers: FetchRunJobs reports 0, which EnrichRepoRunsWithJobs
-	// takes as the minimum observed.
-	if rateLimit != 0 {
-		t.Errorf("rateLimit = %d, want 0 (no rate headers sent)", rateLimit)
+	// No X-RateLimit headers (e.g. enterprise host with rate limiting
+	// disabled): FetchRunJobs normalizes to the unknown default, which
+	// EnrichRepoRunsWithJobs takes as the minimum observed — NOT a spurious
+	// "0 remaining" that would pin the app in permanent backoff (issue #442).
+	if rateLimit != UnknownRateLimit {
+		t.Errorf("rateLimit = %d, want %d (unknown default; no rate headers sent)", rateLimit, UnknownRateLimit)
 	}
 }
 

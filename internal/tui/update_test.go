@@ -1466,7 +1466,12 @@ func TestTickMsg_CopilotTimeout(t *testing.T) {
 		m.copilotMaxWait = 100 * time.Millisecond
 		m.copilotWaitStartTime = time.Now().Add(-200 * time.Millisecond)
 		m.copilotPollStartTime = time.Now().Add(-100 * time.Millisecond) // past, so poll would otherwise fire
-		m.copilotLastPoll = time.Time{}
+		// A poll has already fired (so the timeout isn't preempting the
+		// not-requested resolution) and saw a real review request (evidence
+		// seen) that never completed — the genuine "requested but never
+		// submitted" case the timed-out row exists for (issue #442).
+		m.copilotLastPoll = time.Now().Add(-20 * time.Second)
+		m.copilotEvidenceSeen = true
 		m.rateLimitRemaining = 5000
 		m.fetchReceived = true
 
@@ -1480,7 +1485,7 @@ func TestTickMsg_CopilotTimeout(t *testing.T) {
 			t.Error("copilotReviewComplete should be true once max wait elapses")
 		}
 		if !result.copilotTimedOut {
-			t.Error("copilotTimedOut should be true once max wait elapses")
+			t.Error("copilotTimedOut should be true once max wait elapses with evidence")
 		}
 		if result.copilotState != "" {
 			t.Errorf("copilotState = %q, want empty after timeout", result.copilotState)
@@ -1489,6 +1494,68 @@ func TestTickMsg_CopilotTimeout(t *testing.T) {
 		// since copilotPending is cleared before the poll-dispatch check runs.
 		if n := countBatchedCmds(cmd); n != 2 {
 			t.Errorf("TickMsg after max wait elapsed should not poll copilot; got %d cmds (want 2)", n)
+		}
+	})
+
+	t.Run("spent budget with no evidence resolves silently, not timed out", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.copilotMaxWait = 100 * time.Millisecond
+		m.copilotWaitStartTime = time.Now().Add(-5 * time.Minute) // push-anchored budget already spent
+		m.copilotPollStartTime = time.Now()
+		m.copilotLastPoll = time.Time{} // no poll has fired yet
+		m.rateLimitRemaining = 5000
+		m.fetchReceived = true
+
+		// First: a poll must still be dispatched so the not-requested rule
+		// can resolve; the timeout does not preempt it on a healthy quota.
+		_, cmd := m.Update(TickMsg(time.Now()))
+		if n := countBatchedCmds(cmd); n != 3 {
+			t.Errorf("first tick after spent budget should still dispatch a copilot poll; got %d cmds (want 3)", n)
+		}
+
+		// After polls ran but found nothing (no evidence), the timeout
+		// resolves silently — no "giving up" row for a repo that doesn't
+		// use Copilot (issue #442).
+		m.copilotLastPoll = time.Now()
+		model, _ := m.Update(TickMsg(time.Now()))
+		result := model.(Model)
+		if result.copilotPending {
+			t.Error("copilotPending should be false once the timeout resolves")
+		}
+		if result.copilotTimedOut {
+			t.Error("copilotTimedOut must NOT be set when Copilot was never seen on this PR")
+		}
+		if !result.copilotReviewComplete {
+			t.Error("copilotReviewComplete should be true once the timeout resolves")
+		}
+	})
+
+	t.Run("zero-value rate limit before first fetch does not fire the timeout", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.copilotMaxWait = 100 * time.Millisecond
+		m.copilotWaitStartTime = time.Now().Add(-200 * time.Millisecond)
+		m.copilotPollStartTime = time.Now().Add(-100 * time.Millisecond)
+		m.copilotLastPoll = time.Time{}  // no poll has fired yet
+		m.fetchReceived = false          // no successful response yet
+		m.rateLimitRemaining = 0         // pre-first-fetch zero value
+
+		model, _ := m.Update(TickMsg(time.Now()))
+		result := model.(Model)
+
+		// The rate-limit arm of the timeout disjunct must not treat the
+		// zero-value default as a genuinely low quota: before the first
+		// response arrives, no timeout — the gate stays pending so the
+		// first real poll can run (mirrors the backoff gate's own
+		// fetchReceived guard).
+		if result.copilotTimedOut {
+			t.Error("timeout must not fire on the pre-first-fetch zero rate limit")
+		}
+		if !result.copilotPending {
+			t.Error("gate should stay pending before any poll or fetch response")
 		}
 	})
 
@@ -1531,6 +1598,152 @@ func TestTickMsg_CopilotTimeout(t *testing.T) {
 	})
 }
 
+// TestTickMsg_CopilotTimeoutUnderBackoff reproduces the issue #442 follow-up
+// report: an enterprise host returned no usable rate limit, every tick took
+// the rate-limit backoff early-return, and the copilot_max_wait timeout —
+// which lived below that return — never fired. The TUI spun "Copilot review
+// in progress…" indefinitely (192h elapsed in the wild). The timeout must
+// fire regardless of backoff state, because it is a pure local state
+// transition with no API cost.
+func TestTickMsg_CopilotTimeoutUnderBackoff(t *testing.T) {
+	t.Run("timeout fires even while in rate-limit backoff", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.copilotState = "pending"
+		m.copilotMaxWait = 100 * time.Millisecond
+		m.copilotWaitStartTime = time.Now().Add(-200 * time.Millisecond)
+		m.copilotPollStartTime = time.Now().Add(-100 * time.Millisecond)
+		m.copilotLastPoll = time.Time{}
+		// A Copilot request was observed before the quota collapsed (evidence
+		// seen) — the timed-out row's "giving up" is accurate for it.
+		m.copilotEvidenceSeen = true
+		// Backoff condition is met: a previous "successful" response
+		// reported a critically low rate limit.
+		m.rateLimitRemaining = 5
+		m.fetchReceived = true
+
+		model, cmd := m.Update(TickMsg(time.Now()))
+		result := model.(Model)
+
+		if !result.copilotTimedOut {
+			t.Error("copilot_max_wait timeout must fire even during rate-limit backoff")
+		}
+		if result.copilotPending {
+			t.Error("copilotPending should be cleared by the timeout even during backoff")
+		}
+		if !result.copilotReviewComplete {
+			t.Error("copilotReviewComplete should be true after timeout under backoff")
+		}
+		// The backoff path returns only its delayed tick command.
+		if cmd == nil {
+			t.Fatal("expected a backoff tick command, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(TickMsg); !ok {
+			t.Errorf("expected TickMsg from backoff path, got %T", msg)
+		}
+	})
+}
+
+// TestCopilotProbeMsg reproduces the issue #442 enterprise scenario end to
+// end: the host capability probe returns "incapable" (no Copilot reviewer
+// app on the host), which must disarm the gate, stop all copilot polling,
+// and hide the row — no matter what state the gate was in.
+func TestCopilotProbeMsg(t *testing.T) {
+	t.Run("incapable host disarms an armed gate", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.copilotState = "pending"
+		m.copilotWaitStartTime = time.Now()
+		m.copilotPollStartTime = time.Now().Add(-1 * time.Second)
+
+		model, _ := m.Update(CopilotProbeMsg{Capable: false})
+		result := model.(Model)
+
+		if result.copilotPending {
+			t.Error("copilotPending should be false on an incapable host")
+		}
+		if !result.copilotReviewComplete {
+			t.Error("copilotReviewComplete should be true on an incapable host")
+		}
+		if !result.copilotHostChecked || result.copilotHostCapable {
+			t.Error("probe result should be recorded (checked=true, capable=false)")
+		}
+		if !result.copilotWaitStartTime.IsZero() {
+			t.Error("copilotWaitStartTime should be reset so no row/status line renders")
+		}
+	})
+
+	t.Run("capable host leaves armed gate untouched", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		waitStart := time.Now()
+		m.copilotWaitStartTime = waitStart
+
+		model, _ := m.Update(CopilotProbeMsg{Capable: true})
+		result := model.(Model)
+
+		if !result.copilotPending {
+			t.Error("copilotPending should remain true on a capable host")
+		}
+		if !result.copilotHostChecked || !result.copilotHostCapable {
+			t.Error("probe result should be recorded (checked=true, capable=true)")
+		}
+		if !result.copilotWaitStartTime.Equal(waitStart) {
+			t.Errorf("copilotWaitStartTime should remain armed on a capable host, got %v want %v",
+				result.copilotWaitStartTime, waitStart)
+		}
+	})
+
+	t.Run("incapable host prevents PRInfoMsg from re-arming", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotHostChecked = true
+		m.copilotHostCapable = false
+
+		model, _ := m.Update(PRInfoMsg{
+			Number:  1,
+			Title:   "test",
+			HeadSHA: "abc123",
+		})
+		result := model.(Model)
+
+		if result.copilotPending {
+			t.Error("PRInfoMsg must not arm the gate on a known-incapable host")
+		}
+		if !result.copilotWaitStartTime.IsZero() {
+			t.Error("copilotWaitStartTime must stay zero on a known-incapable host")
+		}
+	})
+}
+
+// TestTickMsg_NoCopilotPollOnIncapableHost verifies the poll-dispatch
+// condition excludes incapable hosts even when every other gate is open.
+func TestTickMsg_NoCopilotPollOnIncapableHost(t *testing.T) {
+	m := makeModel()
+	m.waitForCopilot = true
+	m.copilotPending = true
+	m.copilotHostChecked = true
+	m.copilotHostCapable = false
+	m.rateLimitRemaining = 5000
+	m.fetchReceived = true
+	m.copilotPollStartTime = time.Now().Add(-30 * time.Second)
+	m.copilotLastPoll = time.Time{}
+
+	model, cmd := m.Update(TickMsg(time.Now()))
+	result := model.(Model)
+	if result.copilotTimedOut {
+		t.Error("incapable host should not drive the timeout path (gate never armed)")
+	}
+	// Only the 2 baseline cmds (fetchCheckRuns + tick) — no copilot fetch.
+	if n := countBatchedCmds(cmd); n != 2 {
+		t.Errorf("incapable host should not dispatch copilot fetches; got %d cmds (want 2)", n)
+	}
+}
+
 // countBatchedCmds executes a tea.Cmd and, if it returns a tea.BatchMsg,
 // returns the number of batched commands. Returns 1 for a single (non-batch)
 // command and 0 for nil.
@@ -1557,7 +1770,10 @@ func TestCopilotWaitAnchorReanchorsToPushTime(t *testing.T) {
 		m.copilotWaitStartTime = time.Now()
 		m.copilotPollStartTime = time.Now().Add(m.copilotInitialDelay)
 
-		pushTime := time.Now().Add(-5 * time.Minute)
+		// Recent push (2s ago): inside the initial-delay window, so the
+		// poll start re-anchors to push + initial delay.
+		pushTime := time.Now().Add(-2 * time.Second)
+		before := time.Now()
 		model, _ := m.handleChecksUpdate(ChecksUpdateMsg{
 			CheckRuns:          []ghclient.CheckRunInfo{{Status: "in_progress"}},
 			HeadPushedTime:     pushTime,
@@ -1571,6 +1787,43 @@ func TestCopilotWaitAnchorReanchorsToPushTime(t *testing.T) {
 		wantPollStart := pushTime.Add(m.copilotInitialDelay)
 		if !result.copilotPollStartTime.Equal(wantPollStart) {
 			t.Errorf("copilotPollStartTime = %v, want %v", result.copilotPollStartTime, wantPollStart)
+		}
+		_ = before
+	})
+
+	t.Run("skips initial delay when push predates it", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotInitialDelay = 15 * time.Second
+		m.copilotMaxWait = 180 * time.Second
+
+		m.copilotPending = true
+		m.copilotWaitStartTime = time.Now()
+		m.copilotPollStartTime = time.Now().Add(m.copilotInitialDelay)
+
+		// Push happened 5 minutes ago — already older than the 15s
+		// initial-delay window. Any Copilot review request already exists
+		// (or never will), so the first poll fires immediately instead of
+		// waiting out the delay (issue #442). This is the attach-to-old-PR
+		// case: without the skip, non-Copilot repos sit through the full
+		// delay before the two-consecutive-not-requested rule can resolve.
+		pushTime := time.Now().Add(-5 * time.Minute)
+		before := time.Now()
+		model, _ := m.handleChecksUpdate(ChecksUpdateMsg{
+			CheckRuns:          []ghclient.CheckRunInfo{{Status: "in_progress"}},
+			HeadPushedTime:     pushTime,
+			RateLimitRemaining: 5000,
+		})
+		result := model.(*Model)
+
+		if !result.copilotWaitStartTime.Equal(pushTime) {
+			t.Errorf("copilotWaitStartTime = %v, want %v (real push time)", result.copilotWaitStartTime, pushTime)
+		}
+		// Poll start is "now" (between before and after the update), not
+		// pushTime+delay.
+		after := time.Now()
+		if result.copilotPollStartTime.Before(before) || result.copilotPollStartTime.After(after) {
+			t.Errorf("copilotPollStartTime = %v, want ~now (delay skipped for old push)", result.copilotPollStartTime)
 		}
 	})
 
