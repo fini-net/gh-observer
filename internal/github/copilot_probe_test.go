@@ -3,8 +3,12 @@ package github
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/go-github/v92/github"
 )
 
 // TestCopilotReviewerExistsOnClient covers the host capability probe
@@ -71,6 +75,88 @@ func TestCopilotReviewerExistsOnClient(t *testing.T) {
 		// both this and the %5Bbot%5D form).
 		if !strings.Contains(gotPath, "/users/copilot-pull-request-reviewer[bot]") {
 			t.Errorf("probe path = %q, want /users/copilot-pull-request-reviewer[bot]", gotPath)
+		}
+	})
+
+	t.Run("probe timeout conservatively means capable", func(t *testing.T) {
+		// A hung/slow host must not disable detection: the timeout leaves
+		// the per-PR scan as the source of truth.
+		origTimeout := copilotProbeTimeout
+		copilotProbeTimeout = 50 * time.Millisecond
+		t.Cleanup(func() { copilotProbeTimeout = origTimeout })
+
+		handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			time.Sleep(1 * time.Second) // far beyond the shrunken timeout
+			w.WriteHeader(http.StatusOK)
+		})
+		client := newTestClient(t, handler)
+		started := time.Now()
+		if got := copilotReviewerExistsOnClient(context.Background(), client); !got {
+			t.Error("expected true on probe timeout (conservative default; never disable on a hung host)")
+		}
+		if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+			t.Errorf("probe should respect copilotProbeTimeout, took %v", elapsed)
+		}
+	})
+}
+
+// TestCopilotReviewerExistsOnHost covers the host-level dispatch: the public
+// host short-circuits to capable without any request (the app provably
+// exists there — verified 2026-10-06 that GET
+// /users/copilot-pull-request-reviewer[bot] returns 200 on github.com, both
+// unauthenticated and tokened), while enterprise hosts get the real probe.
+// A github.com 404 is impossible to hit by construction, which is the point:
+// a false "incapable" can only ever originate from an enterprise host where
+// 404 is definitive.
+func TestCopilotReviewerExistsOnHost(t *testing.T) {
+	t.Run("github.com short-circuits to capable without a request", func(t *testing.T) {
+		// The short-circuit must hold for the empty host and
+		// case-insensitively, mirroring APIURLsForHost's host matching.
+		// The cancelled context makes any accidental real request fail
+		// immediately (which would still conservatively report true), so
+		// what this really locks in is the contract that matters
+		// behaviorally: the public host ALWAYS reports capable, never
+		// touches the network in a way that could disable detection, and
+		// returns promptly.
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		for _, host := range []string{"", "github.com", "GITHUB.COM"} {
+			started := time.Now()
+			if got := CopilotReviewerExistsOnHost(ctx, "ghp_not-a-real-token", host); !got {
+				t.Errorf("CopilotReviewerExistsOnHost(%q) = false, want true (public host is always capable)", host)
+			}
+			if elapsed := time.Since(started); elapsed > time.Second {
+				t.Errorf("CopilotReviewerExistsOnHost(%q) took %v; expected an immediate short-circuit", host, elapsed)
+			}
+		}
+	})
+
+	t.Run("unparseable enterprise host conservatively means capable", func(t *testing.T) {
+		// NewClientFromToken fails on an invalid derived API URL; the
+		// probe must keep detection enabled rather than silently
+		// disabling the feature (per-PR error paths surface the failure).
+		if got := CopilotReviewerExistsOnHost(context.Background(), "token", "ghe .example.com"); !got {
+			t.Error("expected true when client construction fails (conservative default)")
+		}
+	})
+
+	t.Run("enterprise host 404 means incapable", func(t *testing.T) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		})
+		server := httptest.NewServer(handler)
+		t.Cleanup(server.Close)
+
+		// Route an "enterprise" host at the test server by pointing the
+		// client at it directly — this exercises the same
+		// copilotReviewerExistsOnClient 404 logic an enterprise host
+		// reaches after client construction succeeds.
+		client, err := github.NewClient(github.WithURLs(ptrTo(server.URL+"/"), ptrTo(server.URL+"/")))
+		if err != nil {
+			t.Fatalf("client: %v", err)
+		}
+		if got := copilotReviewerExistsOnClient(context.Background(), client); got {
+			t.Error("expected false for 404 on an enterprise host without the Copilot reviewer app")
 		}
 	})
 }

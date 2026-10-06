@@ -1270,6 +1270,9 @@ func TestHandleCopilotReview(t *testing.T) {
 		if !result.copilotReviewComplete {
 			t.Error("copilotReviewComplete should be true after approved review")
 		}
+		if !result.copilotEvidenceSeen {
+			t.Error("copilotEvidenceSeen should be true after an approved review (positive Copilot evidence)")
+		}
 		if !result.quitting {
 			t.Error("should quit when checks complete and copilot approved")
 		}
@@ -1310,6 +1313,9 @@ func TestHandleCopilotReview(t *testing.T) {
 		if !result.copilotPending {
 			t.Error("copilotPending should remain true")
 		}
+		if !result.copilotEvidenceSeen {
+			t.Error("copilotEvidenceSeen should be true for a requested-but-not-submitted review (positive Copilot evidence)")
+		}
 		if result.quitting {
 			t.Error("should not quit while copilot pending")
 		}
@@ -1329,6 +1335,11 @@ func TestHandleCopilotReview(t *testing.T) {
 		result := model.(*Model)
 		if result.copilotPending {
 			t.Error("copilotPending should be false after stale")
+		}
+		// A stale review still proves the PR uses Copilot, so it counts as
+		// evidence for the row's visibility (issue #442).
+		if !result.copilotEvidenceSeen {
+			t.Error("copilotEvidenceSeen should be true after a stale review (a review exists on this PR)")
 		}
 		if !result.quitting {
 			t.Error("should quit with stale review when checks complete")
@@ -1362,6 +1373,51 @@ func TestHandleCopilotReview(t *testing.T) {
 		}
 		if !result.copilotReviewComplete {
 			t.Error("copilotReviewComplete should be true")
+		}
+		if result.copilotEvidenceSeen {
+			t.Error("copilotEvidenceSeen must stay false on the not-requested path (no Copilot on this PR — the row stays hidden)")
+		}
+	})
+
+	t.Run("real zero rate limit from a successful query is honored", func(t *testing.T) {
+		// Concern #3: error paths return UnknownRateLimit, so a 0 reaching
+		// the handler is a genuine exhausted quota from a successful query
+		// (normalizeRateLimit preserves it) and must lower the model's
+		// accounting — engaging backoff for the requests that follow,
+		// consistent with handleRepoChecksUpdate/handleRepoRunsUpdate.
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.rateLimitRemaining = 5000
+		m.fetchReceived = true
+
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			State:              "approved",
+			RateLimitRemaining: 0,
+		})
+		result := model.(*Model)
+		if result.rateLimitRemaining != 0 {
+			t.Errorf("rateLimitRemaining = %d, want 0 (real exhausted quota is honored, not dropped)", result.rateLimitRemaining)
+		}
+	})
+
+	t.Run("rate limit observations never raise the model's value", func(t *testing.T) {
+		// Min-accumulation: a Copilot query observing a higher remaining
+		// (e.g. quota reset between polls) must not lift the value the
+		// check-runs poll already observed.
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.rateLimitRemaining = 200
+		m.fetchReceived = true
+
+		model, _ := m.handleCopilotReview(CopilotReviewMsg{
+			State:              "approved",
+			RateLimitRemaining: 4999,
+		})
+		result := model.(*Model)
+		if result.rateLimitRemaining != 200 {
+			t.Errorf("rateLimitRemaining = %d, want 200 (observations take the minimum)", result.rateLimitRemaining)
 		}
 	})
 
@@ -1716,6 +1772,119 @@ func TestCopilotProbeMsg(t *testing.T) {
 		}
 		if !result.copilotWaitStartTime.IsZero() {
 			t.Error("copilotWaitStartTime must stay zero on a known-incapable host")
+		}
+	})
+
+	t.Run("incapable probe after checks complete quits immediately (probe/gate race)", func(t *testing.T) {
+		// Review concern #2: the gate arms optimistically and the probe
+		// disarms later. If checks finished while the probe was in flight,
+		// the handleChecksUpdate quit block was suppressed by the pending
+		// gate — the disarm must run the same completion check and quit
+		// now, not wait for a next poll that will never fire.
+		for _, tc := range []struct {
+			name       string
+			conclusion string
+			wantExit   int
+		}{
+			{"success exits 0", "success", 0},
+			{"failure exits 1", "failure", 1},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				m := makeModel()
+				m.waitForCopilot = true
+				m.copilotPending = true // gate armed optimistically, probe in flight
+				m.checkRuns = []ghclient.CheckRunInfo{{Status: "completed", Conclusion: tc.conclusion}}
+				m.firstCheckSeenAt = time.Now().Add(-3 * time.Minute) // past startupGracePeriod
+				m.peakCheckCount = 1
+				m.rateLimitRemaining = 5000
+				m.fetchReceived = true
+
+				model, cmd := m.Update(CopilotProbeMsg{Capable: false})
+				result := model.(Model)
+
+				if result.copilotPending {
+					t.Error("copilotPending should be false after the incapable probe")
+				}
+				if !result.checksComplete {
+					t.Error("checksComplete should be set when checks had already finished at disarm")
+				}
+				if !result.quitting {
+					t.Error("should quit when the probe disarms a gate that was the only exit blocker")
+				}
+				if result.exitCode != tc.wantExit {
+					t.Errorf("exitCode = %d, want %d", result.exitCode, tc.wantExit)
+				}
+				if cmd == nil {
+					t.Fatal("expected a tea.Quit command, got nil")
+				}
+				if _, ok := cmd().(tea.QuitMsg); !ok {
+					t.Errorf("expected tea.QuitMsg, got %T", cmd())
+				}
+			})
+		}
+	})
+
+	t.Run("incapable probe with checks still running does not quit", func(t *testing.T) {
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.checkRuns = []ghclient.CheckRunInfo{{Status: "in_progress"}}
+		m.firstCheckSeenAt = time.Now().Add(-3 * time.Minute)
+		m.peakCheckCount = 1
+		m.rateLimitRemaining = 5000
+		m.fetchReceived = true
+
+		model, cmd := m.Update(CopilotProbeMsg{Capable: false})
+		result := model.(Model)
+
+		if result.quitting {
+			t.Error("must not quit when checks are still running; exit is governed by checks completion")
+		}
+		if result.copilotPending {
+			t.Error("gate should still be disarmed on an incapable host")
+		}
+		if !result.copilotReviewComplete {
+			t.Error("copilotReviewComplete should be set by the disarm")
+		}
+		if cmd != nil {
+			t.Errorf("expected nil cmd, got %T", cmd())
+		}
+	})
+
+	t.Run("incapable probe defers quit while averages fetches are pending", func(t *testing.T) {
+		// Mirrors handleChecksUpdate: exitCode/checksComplete are set when
+		// checks are done, but the actual quit waits for pending workflow
+		// history fetches (the last JobAveragesPartialMsg finishes it).
+		m := makeModel()
+		m.waitForCopilot = true
+		m.copilotPending = true
+		m.checkRuns = []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success"}}
+		m.firstCheckSeenAt = time.Now().Add(-3 * time.Minute)
+		m.peakCheckCount = 1
+		m.avgFetchPending = true
+		m.pendingWorkflowFetch = map[int64]bool{456: true}
+		m.rateLimitRemaining = 5000
+		m.fetchReceived = true
+
+		model, cmd := m.Update(CopilotProbeMsg{Capable: false})
+		result := model.(Model)
+
+		if !result.checksComplete {
+			t.Error("checksComplete should be recorded when checks finished at disarm")
+		}
+		if result.quitting {
+			t.Error("quit must be deferred while workflow history fetches are pending")
+		}
+		if cmd != nil {
+			t.Errorf("expected nil cmd, got %T", cmd())
+		}
+
+		// The final fetch completion should finish the quit (the existing
+		// JobAveragesPartialMsg handler's checksComplete path).
+		model, _ = result.Update(JobAveragesPartialMsg{WorkflowID: 456, Averages: map[string]time.Duration{"build": time.Minute}})
+		result = model.(Model)
+		if !result.quitting {
+			t.Error("the last averages fetch should complete the deferred quit")
 		}
 	})
 }

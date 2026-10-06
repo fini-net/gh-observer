@@ -40,10 +40,12 @@ presumed_averages:
 # GitHub Enterprise Server without Copilot code review) never arm the gate,
 # never render the Copilot row, and don't query for reviews. Only a
 # definitive 404 for the reviewer disables detection; any other error
-# (network, auth, 5xx) keeps it enabled. Note: on enterprise setups where
-# SSO or token scope can produce 404s for existing users, detection may be
-# disabled conservatively — the per-PR scan self-resolves either way, and
-# if you hit this, please open an issue.
+# (network, auth, 5xx) keeps it enabled. github.com short-circuits to
+# enabled without a request (the app is a first-party installation there),
+# so this only ever disables detection on enterprise hosts. Note: on
+# enterprise setups where SSO or token scope can produce 404s for existing
+# users, detection may be disabled conservatively — the per-PR scan
+# self-resolves either way, and if you hit this, please open an issue.
 #
 # The synthetic Copilot row only appears once a poll has positively seen a
 # Copilot review request or review on the PR; until then a neutral

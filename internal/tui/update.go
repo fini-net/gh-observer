@@ -196,11 +196,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			probeBlocks := m.copilotHostChecked && !m.copilotHostCapable
 			if !probeBlocks {
 				if shaChanged {
-					m.copilotState = ""
-					m.copilotStale = false
-					m.copilotReviewComplete = false
-					m.copilotNotReqStreak = 0
-					m.copilotTimedOut = false
+					// Shared reset helper (see clearCopilotState). Evidence
+					// deliberately persists: copilotEvidenceSeen means "this
+					// PR uses Copilot", which a force-push doesn't change —
+					// the fresh poll re-establishes state within one interval.
+					clearCopilotState(&m)
 					debug.Log("copilot state reset on head SHA change", "old", oldSHA, "new", msg.HeadSHA)
 				}
 				m.copilotPending = true
@@ -241,14 +241,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.copilotHostCapable = msg.Capable
 		if !msg.Capable {
 			debug.Log("copilot reviewer absent on host; disabling copilot detection")
+			// Shared reset helper (see clearCopilotState). Evidence is
+			// cleared too: an incapable host can produce no evidence, and a
+			// stale true would keep a "checking…" status line rendering via
+			// view paths keyed on it.
+			clearCopilotState(&m)
+			m.copilotEvidenceSeen = false
 			m.copilotPending = false
 			m.copilotReviewComplete = true
-			m.copilotState = ""
-			m.copilotStale = false
-			m.copilotTimedOut = false
-			m.copilotNotReqStreak = 0
 			m.copilotWaitStartTime = time.Time{}
 			m.copilotPollStartTime = time.Time{}
+
+			// The gate may have been the only thing holding exit open: if
+			// checks already finished while the probe was in flight, the
+			// ChecksUpdateMsg quit block never ran (copilotPending made
+			// copilotGateSatisfied false). Re-run the same completion
+			// conditions as handleChecksUpdate so the program exits now
+			// instead of on the next poll. checksComplete is not consulted:
+			// it is only set by that same blocked quit block, so it is
+			// necessarily still false here.
+			if allChecksComplete(m.checkRuns) && canTrustCompletion(&m) {
+				m.exitCode = determineExitCode(m.checkRuns, m.copilotState, m.waitForCopilot)
+				m.checksComplete = true
+				if !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 {
+					m.quitting = true
+					return m, tea.Quit
+				}
+			}
 		}
 		return m, nil
 
@@ -569,6 +588,22 @@ func copilotGateSatisfied(m *Model) bool {
 	return false
 }
 
+// clearCopilotState resets the mutable Copilot detection state shared by
+// the head-SHA-change reset (PRInfoMsg) and the incapable-host disarm
+// (CopilotProbeMsg), so the two lists cannot drift apart. It deliberately
+// leaves copilotEvidenceSeen and the wait/poll time anchors to their call
+// sites: evidence persists across a SHA reset (this PR uses Copilot either
+// way) but must clear on the incapable-host disarm, and both sites reset
+// the anchors themselves — the SHA reset re-arms them, the disarm retires
+// them for good.
+func clearCopilotState(m *Model) {
+	m.copilotState = ""
+	m.copilotStale = false
+	m.copilotReviewComplete = false
+	m.copilotNotReqStreak = 0
+	m.copilotTimedOut = false
+}
+
 // copilotMaxWaitElapsed returns true once copilot_max_wait has elapsed since
 // copilotWaitStartTime was armed (issue #442). Shared by copilotGateSatisfied
 // (bounds program exit) and the TickMsg handler (bounds the poll loop and row
@@ -588,11 +623,12 @@ func (m *Model) handleCopilotReview(msg CopilotReviewMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Fold the Copilot query's rate-limit observation into the model's
-	// accounting, taking the minimum. The >0 guard keeps error-path zeros
-	// (no response was received) from spuriously engaging backoff; a real
-	// 0 from a successful query is preserved by the source-layer
-	// normalization only when absent (see normalizeRateLimit).
-	if msg.RateLimitRemaining > 0 && msg.RateLimitRemaining < m.rateLimitRemaining {
+	// accounting, taking the minimum. Error paths never report a bare 0:
+	// FetchCopilotReview returns UnknownRateLimit on failure, so a 0
+	// reaching here is a real exhausted quota from a successful query —
+	// preserved by the source-layer normalizeRateLimit and honored, matching
+	// handleRepoChecksUpdate/handleRepoRunsUpdate.
+	if msg.RateLimitRemaining < m.rateLimitRemaining {
 		m.rateLimitRemaining = msg.RateLimitRemaining
 	}
 
