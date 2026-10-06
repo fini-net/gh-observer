@@ -23,10 +23,13 @@ func FetchCheckRuns(ctx context.Context, client *github.Client, owner, repo, sha
 		return nil, err
 	}
 
-	// Extract rate limit from response
-	remaining := 5000 // Default if not available
+	// Extract rate limit from response. normalizeRateLimit maps a
+	// zero-value rate (enterprise host with rate limiting disabled, or a
+	// nil response) to the unknown default instead of a spurious
+	// "0 remaining" (see normalizeRateLimit).
+	remaining := UnknownRateLimit
 	if resp != nil {
-		remaining = resp.Rate.Remaining
+		remaining = normalizeRateLimit(resp.Rate.Limit, resp.Rate.Remaining)
 	}
 
 	return &CheckRunsResult{

@@ -127,7 +127,10 @@ func makeReviewQuery(requests []struct {
 	Body string
 }, rateLimit int) *copilotReviewQuery {
 	q := &copilotReviewQuery{
-		RateLimit: struct{ Remaining int }{Remaining: rateLimit},
+		RateLimit: struct {
+			Limit     int
+			Remaining int
+		}{Limit: 5000, Remaining: rateLimit},
 	}
 	q.Repository.PullRequest.ReviewRequests.Nodes = requests
 	q.Repository.PullRequest.Reviews.Nodes = reviews

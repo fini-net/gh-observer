@@ -102,6 +102,7 @@ type repoPRQuery struct {
 		} `graphql:"pullRequests(first: $prLimit, states: OPEN, orderBy: {field: UPDATED_AT, direction: DESC})"`
 	} `graphql:"repository(owner: $owner, name: $repo)"`
 	RateLimit struct {
+		Limit     int
 		Remaining int
 	}
 }
@@ -135,14 +136,14 @@ func fetchRepoCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner
 	err := client.Query(ctx, &query, variables)
 	if err != nil {
 		debug.Log("repo graphql query failed", "owner", owner, "repo", repo, "err", err)
-		return nil, 5000, err
+		return nil, UnknownRateLimit, err
 	}
 
 	debug.Log("repo graphql query success", "owner", owner, "repo", repo,
 		"pr_count", len(query.Repository.PullRequests.Nodes),
 		"rate_limit_remaining", query.RateLimit.Remaining)
 
-	rateLimitRemaining := query.RateLimit.Remaining
+	rateLimitRemaining := normalizeRateLimit(query.RateLimit.Limit, query.RateLimit.Remaining)
 
 	result := make(map[int]PRCheckData)
 	for _, pr := range query.Repository.PullRequests.Nodes {

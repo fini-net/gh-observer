@@ -63,3 +63,11 @@ type CopilotReviewMsg struct {
 	RateLimitRemaining int
 	Err                error
 }
+
+// CopilotProbeMsg carries the result of the one-shot host capability probe:
+// does the Copilot reviewer GitHub App exist on this host at all? Absent
+// hosts (e.g. GitHub Enterprise Server without Copilot code review) never
+// arm the Copilot gate and never render the Copilot row (issue #442).
+type CopilotProbeMsg struct {
+	Capable bool
+}

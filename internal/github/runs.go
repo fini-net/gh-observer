@@ -72,6 +72,7 @@ type commitPushedDateQuery struct {
 		} `graphql:"object(oid: $oid)"`
 	} `graphql:"repository(owner: $owner, name: $repo)"`
 	RateLimit struct {
+		Limit     int
 		Remaining int
 	}
 }
@@ -100,7 +101,7 @@ func fetchCommitPushedTimeWithClient(ctx context.Context, client graphqlQuerier,
 		debug.Log("commit pushedDate lookup failed", "owner", owner, "repo", repo, "sha", sha, "err", err)
 		return time.Time{}, 0
 	}
-	rateLimitRemaining := q.RateLimit.Remaining
+	rateLimitRemaining := normalizeRateLimit(q.RateLimit.Limit, q.RateLimit.Remaining)
 	debug.Log("commit pushedDate lookup", "owner", owner, "repo", repo, "sha", sha, "rate_limit_remaining", rateLimitRemaining)
 	if !q.Repository.Object.Commit.PushedDate.IsZero() {
 		return q.Repository.Object.Commit.PushedDate.Time, rateLimitRemaining
@@ -146,7 +147,7 @@ func fetchCommitPushedTime(ctx context.Context, token, host, owner, repo, sha st
 func FetchRunInfo(ctx context.Context, client *github.Client, token, host, owner, repo string, runID int64) (*RunInfo, int, error) {
 	run, _, err := client.Actions.GetWorkflowRunByID(ctx, owner, repo, runID)
 	if err != nil {
-		return nil, 5000, fmt.Errorf("failed to fetch workflow run %d: %w", runID, err)
+		return nil, UnknownRateLimit, fmt.Errorf("failed to fetch workflow run %d: %w", runID, err)
 	}
 
 	info := &RunInfo{
@@ -188,7 +189,7 @@ func FetchRunInfo(ctx context.Context, client *github.Client, token, host, owner
 	// Conservative default: matches FetchRunJobs's sentinel when no
 	// GraphQL rate-limit observation is available. The GraphQL lookup
 	// below replaces it with the real observed value when it succeeds.
-	rateLimitRemaining := 5000
+	rateLimitRemaining := UnknownRateLimit
 
 	// Best-effort GraphQL lookup of pushedDate: if it succeeds, replace
 	// the REST fallback with the real push time. A failure leaves the
@@ -220,7 +221,7 @@ func FetchRunJobs(ctx context.Context, client *github.Client, owner, repo string
 	}
 
 	var allJobs []WorkflowJobInfo
-	rateLimitRemaining := 5000
+	rateLimitRemaining := UnknownRateLimit
 
 	for {
 		jobs, resp, err := client.Actions.ListWorkflowJobs(ctx, owner, repo, runID, opts)
@@ -229,7 +230,7 @@ func FetchRunJobs(ctx context.Context, client *github.Client, owner, repo string
 		}
 
 		if resp != nil {
-			rateLimitRemaining = resp.Rate.Remaining
+			rateLimitRemaining = normalizeRateLimit(resp.Rate.Limit, resp.Rate.Remaining)
 		}
 
 		for _, job := range jobs.Jobs {
