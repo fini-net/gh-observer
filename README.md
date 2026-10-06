@@ -154,6 +154,42 @@ cd gh-observer
 just build
 ```
 
+## Upgrading
+
+How you upgrade depends on how you installed gh-observer:
+
+```bash
+# If installed as a gh extension (recommended)
+gh extension upgrade observer
+
+# To upgrade all your gh extensions at once
+gh extension upgrade --all
+
+# If installed via go install
+go install github.com/fini-net/gh-observer@latest
+```
+
+If you installed as a gh extension with `--pin` to a specific version, `gh
+extension upgrade` keeps you on that pinned version. To move to a newer
+release, install the new version explicitly:
+
+```bash
+gh extension install fini-net/gh-observer --pin v1.1.0 --force
+```
+
+Upgrades are in-place and configuration (`~/.config/gh-observer/config.yaml`)
+is backward compatible - no migration steps needed. If an upgrade fails or
+leaves a broken install behind, `gh extension install fini-net/gh-observer
+--force` reinstalls the latest release cleanly.
+
+If you built from source, pull the latest changes and rebuild:
+
+```bash
+cd gh-observer
+git pull
+just build
+```
+
 ## Usage
 
 ### Auto-detect PR from current branch
