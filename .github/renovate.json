@@ -18,7 +18,7 @@
     },
     {
       "matchManagers": ["github-actions"],
-      "matchDepNames": ["github/codeql-action/*"],
+      "matchDepNames": ["github/codeql-action"],
       "groupName": "codeql-action"
     },
     {
