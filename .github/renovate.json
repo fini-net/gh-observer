@@ -17,6 +17,11 @@
       "minimumReleaseAge": "3 days"
     },
     {
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["github/codeql-action/*"],
+      "groupName": "codeql-action"
+    },
+    {
       "matchUpdateTypes": ["patch"],
       "matchManagers": ["!github-actions"],
       "groupName": "patches",
