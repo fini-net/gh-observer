@@ -9,6 +9,24 @@
   "github-actions": {
     "enabled": true
   },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["^\\.github/workflows/actionlint\\.ya?ml$"],
+      "matchStrings": ["ACTIONLINT_VERSION:\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "rhysd/actionlint",
+      "extractVersionTemplate": "^v(?<version>.*)$",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["^\\.github/workflows/actionlint\\.ya?ml$"],
+      "matchStrings": ["PYFLAKES_VERSION:\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "datasourceTemplate": "pypi",
+      "depNameTemplate": "pyflakes"
+    }
+  ],
   "packageRules": [
     {
       "matchManagers": ["github-actions"],
