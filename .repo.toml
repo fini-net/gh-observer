@@ -4,7 +4,7 @@
 
 [about]
 description = "🔎 Terminal UI for watching GitHub Actions CI/CD workflows with runtime metrics, queue times, and check status - alternative to gh pr checks --watch"
-topics = ["error-logs", "gh-extension", "github-actions", "github-cli", "latency-monitor", "pull-requests", "tui-app"]
+topics = ["bubbletea", "ci-cd", "ci-monitor", "cli", "developer-experience", "developer-tools", "error-logs", "gh-extension", "github-actions", "github-actions-monitor", "github-api", "github-cli", "github-workflows", "go", "golang", "latency-monitor", "pr-checks", "pull-requests", "tui", "tui-app"]
 license = "GPL-2.0-only"
 
 [urls]
