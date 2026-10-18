@@ -113,7 +113,7 @@ Check names display as "Workflow Name / Job Name". Failed checks include inline 
 
 ### Release workflow
 
-`just release v1.0.0` creates the GitHub release tag. Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds cross-platform binaries via `gh-extension-precompile`, signs with keyless cosign, and generates SLSA Level 3 provenance. Binaries are named `<os>-<arch>` (e.g., `darwin-arm64`) — **not** `<repo>_<version>_<os>-<arch>`. The signing and SLSA steps glob on this pattern and will fail silently if renamed.
+`just release v1.0.0` creates the GitHub release tag. Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds cross-platform binaries via `gh-extension-precompile`, signs each with keyless cosign (one `<binary>.sigstore.json` Sigstore bundle per binary, verified in-CI before upload), and generates SLSA Level 3 provenance. Binaries are named `<os>-<arch>` (e.g., `darwin-arm64`) — **not** `<repo>_<version>_<os>-<arch>`. The signing, verification, and SLSA steps glob on this pattern; a rename that misses a glob fails the release loudly (the verify step requires a `.sigstore.json` bundle for every binary).
 
 ## Important implementation notes
 

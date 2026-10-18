@@ -439,29 +439,25 @@ binaries: `darwin-amd64`, `darwin-arm64`, `linux-amd64`, `linux-arm64`,
 
 ### Option 2: Cosign Signatures (keyless)
 
-Each binary is signed using Sigstore keyless (certificate-based) signing. To
-verify a binary against its signature and certificate:
+Each binary is signed using Sigstore keyless signing. The signature, signing
+certificate, and transparency-log entry are bundled into a single
+`.sigstore.json` file. To verify a binary against its bundle:
 
 ```bash
 cosign verify-blob darwin-arm64 \
-  --certificate darwin-arm64.pem \
-  --signature darwin-arm64.sig \
+  --bundle darwin-arm64.sigstore.json \
   --certificate-identity https://github.com/fini-net/gh-observer/.github/workflows/release.yml@refs/tags/v1.0.0 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-Alternatively, you can verify using the cosign bundle file:
+Replace `v1.0.0` with the release version you are verifying. The
+`.sigstore.json` files are available on the
+[releases page](https://github.com/fini-net/gh-observer/releases). Releases
+up to and including v4.1 name the bundle `<binary>.bundle`; the verify
+command is identical with `--bundle <binary>.bundle`.
 
-```bash
-cosign verify-blob darwin-arm64 \
-  --bundle darwin-arm64.bundle \
-  --certificate-identity https://github.com/fini-net/gh-observer/.github/workflows/release.yml@refs/tags/v1.0.0 \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
-
-Replace `v1.0.0` with the release version you are verifying. The `.sig`,
-`.pem`, and `.bundle` files are available on the
-[releases page](https://github.com/fini-net/gh-observer/releases).
+The release workflow runs this same verification against every binary before
+uploading anything, so a release only ships with signatures that verify.
 
 ### Option 3: SLSA Provenance
 
