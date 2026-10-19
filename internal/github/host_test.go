@@ -57,6 +57,45 @@ func TestAPIURLsForHost(t *testing.T) {
 	}
 }
 
+func TestAPIURLsForHostOverride(t *testing.T) {
+	tests := []struct {
+		name        string
+		override    string
+		wantREST    string
+		wantGraphQL string
+	}{
+		{"http base", "http://127.0.0.1:54321", "http://127.0.0.1:54321/", "http://127.0.0.1:54321/graphql"},
+		{"https base", "https://ghe.corp.local/api", "https://ghe.corp.local/api/", "https://ghe.corp.local/api/graphql"},
+		{"trailing slash trimmed", "http://127.0.0.1:54321/", "http://127.0.0.1:54321/", "http://127.0.0.1:54321/graphql"},
+		{"whitespace trimmed", "  http://127.0.0.1:54321  ", "http://127.0.0.1:54321/", "http://127.0.0.1:54321/graphql"},
+		{"invalid (no scheme) ignored", "127.0.0.1:54321", "https://api.ghe.example.com/", "https://api.ghe.example.com/graphql"},
+		{"invalid (unsupported scheme) ignored", "ftp://example.com", "https://api.ghe.example.com/", "https://api.ghe.example.com/graphql"},
+		{"invalid (no host) ignored", "http://", "https://api.ghe.example.com/", "https://api.ghe.example.com/graphql"},
+		{"empty ignored", "", "https://api.ghe.example.com/", "https://api.ghe.example.com/graphql"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(APIURLEnvOverride, tt.override)
+			rest, gql := APIURLsForHost("ghe.example.com")
+			if rest != tt.wantREST {
+				t.Errorf("APIURLsForHost() rest = %q, want %q", rest, tt.wantREST)
+			}
+			if gql != tt.wantGraphQL {
+				t.Errorf("APIURLsForHost() graphql = %q, want %q", gql, tt.wantGraphQL)
+			}
+		})
+	}
+
+	t.Run("override never applies to the public host", func(t *testing.T) {
+		t.Setenv(APIURLEnvOverride, "http://127.0.0.1:54321")
+		for _, host := range []string{"", "github.com", "GitHub.com"} {
+			if rest, gql := APIURLsForHost(host); rest != "" || gql != "" {
+				t.Errorf("APIURLsForHost(%q) = %q/%q, want empty strings (public host keeps library defaults)", host, rest, gql)
+			}
+		}
+	})
+}
+
 func TestGetTokenForHostEnvPrecedence(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // gh CLI absent: env vars only
 
@@ -188,6 +227,20 @@ func TestNewClientFromTokenHostRouting(t *testing.T) {
 		}
 		if got := client.BaseURL(); got != "https://api.github.example.com/" {
 			t.Errorf("BaseURL = %q, want https://api.github.example.com/", got)
+		}
+	})
+
+	t.Run("override redirects enterprise client", func(t *testing.T) {
+		t.Setenv(APIURLEnvOverride, "http://127.0.0.1:54321")
+		client, err := NewClientFromToken("tok", "ghe.example.com")
+		if err != nil {
+			t.Fatalf("NewClientFromToken() error: %v", err)
+		}
+		// go-github appends api/v3/ to hosts not under api.* — the test
+		// server routes on the api/v3 prefix. What matters here is that
+		// the base points at the override, not api.ghe.example.com.
+		if got := client.BaseURL(); got != "http://127.0.0.1:54321/api/v3/" {
+			t.Errorf("BaseURL = %q, want http://127.0.0.1:54321/api/v3/", got)
 		}
 	})
 }

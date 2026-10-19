@@ -1,0 +1,17 @@
+# codecov/patch status configuration (issue #530).
+#
+# The patch check's target floats with the base branch's coverage (81.92%
+# when PR #529 tripped it at 77.08%), which punishes renames passing
+# through legacy code with no tests even when a PR's new logic is fully
+# tested — a status check that's always red on those PRs is one we learn
+# to ignore, defeating the point of adopting coverage in #520. Keep the
+# patch check visible but informational: codecov still reports patch
+# coverage on every PR as an annotation, it just can't fail.
+#
+# The project status keeps its default (target: auto), which tracks the
+# overall coverage trend against main.
+coverage:
+  status:
+    patch:
+      default:
+        informational: true

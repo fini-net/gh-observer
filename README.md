@@ -259,9 +259,15 @@ these env vars on machines where untrusted URLs get pasted; prefer
 `gh auth login --hostname`, which binds credentials to a specific host.
 
 Limitations: API endpoints are derived using the `api.<host>` subdomain
-convention (`https://api.<host>/` and `https://api.<host>/graphql`), so
-path-style enterprise installs (`<host>/api/v3`) are not yet supported.
-Hostnames with ports are also not supported.
+convention (`https://api.<host>/` and `https://api.<host>/graphql`). Enterprise
+instances that don't use that layout can override both endpoints with
+`GH_OBSERVER_API_URL`: set it to an absolute http(s) base URL and every
+non-github.com host gets REST at `<url>/` and GraphQL at `<url>/graphql` —
+for example `GH_OBSERVER_API_URL=https://ghe.example.com/api` covers a
+path-style `/api/v3` install. Invalid values are ignored with a debug log
+(`--debug`), and the public host is never redirected. Hostnames with ports
+are not supported in arguments, though the override URL may carry one
+(handy for testing).
 
 ### Watch an Actions workflow run
 

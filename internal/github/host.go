@@ -46,17 +46,46 @@ func isValidHost(s string) bool {
 	return defaultHostRegex.MatchString(s)
 }
 
+// APIURLEnvOverride names the environment variable that overrides the
+// derived enterprise API endpoints: when set to an absolute http(s) URL,
+// REST uses <url>/ and GraphQL uses <url>/graphql for every non-github.com
+// host. This serves GitHub Enterprise instances whose API is not reachable
+// via the api.<host> subdomain convention (e.g. a path-prefix reverse-proxy
+// layout), and gives out-of-package tests a seam to point host-based client
+// construction at a local httptest server (issue #530) — the host regex
+// rejects ports, so an httptest server is otherwise unreachable through
+// host-based dispatch.
+const APIURLEnvOverride = "GH_OBSERVER_API_URL"
+
 // APIURLsForHost derives the REST and GraphQL API base URLs for a host.
 // The public github.com host returns empty strings so callers keep the
-// library defaults (api.github.com and githubv4's default endpoint).
+// library defaults (api.github.com and githubv4's default endpoint); a
+// stray GH_OBSERVER_API_URL never redirects public-host traffic.
 // Any other host is treated as a GitHub Enterprise instance using the
 // api.<host> subdomain convention: REST at https://api.<host>/ and
-// GraphQL at https://api.<host>/graphql.
+// GraphQL at https://api.<host>/graphql — unless GH_OBSERVER_API_URL
+// overrides both (see APIURLEnvOverride). An invalid override value is
+// ignored with a debug log, mirroring the GH_HOST validation precedent:
+// clients would otherwise fail confusingly at request time.
 func APIURLsForHost(host string) (restURL, graphqlURL string) {
 	if host == "" || strings.EqualFold(host, DefaultGitHubHost) {
 		return "", ""
 	}
+	if base := strings.TrimSpace(os.Getenv(APIURLEnvOverride)); base != "" {
+		if validAPIURL(base) {
+			base = strings.TrimSuffix(base, "/")
+			return base + "/", base + "/graphql"
+		}
+		debug.Log("ignoring invalid "+APIURLEnvOverride, "value", base)
+	}
 	return fmt.Sprintf("https://api.%s/", host), fmt.Sprintf("https://api.%s/graphql", host)
+}
+
+// validAPIURL reports whether the GH_OBSERVER_API_URL value is usable: an
+// absolute http or https URL with a host.
+func validAPIURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 // GetTokenForHost retrieves an auth token for the given host, mirroring

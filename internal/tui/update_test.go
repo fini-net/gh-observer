@@ -2,6 +2,10 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -1595,9 +1599,9 @@ func TestTickMsg_CopilotTimeout(t *testing.T) {
 		m.copilotMaxWait = 100 * time.Millisecond
 		m.copilotWaitStartTime = time.Now().Add(-200 * time.Millisecond)
 		m.copilotPollStartTime = time.Now().Add(-100 * time.Millisecond)
-		m.copilotLastPoll = time.Time{}  // no poll has fired yet
-		m.fetchReceived = false          // no successful response yet
-		m.rateLimitRemaining = 0         // pre-first-fetch zero value
+		m.copilotLastPoll = time.Time{} // no poll has fired yet
+		m.fetchReceived = false         // no successful response yet
+		m.rateLimitRemaining = 0        // pre-first-fetch zero value
 
 		model, _ := m.Update(TickMsg(time.Now()))
 		result := model.(Model)
@@ -2114,5 +2118,239 @@ func TestDetermineExitCode_Copilot(t *testing.T) {
 				t.Errorf("determineExitCode() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+// --- tea.Cmd constructor success paths (issue #530) ---
+//
+// fetchPRInfo and fetchCheckRuns build their clients from (token, host), so
+// tests route a fake enterprise host at an httptest server via the
+// GH_OBSERVER_API_URL override (ghclient.APIURLEnvOverride) — the same seam
+// the runSnapshot tests in the root package use. REST routes arrive under
+// /api/v3/ (go-github's enterprise URL layout); GraphQL at /graphql.
+
+// fetchCmdHost is a fake enterprise host: never github.com (so the API URL
+// override applies) and never a real hostname (so a test that forgets the
+// override fails on connection, not on a real API call).
+const fetchCmdHost = "ghe.example.com"
+
+// TestFetchPRInfoCmdSuccess locks in the success path of the fetchPRInfo
+// constructor: the emitted PRInfoMsg carries the PR number, title, and head
+// SHA fetched over REST (the timing anchor deliberately does NOT ride this
+// message — it arrives via ChecksUpdateMsg, issue #349).
+func TestFetchPRInfoCmdSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/pulls/7") {
+			t.Errorf("unexpected request to fake API: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number": 7, "title": "Add widgets", "state": "open", "head": {"sha": "deadbeef"}}`))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv(ghclient.APIURLEnvOverride, server.URL)
+
+	cmd := fetchPRInfo(context.Background(), "test-token", fetchCmdHost, "owner", "repo", 7)
+	msg := cmd()
+
+	prMsg, ok := msg.(PRInfoMsg)
+	if !ok {
+		t.Fatalf("fetchPRInfo() emitted %T, want PRInfoMsg", msg)
+	}
+	if prMsg.Err != nil {
+		t.Fatalf("PRInfoMsg.Err = %v, want nil", prMsg.Err)
+	}
+	if prMsg.Number != 7 {
+		t.Errorf("PRInfoMsg.Number = %d, want 7", prMsg.Number)
+	}
+	if prMsg.Title != "Add widgets" {
+		t.Errorf("PRInfoMsg.Title = %q, want %q", prMsg.Title, "Add widgets")
+	}
+	if prMsg.HeadSHA != "deadbeef" {
+		t.Errorf("PRInfoMsg.HeadSHA = %q, want deadbeef", prMsg.HeadSHA)
+	}
+}
+
+// TestFetchPRInfoCmdError covers the failure path: an unreachable API must
+// surface as PRInfoMsg.Err, not as a panic or a zero-value success message.
+func TestFetchPRInfoCmdError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	server.Close() // unreachable from here on
+	t.Setenv(ghclient.APIURLEnvOverride, server.URL)
+
+	cmd := fetchPRInfo(context.Background(), "test-token", fetchCmdHost, "owner", "repo", 7)
+	msg := cmd()
+
+	prMsg, ok := msg.(PRInfoMsg)
+	if !ok {
+		t.Fatalf("fetchPRInfo() emitted %T, want PRInfoMsg", msg)
+	}
+	if prMsg.Err == nil {
+		t.Error("PRInfoMsg.Err = nil, want the fetch error")
+	}
+}
+
+// fetchChecksGraphQL builds the GraphQL response the fetchCheckRuns cmd
+// decodes: a head commit with pushedDate and one successful CheckRun
+// context named "build", plus the PR createdAt. pushedDate/createdAt are
+// the cycle-start anchor inputs (issue #518): the emitted ChecksUpdateMsg
+// must carry max(pushedDate, createdAt) as CycleStartTime.
+func fetchChecksGraphQL(pushedAt, createdAt time.Time) string {
+	commit := map[string]any{
+		"pushedDate": pushedAt.UTC().Format(time.RFC3339),
+		"statusCheckRollup": map[string]any{
+			"contexts": map[string]any{
+				"nodes": []any{map[string]any{
+					"__typename":  "CheckRun",
+					"name":        "build",
+					"status":      "COMPLETED",
+					"conclusion":  "SUCCESS",
+					"startedAt":   time.Now().Add(-9 * time.Minute).UTC().Format(time.RFC3339),
+					"completedAt": time.Now().Add(-8 * time.Minute).UTC().Format(time.RFC3339),
+					"annotations": map[string]any{"nodes": []any{}},
+					"checkSuite": map[string]any{
+						"workflowRun": map[string]any{
+							"databaseId": 111,
+							"workflow":   map[string]any{"databaseId": 42, "name": "CI"},
+						},
+					},
+				}},
+				"pageInfo": map[string]any{"hasNextPage": false},
+			},
+		},
+	}
+	resp := map[string]any{
+		"data": map[string]any{
+			"repository": map[string]any{
+				"pullRequest": map[string]any{
+					"createdAt": createdAt.UTC().Format(time.RFC3339),
+					"commits":   map[string]any{"nodes": []any{map[string]any{"commit": commit}}},
+				},
+			},
+			"rateLimit": map[string]any{"limit": 5000, "remaining": 4999},
+		},
+	}
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// TestFetchCheckRunsCmdSuccess locks in the success path of the
+// fetchCheckRuns constructor: the emitted ChecksUpdateMsg carries the
+// decoded check runs, the rate limit, and — the field #529 renamed —
+// CycleStartTime, the later of the head push and the PR creation (issue
+// #518).
+func TestFetchCheckRunsCmdSuccess(t *testing.T) {
+	t.Run("cycle start is the later of push and PR creation", func(t *testing.T) {
+		// Fixture times are truncated to seconds: the anchor round-trips
+		// through RFC3339, so sub-second precision would not survive.
+		pushed := time.Now().Add(-10 * time.Minute).Truncate(time.Second)
+		created := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.Contains(r.URL.Path, "/graphql") || r.Method != http.MethodPost {
+				t.Errorf("unexpected request to fake API: %s %s", r.Method, r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(fetchChecksGraphQL(pushed, created)))
+		}))
+		t.Cleanup(server.Close)
+		t.Setenv(ghclient.APIURLEnvOverride, server.URL)
+
+		cmd := fetchCheckRuns(context.Background(), "test-token", fetchCmdHost, "owner", "repo", 7)
+		msg := cmd()
+
+		checksMsg, ok := msg.(ChecksUpdateMsg)
+		if !ok {
+			t.Fatalf("fetchCheckRuns() emitted %T, want ChecksUpdateMsg", msg)
+		}
+		if checksMsg.Err != nil {
+			t.Fatalf("ChecksUpdateMsg.Err = %v, want nil", checksMsg.Err)
+		}
+		if !checksMsg.CycleStartTime.Equal(pushed) {
+			t.Errorf("CycleStartTime = %v, want push time %v (push after creation: the later anchor wins, issue #518)", checksMsg.CycleStartTime, pushed)
+		}
+		assertFetchedChecks(t, checksMsg)
+	})
+
+	t.Run("PR creation clamps a stale push", func(t *testing.T) {
+		// A push predating the PR (PR opened from an already-pushed
+		// branch) must not drag the anchor into the past.
+		pushed := time.Now().Add(-3 * time.Hour).Truncate(time.Second)
+		created := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(fetchChecksGraphQL(pushed, created)))
+		}))
+		t.Cleanup(server.Close)
+		t.Setenv(ghclient.APIURLEnvOverride, server.URL)
+
+		cmd := fetchCheckRuns(context.Background(), "test-token", fetchCmdHost, "owner", "repo", 7)
+		msg := cmd()
+
+		checksMsg, ok := msg.(ChecksUpdateMsg)
+		if !ok {
+			t.Fatalf("fetchCheckRuns() emitted %T, want ChecksUpdateMsg", msg)
+		}
+		if checksMsg.Err != nil {
+			t.Fatalf("ChecksUpdateMsg.Err = %v, want nil", checksMsg.Err)
+		}
+		if !checksMsg.CycleStartTime.Equal(created) {
+			t.Errorf("CycleStartTime = %v, want PR creation %v (creation clamps a push that predates the PR, issue #518)", checksMsg.CycleStartTime, created)
+		}
+	})
+}
+
+// assertFetchedChecks verifies the decoded ChecksUpdateMsg content beyond
+// the anchor: the check-run fields (name, workflow, status/conclusion
+// lowercased, workflow IDs) and the rate limit carried on the message.
+func assertFetchedChecks(t *testing.T, msg ChecksUpdateMsg) {
+	t.Helper()
+	if len(msg.CheckRuns) != 1 {
+		t.Fatalf("len(CheckRuns) = %d, want 1", len(msg.CheckRuns))
+	}
+	run := msg.CheckRuns[0]
+	if run.Name != "build" {
+		t.Errorf("CheckRuns[0].Name = %q, want build", run.Name)
+	}
+	if run.WorkflowName != "CI" {
+		t.Errorf("CheckRuns[0].WorkflowName = %q, want CI", run.WorkflowName)
+	}
+	if run.Status != "completed" || run.Conclusion != "success" {
+		t.Errorf("CheckRuns[0].Status/Conclusion = %q/%q, want completed/success (lowercased)", run.Status, run.Conclusion)
+	}
+	if run.WorkflowRunID != 111 || run.WorkflowID != 42 {
+		t.Errorf("CheckRuns[0] IDs = %d/%d, want 111/42", run.WorkflowRunID, run.WorkflowID)
+	}
+	if run.StartedAt == nil || run.CompletedAt == nil {
+		t.Errorf("CheckRuns[0] timestamps must be non-nil for a completed run: %+v", run)
+	}
+	if msg.RateLimitRemaining != 4999 {
+		t.Errorf("RateLimitRemaining = %d, want 4999", msg.RateLimitRemaining)
+	}
+}
+
+// TestFetchCheckRunsCmdError covers the failure path: an unreachable API
+// must surface as ChecksUpdateMsg.Err.
+func TestFetchCheckRunsCmdError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	server.Close() // unreachable from here on
+	t.Setenv(ghclient.APIURLEnvOverride, server.URL)
+
+	cmd := fetchCheckRuns(context.Background(), "test-token", fetchCmdHost, "owner", "repo", 7)
+	msg := cmd()
+
+	checksMsg, ok := msg.(ChecksUpdateMsg)
+	if !ok {
+		t.Fatalf("fetchCheckRuns() emitted %T, want ChecksUpdateMsg", msg)
+	}
+	if checksMsg.Err == nil {
+		t.Error("ChecksUpdateMsg.Err = nil, want the fetch error")
 	}
 }
