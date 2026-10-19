@@ -98,7 +98,7 @@ Check names display as "Workflow Name / Job Name". Failed checks include inline 
 
 ### Key timing calculations (`internal/timing/calculator.go`)
 
-- **Queue latency**: `check.StartedAt - headPushedTime` (how long GitHub took to queue after the push). `headPushedTime` is the head commit's `pushedDate` (with `committedDate` fallback) sourced from GraphQL; the Actions REST API exposes only the committer timestamp, not the push time.
+- **Queue latency**: `check.StartedAt - cycleStartTime` (how long GitHub took to queue after the CI cycle began). `cycleStartTime` is the later of the head commit's `pushedDate` (with `committedDate` fallback) and the PR's `createdAt` (issue #518), sourced from the same GraphQL query as the checks; the creation time clamps a push that predates the PR (a PR opened from an already-pushed branch, or a stale `committedDate` from a rebase). The Actions REST API exposes only the committer timestamp, not the push time.
 - **Runtime**: `time.Now() - check.StartedAt` (in_progress only)
 - **Final duration**: `check.CompletedAt - check.StartedAt`
 

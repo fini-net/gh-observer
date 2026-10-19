@@ -188,16 +188,16 @@ func TestGetCopilotReviewIcon(t *testing.T) {
 }
 
 func TestFormatQueueLatencyQueued(t *testing.T) {
-	pushed := time.Now().Add(-5 * time.Minute)
+	cycleStart := time.Now().Add(-5 * time.Minute)
 
-	t.Run("queued with push time shows elapsed", func(t *testing.T) {
-		got := FormatQueueLatency(ghclient.CheckRunInfo{Status: "queued"}, pushed)
+	t.Run("queued with cycle start shows elapsed", func(t *testing.T) {
+		got := FormatQueueLatency(ghclient.CheckRunInfo{Status: "queued"}, cycleStart)
 		if got == "-" || got == "" {
 			t.Errorf("FormatQueueLatency(queued) = %q, want elapsed duration", got)
 		}
 	})
 
-	t.Run("queued without push time shows dash", func(t *testing.T) {
+	t.Run("queued without cycle start shows dash", func(t *testing.T) {
 		got := FormatQueueLatency(ghclient.CheckRunInfo{Status: "queued"}, time.Time{})
 		if got != "-" {
 			t.Errorf("FormatQueueLatency(queued, zero time) = %q, want %q", got, "-")
@@ -205,16 +205,16 @@ func TestFormatQueueLatencyQueued(t *testing.T) {
 	})
 
 	t.Run("started check with positive latency", func(t *testing.T) {
-		check := ghclient.CheckRunInfo{Status: "in_progress", StartedAt: ptrTime(pushed.Add(2 * time.Minute))}
-		got := FormatQueueLatency(check, pushed)
+		check := ghclient.CheckRunInfo{Status: "in_progress", StartedAt: ptrTime(cycleStart.Add(2 * time.Minute))}
+		got := FormatQueueLatency(check, cycleStart)
 		if got != "2m 0s" {
 			t.Errorf("FormatQueueLatency() = %q, want %q", got, "2m 0s")
 		}
 	})
 
 	t.Run("started check with zero latency shows dash", func(t *testing.T) {
-		check := ghclient.CheckRunInfo{Status: "in_progress", StartedAt: ptrTime(pushed)}
-		got := FormatQueueLatency(check, pushed)
+		check := ghclient.CheckRunInfo{Status: "in_progress", StartedAt: ptrTime(cycleStart)}
+		got := FormatQueueLatency(check, cycleStart)
 		if got != "-" {
 			t.Errorf("FormatQueueLatency() = %q, want %q", got, "-")
 		}
@@ -353,11 +353,11 @@ func TestViewGracePeriodCountdown(t *testing.T) {
 	}
 }
 
-func TestViewHeaderPushedLine(t *testing.T) {
+func TestViewHeaderStartedLine(t *testing.T) {
 	m := &Model{
 		styles:             stylesForTest(),
 		prTitle:            "Test PR",
-		headPushedTime:     time.Now().Add(-3 * time.Minute),
+		cycleStartTime:     time.Now().Add(-3 * time.Minute),
 		checkRuns:          []ghclient.CheckRunInfo{{Status: "in_progress", Name: "build"}},
 		lastUpdate:         time.Now(),
 		fetchReceived:      true,
@@ -365,8 +365,8 @@ func TestViewHeaderPushedLine(t *testing.T) {
 	}
 
 	out := stripANSI(m.View().Content)
-	if !strings.Contains(out, "Pushed") {
-		t.Errorf("View missing pushed line, got:\n%s", out)
+	if !strings.Contains(out, "Started") {
+		t.Errorf("View missing started line, got:\n%s", out)
 	}
 	if !strings.Contains(out, "PR #0: Test PR") {
 		t.Errorf("View missing PR header, got:\n%s", out)

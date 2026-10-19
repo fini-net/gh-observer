@@ -94,8 +94,7 @@ Actions are the operations each actor performs within the system.
 
 | Action | Endpoint | Purpose |
 | ------ | --------- | ------- |
-| Fetch PR metadata | `GET /repos/{owner}/{repo}/pulls/{pr_number}` | Get PR title, head SHA, created_at |
-| Fetch commit timestamp | `GET /repos/{owner}/{repo}/commits/{sha}` | Get committer date for queue latency |
+| Fetch PR metadata | `GET /repos/{owner}/{repo}/pulls/{pr_number}` | Get PR title and head SHA (created_at is no longer consumed; the GraphQL check-runs query supplies the timing anchor) |
 | Resolve workflow run | `GET /repos/{owner}/{repo}/actions/runs/{run_id}` | Map run ID to workflow ID |
 | List workflow runs | `GET /repos/{owner}/{repo}/actions/workflows/{id}/runs` | Get recent completed runs for averages |
 | List workflow jobs | `GET /repos/{owner}/{repo}/actions/runs/{id}/jobs` | Get job durations for averaging |
@@ -104,7 +103,7 @@ Actions are the operations each actor performs within the system.
 
 | Action | Purpose |
 | ------ | ------- |
-| Fetch check runs (paginated) | Single query traverses Repository -> PullRequest -> Commits -> StatusCheckRollup -> Contexts (100 per page) |
+| Fetch check runs (paginated) | Single query traverses Repository -> PullRequest -> Commits -> StatusCheckRollup -> Contexts (100 per page); also selects PR `createdAt` and the head commit's `pushedDate`/`committedDate` to compute the cycle-start anchor, `max(push, creation)` (issue #518) |
 | Resolve union types | Discriminates `CheckRun` vs `StatusContext` within the rollup |
 | Fetch annotations | Retrieves up to 5 annotations per failed check run |
 | Track rate limit | Reads `RateLimit.Remaining` from each response |
@@ -128,7 +127,7 @@ Actions are the operations each actor performs within the system.
 
 | Action | Input | Output |
 | ------ | ----- | ------ |
-| Calculate queue latency | `check.StartedAt - headCommitTime` | Duration showing how long GitHub queued the job |
+| Calculate queue latency | `check.StartedAt - cycleStartTime` | Duration showing how long GitHub queued the job since the CI cycle began (the later of the head push and PR creation, issue #518) |
 | Calculate runtime | `time.Now() - check.StartedAt` | Duration for in-progress checks |
 | Calculate final duration | `check.CompletedAt - check.StartedAt` | Duration for completed checks |
 | Format duration | `time.Duration` | Human-readable string (e.g., `3m 52s`, `15s`) |

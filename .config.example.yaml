@@ -54,9 +54,10 @@ wait_for_copilot: true
 
 # Maximum total wall-clock time to wait for a Copilot review before giving up:
 # the Copilot row/spinner stops updating and gh-observer proceeds, regardless
-# of whether Actions checks are still running. Measured from the commit's
-# push time when known (falling back to PR-info time, i.e. when the head SHA
-# is known, only if the push time never arrives), so it includes the
+# of whether Actions checks are still running. Measured from the CI cycle's
+# start — the later of the commit's push time and the PR's creation time
+# (issue #518) — when known (falling back to PR-info time, i.e. when the head
+# SHA is known, only if the anchor never arrives), so it includes the
 # initial_delay window below. copilot_max_wait does NOT add to
 # copilot_initial_delay — it bounds the whole wait.
 copilot_max_wait: 180s
@@ -68,7 +69,7 @@ copilot_poll_interval: 10s
 # Initial delay before the first Copilot review poll, giving GitHub time to
 # create the review request after a push. Bounded by copilot_max_wait above
 # (the delay counts toward the total wait, it does not add to it). Skipped
-# when the PR's latest push already predates this window (e.g. attaching to
-# an old PR): any review request already exists by then, so polling starts
+# when the CI cycle already predates this window (e.g. attaching to an old
+# PR): any review request already exists by then, so polling starts
 # immediately.
 copilot_initial_delay: 15s

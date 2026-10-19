@@ -116,7 +116,8 @@ type contextNode struct {
 type pullRequestQuery struct {
 	Repository struct {
 		PullRequest struct {
-			Commits struct {
+			CreatedAt githubv4.DateTime `graphql:"createdAt"`
+			Commits   struct {
 				Nodes []struct {
 					Commit struct {
 						PushedDate        githubv4.DateTime `graphql:"pushedDate"`
@@ -230,14 +231,33 @@ func contextNodesToCheckRuns(nodes []contextNode) []CheckRunInfo {
 	return checkRuns
 }
 
+// cycleStart combines the head commit's push time with the PR's creation
+// time into the effective cycle-start anchor: the later of the two
+// (issue #518). The push time alone can predate the current CI cycle — a
+// PR opened from an already-pushed branch, or a committedDate fallback
+// dragged stale by a rebase — making every "since push" display (queue
+// latency, the "Started Xs ago" header, the Copilot wait budget) read
+// misleadingly old. Creation time clamps that stale anchor; a force-push
+// after PR creation keeps the push time, so the common case is unchanged.
+// A zero pushTime with a non-zero creation time returns the creation time
+// (a strictly better fallback than a stale committedDate); both zero
+// returns zero so callers render the existing placeholder.
+func cycleStart(pushTime, prCreatedAt time.Time) time.Time {
+	if pushTime.IsZero() || prCreatedAt.After(pushTime) {
+		return prCreatedAt
+	}
+	return pushTime
+}
+
 // FetchCheckRunsGraphQL fetches check runs with workflow names using GraphQL
 // with cursor-based pagination to handle PRs with more than 100 status contexts.
-// Also returns the head commit's push time (pushedDate, falling back to
-// committedDate when pushedDate is absent) so callers can render queue
-// latency and "Pushed Xs ago" against the push time rather than the
-// (possibly stale) commit time. The push time is populated from the first
-// page only; if the PR has no commits or the first page errors, the zero
-// value is returned and callers must fall back.
+// Also returns the PR's cycle start time — the later of the head commit's
+// push time (pushedDate, falling back to committedDate when pushedDate is
+// absent) and the PR's createdAt (issue #518) — so callers can render queue
+// latency and "Started Xs ago" against when the current CI cycle actually
+// began rather than a (possibly stale) commit time. The anchor is populated
+// from the first page only; if the PR has no commits or the first page
+// errors, the zero value is returned and callers must fall back.
 // The host selects the GraphQL endpoint: "" or github.com uses the public
 // endpoint; any other host uses the derived enterprise endpoint.
 func FetchCheckRunsGraphQL(ctx context.Context, token, host, owner, repo string, prNumber int) ([]CheckRunInfo, time.Time, int, error) {
@@ -249,6 +269,7 @@ func FetchCheckRunsGraphQL(ctx context.Context, token, host, owner, repo string,
 func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, repo string, prNumber int) ([]CheckRunInfo, time.Time, int, error) {
 	var allCheckRuns []CheckRunInfo
 	var headPushedTime time.Time
+	var prCreatedAt time.Time
 	var cursor *githubv4.String
 	rateLimitRemaining := UnknownRateLimit
 
@@ -286,6 +307,13 @@ func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, re
 			rateLimitRemaining = remaining
 		}
 
+		// Capture the PR creation time on the first page (same value every
+		// page). It lives on the PullRequest level, so it's populated even
+		// when the commit list is empty and still yields a usable anchor.
+		if prCreatedAt.IsZero() && !query.Repository.PullRequest.CreatedAt.IsZero() {
+			prCreatedAt = query.Repository.PullRequest.CreatedAt.Time
+		}
+
 		if len(query.Repository.PullRequest.Commits.Nodes) == 0 {
 			break
 		}
@@ -310,5 +338,12 @@ func fetchCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner, re
 		cursor = &contexts.PageInfo.EndCursor
 	}
 
-	return allCheckRuns, headPushedTime, rateLimitRemaining, nil
+	// Combine the push time and PR creation time into the cycle start
+	// anchor (issue #518): creation clamps a push that predates the PR (a
+	// PR opened from an already-pushed branch, or a stale committedDate
+	// fallback); a force-push after creation keeps the push time.
+	anchor := cycleStart(headPushedTime, prCreatedAt)
+	debug.Log("cycle start computed", "push", headPushedTime, "pr_created", prCreatedAt, "anchor", anchor)
+
+	return allCheckRuns, anchor, rateLimitRemaining, nil
 }

@@ -33,21 +33,22 @@ const maxCheckNameWidth = 60
 const copilotRowKind = "review"
 
 // FormatQueueLatency returns the queue time text or placeholder. The
-// headPushedTime parameter is the PR head commit's push time (not the
-// commit-author time): for a queued check this shows "how long since the
-// push" (a stand-in for "how long until the check starts"), and for a
-// started check it backs the QueueLatency calculation (check.StartedAt -
-// pushedAt) which represents how long GitHub took to start the check after
-// the commit was pushed.
-func FormatQueueLatency(check ghclient.CheckRunInfo, headPushedTime time.Time) string {
+// cycleStartTime parameter is the PR's cycle start anchor — the later of
+// the head commit's push time and the PR's creation time (issue #518), not
+// the commit-author time: for a queued check this shows "how long since the
+// cycle began" (a stand-in for "how long until the check starts"), and for
+// a started check it backs the QueueLatency calculation (check.StartedAt -
+// cycleStart) which represents how long GitHub took to start the check
+// after the CI cycle began.
+func FormatQueueLatency(check ghclient.CheckRunInfo, cycleStartTime time.Time) string {
 	if check.Status == "queued" {
-		if !headPushedTime.IsZero() {
-			return timing.FormatDuration(time.Since(headPushedTime))
+		if !cycleStartTime.IsZero() {
+			return timing.FormatDuration(time.Since(cycleStartTime))
 		}
 		return "-"
 	}
 
-	queueLatency := timing.QueueLatency(headPushedTime, check)
+	queueLatency := timing.QueueLatency(cycleStartTime, check)
 	if queueLatency > 0 {
 		return timing.FormatDuration(queueLatency)
 	}
@@ -242,7 +243,7 @@ func FormatAvg(check ghclient.CheckRunInfo, jobAverages map[string]time.Duration
 }
 
 // CalculateColumnWidths scans all check runs and determines max width for each column
-func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headPushedTime time.Time, jobAverages map[string]time.Duration) ColumnWidths {
+func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, cycleStartTime time.Time, jobAverages map[string]time.Duration) ColumnWidths {
 	const (
 		minNameWidth = 20
 		minTimeWidth = 5
@@ -256,7 +257,7 @@ func CalculateColumnWidths(checkRuns []ghclient.CheckRunInfo, headPushedTime tim
 	}
 
 	for _, check := range checkRuns {
-		queueText := FormatQueueLatency(check, headPushedTime)
+		queueText := FormatQueueLatency(check, cycleStartTime)
 		if runewidth.StringWidth(queueText) > widths.QueueWidth {
 			widths.QueueWidth = runewidth.StringWidth(queueText)
 		}

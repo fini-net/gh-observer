@@ -334,25 +334,29 @@ client, err := ghclient.NewClientFromToken(token, host)
 prInfo, err := ghclient.FetchPRInfo(ctx, client, owner, repo, prNumber)
 ```
 
-Uses REST API to get PR title, head SHA, and created-at timestamp. The head
-commit's push time is sourced separately from the GraphQL check-runs query
-(`FetchCheckRunsGraphQL`), which fetches `pushedDate` in the same round-trip
-as the StatusCheckRollup (issue #349).
+Uses REST API to get PR title and head SHA. The timing anchor is sourced
+separately from the GraphQL check-runs query (`FetchCheckRunsGraphQL`),
+which fetches the head commit's `pushedDate` and the PR's `createdAt` in
+the same round-trip as the StatusCheckRollup and combines them into the
+cycle-start anchor, `max(push, creation)` (issues #349 and #518).
 
 #### Step 2: Fetch Check Runs
 
 ```go
-checkRuns, headPushedTime, _, err := ghclient.FetchCheckRunsGraphQL(ctx, token, owner, repo, prNumber)
+checkRuns, cycleStart, _, err := ghclient.FetchCheckRunsGraphQL(ctx, token, owner, repo, prNumber)
 ```
 
-Returns `[]CheckRunInfo` with workflow names, status, timestamps, and annotations.
+Returns `[]CheckRunInfo` with workflow names, status, timestamps, and
+annotations, plus the cycle-start anchor: the later of the head commit's
+push time and the PR's creation time (issue #518), so a PR opened from an
+already-pushed branch doesn't read misleadingly old.
 
 #### Step 3: Handle Empty Checks
 
 ```go
 if len(checkRuns) == 0 {
-    sinceCreation := time.Since(headCommitTime)
-    fmt.Printf("No checks found (commit pushed %s ago)\n", timing.FormatDuration(sinceCreation))
+    sinceStart := time.Since(cycleStart)
+    fmt.Printf("No checks found (started %s ago)\n", timing.FormatDuration(sinceStart))
     fmt.Println("Checks may still be starting up or not configured for this PR")
     return 0
 }
@@ -378,7 +382,7 @@ Located at `internal/github/history.go:31-153`. Fetches recent completed workflo
 #### Step 5: Calculate Column Widths
 
 ```go
-widths := tui.CalculateColumnWidths(checkRuns, headCommitTime, jobAverages)
+widths := tui.CalculateColumnWidths(checkRuns, cycleStart, jobAverages)
 ```
 
 Now includes a 4th column for historical averages.
@@ -471,8 +475,7 @@ type Model struct {
     // PR metadata (populated later)
     prTitle        string
     headSHA        string
-    prCreatedAt    time.Time
-    headCommitTime time.Time
+    cycleStartTime time.Time
 
     // Check run data (updated every poll)
     checkRuns []ghclient.CheckRunInfo
@@ -1352,7 +1355,7 @@ main.go run()
         │   └── Returns: PRInfo{Title, HeadSHA, CreatedAt}
         │
         ├── ghclient.FetchCheckRunsGraphQL()            [internal/github/graphql.go]
-        │   └── Returns: []CheckRunInfo{...}, headPushedTime, rateLimit
+        │   └── Returns: []CheckRunInfo{...}, cycleStart, rateLimit
         │
         ├── ghclient.FetchJobAverages() (unless --quick)
         │   └── Returns: map[jobName]averageDuration
@@ -1398,7 +1401,7 @@ main.go runPRMode()
             └── Message processing loop
                 │
                 ├── [PRInfoMsg received]
-                │   ├── Store: prTitle, headSHA, headCommitTime
+                │   ├── Store: prTitle, headSHA
                 │   └── Return: fetchCheckRuns()
                 │
                 ├── [TickMsg received]

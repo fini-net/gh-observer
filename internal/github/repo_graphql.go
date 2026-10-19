@@ -21,13 +21,14 @@ const maxPRsPerQuery = 10
 // PRCheckData holds check run data for a single PR in repo mode.
 // HeadSHA is the PR head commit OID, used to dedupe standalone branch runs
 // (see RepoModel.dedupeAndAttachExtraJobs) against the PR section.
-// HeadPushedTime is the head commit's pushedDate (with committedDate as a
-// fallback), used for the queue-latency column and "Pushed Xs ago" header.
+// CycleStartTime is the PR's cycle start anchor — the later of the head
+// commit's push time (pushedDate, with committedDate as a fallback) and
+// the PR's createdAt (issue #518) — used for the queue-latency column.
 type PRCheckData struct {
 	Number         int
 	Title          string
 	CheckRuns      []CheckRunInfo
-	HeadPushedTime time.Time
+	CycleStartTime time.Time
 	HeadSHA        string
 }
 
@@ -78,9 +79,10 @@ type repoPRQuery struct {
 	Repository struct {
 		PullRequests struct {
 			Nodes []struct {
-				Number  int
-				Title   string
-				Commits struct {
+				Number    int
+				Title     string
+				CreatedAt githubv4.DateTime `graphql:"createdAt"`
+				Commits   struct {
 					Nodes []struct {
 						Commit struct {
 							PushedDate        githubv4.DateTime `graphql:"pushedDate"`
@@ -158,10 +160,15 @@ func fetchRepoCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner
 		} else if !commit.CommittedDate.IsZero() {
 			headPushedTime = commit.CommittedDate.Time
 		}
+		// Cycle start anchor: the later of the head push time and the PR
+		// creation time, so a PR opened from an already-pushed branch (or a
+		// stale committedDate fallback) doesn't read misleadingly old in the
+		// queue-latency column (issue #518).
+		anchor := cycleStart(headPushedTime, pr.CreatedAt.Time)
 
 		checkRuns := repoContextNodesToCheckRuns(commit.StatusCheckRollup.Contexts.Nodes)
 
-		if len(checkRuns) == 0 && headPushedTime.IsZero() {
+		if len(checkRuns) == 0 && anchor.IsZero() {
 			continue
 		}
 
@@ -169,7 +176,7 @@ func fetchRepoCheckRunsGraphQL(ctx context.Context, client graphqlQuerier, owner
 			Number:         pr.Number,
 			Title:          pr.Title,
 			CheckRuns:      checkRuns,
-			HeadPushedTime: headPushedTime,
+			CycleStartTime: anchor,
 			HeadSHA:        string(commit.OID),
 		}
 	}

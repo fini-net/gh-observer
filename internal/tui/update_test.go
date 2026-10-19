@@ -1927,8 +1927,8 @@ func countBatchedCmds(cmd tea.Cmd) int {
 	return 1
 }
 
-func TestCopilotWaitAnchorReanchorsToPushTime(t *testing.T) {
-	t.Run("re-anchors wait/poll start to push time before first poll", func(t *testing.T) {
+func TestCopilotWaitAnchorReanchorsToCycleStart(t *testing.T) {
+	t.Run("re-anchors wait/poll start to cycle start before first poll", func(t *testing.T) {
 		m := makeModel()
 		m.waitForCopilot = true
 		m.copilotInitialDelay = 15 * time.Second
@@ -1939,28 +1939,28 @@ func TestCopilotWaitAnchorReanchorsToPushTime(t *testing.T) {
 		m.copilotWaitStartTime = time.Now()
 		m.copilotPollStartTime = time.Now().Add(m.copilotInitialDelay)
 
-		// Recent push (2s ago): inside the initial-delay window, so the
-		// poll start re-anchors to push + initial delay.
-		pushTime := time.Now().Add(-2 * time.Second)
+		// Recent cycle start (2s ago): inside the initial-delay window, so
+		// the poll start re-anchors to cycle start + initial delay.
+		cycleStart := time.Now().Add(-2 * time.Second)
 		before := time.Now()
 		model, _ := m.handleChecksUpdate(ChecksUpdateMsg{
 			CheckRuns:          []ghclient.CheckRunInfo{{Status: "in_progress"}},
-			HeadPushedTime:     pushTime,
+			CycleStartTime:     cycleStart,
 			RateLimitRemaining: 5000,
 		})
 		result := model.(*Model)
 
-		if !result.copilotWaitStartTime.Equal(pushTime) {
-			t.Errorf("copilotWaitStartTime = %v, want %v (real push time)", result.copilotWaitStartTime, pushTime)
+		if !result.copilotWaitStartTime.Equal(cycleStart) {
+			t.Errorf("copilotWaitStartTime = %v, want %v (real cycle start)", result.copilotWaitStartTime, cycleStart)
 		}
-		wantPollStart := pushTime.Add(m.copilotInitialDelay)
+		wantPollStart := cycleStart.Add(m.copilotInitialDelay)
 		if !result.copilotPollStartTime.Equal(wantPollStart) {
 			t.Errorf("copilotPollStartTime = %v, want %v", result.copilotPollStartTime, wantPollStart)
 		}
 		_ = before
 	})
 
-	t.Run("skips initial delay when push predates it", func(t *testing.T) {
+	t.Run("skips initial delay when cycle start predates it", func(t *testing.T) {
 		m := makeModel()
 		m.waitForCopilot = true
 		m.copilotInitialDelay = 15 * time.Second
@@ -1970,33 +1970,33 @@ func TestCopilotWaitAnchorReanchorsToPushTime(t *testing.T) {
 		m.copilotWaitStartTime = time.Now()
 		m.copilotPollStartTime = time.Now().Add(m.copilotInitialDelay)
 
-		// Push happened 5 minutes ago — already older than the 15s
+		// Cycle started 5 minutes ago — already older than the 15s
 		// initial-delay window. Any Copilot review request already exists
 		// (or never will), so the first poll fires immediately instead of
 		// waiting out the delay (issue #442). This is the attach-to-old-PR
 		// case: without the skip, non-Copilot repos sit through the full
 		// delay before the two-consecutive-not-requested rule can resolve.
-		pushTime := time.Now().Add(-5 * time.Minute)
+		cycleStart := time.Now().Add(-5 * time.Minute)
 		before := time.Now()
 		model, _ := m.handleChecksUpdate(ChecksUpdateMsg{
 			CheckRuns:          []ghclient.CheckRunInfo{{Status: "in_progress"}},
-			HeadPushedTime:     pushTime,
+			CycleStartTime:     cycleStart,
 			RateLimitRemaining: 5000,
 		})
 		result := model.(*Model)
 
-		if !result.copilotWaitStartTime.Equal(pushTime) {
-			t.Errorf("copilotWaitStartTime = %v, want %v (real push time)", result.copilotWaitStartTime, pushTime)
+		if !result.copilotWaitStartTime.Equal(cycleStart) {
+			t.Errorf("copilotWaitStartTime = %v, want %v (real cycle start)", result.copilotWaitStartTime, cycleStart)
 		}
 		// Poll start is "now" (between before and after the update), not
-		// pushTime+delay.
+		// cycleStart+delay.
 		after := time.Now()
 		if result.copilotPollStartTime.Before(before) || result.copilotPollStartTime.After(after) {
-			t.Errorf("copilotPollStartTime = %v, want ~now (delay skipped for old push)", result.copilotPollStartTime)
+			t.Errorf("copilotPollStartTime = %v, want ~now (delay skipped for old cycle start)", result.copilotPollStartTime)
 		}
 	})
 
-	t.Run("gate satisfied immediately when push predates max-wait", func(t *testing.T) {
+	t.Run("gate satisfied immediately when cycle start predates max-wait", func(t *testing.T) {
 		m := makeModel()
 		m.waitForCopilot = true
 		m.copilotInitialDelay = 15 * time.Second
@@ -2006,12 +2006,12 @@ func TestCopilotWaitAnchorReanchorsToPushTime(t *testing.T) {
 		m.copilotWaitStartTime = time.Now()
 		m.copilotPollStartTime = time.Now().Add(m.copilotInitialDelay)
 
-		// Push happened 5 minutes ago — already older than the 3-minute
+		// Cycle started 5 minutes ago — already older than the 3-minute
 		// max-wait budget by the time gh-observer attached.
-		pushTime := time.Now().Add(-5 * time.Minute)
+		cycleStart := time.Now().Add(-5 * time.Minute)
 		model, _ := m.handleChecksUpdate(ChecksUpdateMsg{
 			CheckRuns:          []ghclient.CheckRunInfo{{Status: "in_progress"}},
-			HeadPushedTime:     pushTime,
+			CycleStartTime:     cycleStart,
 			RateLimitRemaining: 5000,
 		})
 		result := model.(*Model)
@@ -2034,10 +2034,10 @@ func TestCopilotWaitAnchorReanchorsToPushTime(t *testing.T) {
 		m.copilotPollStartTime = fallbackPollStart
 		m.copilotLastPoll = time.Now() // a Copilot poll has already gone out
 
-		pushTime := time.Now().Add(-5 * time.Minute)
+		cycleStart := time.Now().Add(-5 * time.Minute)
 		model, _ := m.handleChecksUpdate(ChecksUpdateMsg{
 			CheckRuns:          []ghclient.CheckRunInfo{{Status: "in_progress"}},
-			HeadPushedTime:     pushTime,
+			CycleStartTime:     cycleStart,
 			RateLimitRemaining: 5000,
 		})
 		result := model.(*Model)
@@ -2056,10 +2056,10 @@ func TestCopilotWaitAnchorReanchorsToPushTime(t *testing.T) {
 		m := makeModel()
 		m.waitForCopilot = false
 
-		pushTime := time.Now().Add(-5 * time.Minute)
+		cycleStart := time.Now().Add(-5 * time.Minute)
 		model, _ := m.handleChecksUpdate(ChecksUpdateMsg{
 			CheckRuns:          []ghclient.CheckRunInfo{{Status: "in_progress"}},
-			HeadPushedTime:     pushTime,
+			CycleStartTime:     cycleStart,
 			RateLimitRemaining: 5000,
 		})
 		result := model.(*Model)

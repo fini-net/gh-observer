@@ -33,7 +33,9 @@ slow?"
 - ⏱️ **Runtime metrics** - Shows elapsed time: `3m 52s` tells you exactly how
   long checks have been running
 - ⏳ **Queue latency** - Displays wait time: `15s` shows how long GitHub queued
-  the job before starting
+  the job before starting, measured from when the CI cycle began (the later of
+  the head commit's push and the PR's creation, so a PR opened from an
+  already-pushed branch doesn't read misleadingly old)
 - 🔄 **Real-time updates** - Auto-refreshes every 5s (configurable) without
   manual polling
 - ⚡ **Startup phases** - Helpful messages like "Waiting for Actions to
@@ -62,7 +64,7 @@ Startup Phase (37s elapsed):
   💡 GitHub typically takes 30-90s to queue jobs after PR creation
 
 PR #5: 🔶 [claude] /init 21:04:15 UTC
-Updated 0s ago  •  Pushed 43h 8m 11s ago
+Updated 0s ago  •  Started 43h 8m 11s ago
 
 Startup   Workflow/Job                                Duration   Avg
 

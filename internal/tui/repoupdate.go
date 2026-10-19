@@ -145,7 +145,7 @@ func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, 
 		view := PRViewData{
 			Title:          stripVariationSelectors(prData.Title),
 			CheckRuns:      visible,
-			HeadPushedTime: prData.HeadPushedTime,
+			CycleStartTime: prData.CycleStartTime,
 			HeadSHA:        prData.HeadSHA,
 		}
 		// Preserve extras carried over from the last runs-poll so they

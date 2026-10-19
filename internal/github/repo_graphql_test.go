@@ -255,9 +255,10 @@ func (m *repoMockQuerier) Query(_ context.Context, q interface{}, _ map[string]i
 	return nil
 }
 
-// makeRepoPRQuery builds a *repoPRQuery with one PR carrying the given head SHA
-// and a single CheckRun context node.
-func makeRepoPRQuery(prNumber int, title, headSHA, checkName, workflowName string, rateLimit int) *repoPRQuery {
+// makeRepoPRQuery builds a *repoPRQuery with one PR carrying the given head
+// SHA, cycle times (pushedDate, committedDate, PR createdAt — zero values
+// are omitted), and a single CheckRun context node.
+func makeRepoPRQuery(prNumber int, title, headSHA, checkName, workflowName string, rateLimit int, pushed, committed, createdAt time.Time) *repoPRQuery {
 	startedAt := githubv4.DateTime{}
 	startedAt.Time = time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 
@@ -266,9 +267,10 @@ func makeRepoPRQuery(prNumber int, title, headSHA, checkName, workflowName strin
 	q.RateLimit.Remaining = rateLimit
 
 	pr := struct {
-		Number  int
-		Title   string
-		Commits struct {
+		Number    int
+		Title     string
+		CreatedAt githubv4.DateTime `graphql:"createdAt"`
+		Commits   struct {
 			Nodes []struct {
 				Commit struct {
 					PushedDate        githubv4.DateTime `graphql:"pushedDate"`
@@ -290,6 +292,7 @@ func makeRepoPRQuery(prNumber int, title, headSHA, checkName, workflowName strin
 		Number: prNumber,
 		Title:  title,
 	}
+	pr.CreatedAt.Time = createdAt
 	pr.Commits.Nodes = append(pr.Commits.Nodes, struct {
 		Commit struct {
 			PushedDate        githubv4.DateTime `graphql:"pushedDate"`
@@ -320,7 +323,9 @@ func makeRepoPRQuery(prNumber int, title, headSHA, checkName, workflowName strin
 				} `graphql:"contexts(first: 100)"`
 			}
 		}{
-			OID: githubv4.String(headSHA),
+			PushedDate:    githubv4.DateTime{Time: pushed},
+			CommittedDate: githubv4.DateTime{Time: committed},
+			OID:           githubv4.String(headSHA),
 			StatusCheckRollup: struct {
 				Contexts struct {
 					Nodes    []repoContextNode
@@ -354,7 +359,7 @@ func makeRepoPRQuery(prNumber int, title, headSHA, checkName, workflowName strin
 func TestFetchRepoCheckRunsGraphQLHeadSHA(t *testing.T) {
 	mock := &repoMockQuerier{
 		responses: []*repoPRQuery{
-			makeRepoPRQuery(7, "Add feature", "abc123def456", "build", "CI", 4900),
+			makeRepoPRQuery(7, "Add feature", "abc123def456", "build", "CI", 4900, time.Time{}, time.Time{}, time.Time{}),
 		},
 	}
 
@@ -388,7 +393,7 @@ func TestFetchRepoCheckRunsGraphQLHeadSHA(t *testing.T) {
 func TestFetchRepoCheckRunsGraphQLEmptySHA(t *testing.T) {
 	mock := &repoMockQuerier{
 		responses: []*repoPRQuery{
-			makeRepoPRQuery(1, "No SHA", "", "lint", "CI", 4900),
+			makeRepoPRQuery(1, "No SHA", "", "lint", "CI", 4900, time.Time{}, time.Time{}, time.Time{}),
 		},
 	}
 
@@ -401,5 +406,90 @@ func TestFetchRepoCheckRunsGraphQLEmptySHA(t *testing.T) {
 	}
 	if prs[1].HeadSHA != "" {
 		t.Errorf("HeadSHA = %q, want empty", prs[1].HeadSHA)
+	}
+}
+
+// TestFetchRepoCheckRunsGraphQLCycleStartClampedByCreation asserts the
+// per-PR anchor is clamped by the PR's createdAt when the push predates
+// the PR: a PR opened from an already-pushed branch must not read
+// misleadingly old in the queue-latency column (issue #518).
+func TestFetchRepoCheckRunsGraphQLCycleStartClampedByCreation(t *testing.T) {
+	pushed := time.Date(2024, 6, 1, 9, 0, 0, 0, time.UTC) // 3 days before creation
+	created := time.Date(2024, 6, 4, 9, 0, 0, 0, time.UTC)
+	mock := &repoMockQuerier{
+		responses: []*repoPRQuery{
+			makeRepoPRQuery(9, "Old branch", "deadbeef", "build", "CI", 4900, pushed, time.Time{}, created),
+		},
+	}
+
+	prs, _, err := fetchRepoCheckRunsGraphQL(context.Background(), mock, "owner", "repo")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if got := prs[9].CycleStartTime; !got.Equal(created) {
+		t.Errorf("CycleStartTime = %v, want %v (creation must clamp stale push)", got, created)
+	}
+}
+
+// TestFetchRepoCheckRunsGraphQLCycleStartPushWins asserts a push newer than
+// the PR creation (the force-push-after-creation case) keeps the push time,
+// so the common case is unchanged (issue #518).
+func TestFetchRepoCheckRunsGraphQLCycleStartPushWins(t *testing.T) {
+	created := time.Date(2024, 6, 1, 9, 0, 0, 0, time.UTC)
+	pushed := time.Date(2024, 6, 4, 9, 0, 0, 0, time.UTC) // force-push after creation
+	mock := &repoMockQuerier{
+		responses: []*repoPRQuery{
+			makeRepoPRQuery(10, "Force push", "deadbeef", "build", "CI", 4900, pushed, time.Time{}, created),
+		},
+	}
+
+	prs, _, err := fetchRepoCheckRunsGraphQL(context.Background(), mock, "owner", "repo")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if got := prs[10].CycleStartTime; !got.Equal(pushed) {
+		t.Errorf("CycleStartTime = %v, want %v (push must win after creation)", got, pushed)
+	}
+}
+
+// TestFetchRepoCheckRunsGraphQLCycleStartCommittedFallbackClamped asserts
+// the committedDate fallback (engaged when pushedDate is absent) is also
+// clamped by the PR creation time, so a rebase dragging in an ancient
+// committer date can't anchor the cycle before the PR existed (issue #518).
+func TestFetchRepoCheckRunsGraphQLCycleStartCommittedFallbackClamped(t *testing.T) {
+	committed := time.Date(2024, 6, 1, 9, 0, 0, 0, time.UTC) // stale committer date
+	created := time.Date(2024, 6, 4, 9, 0, 0, 0, time.UTC)
+	mock := &repoMockQuerier{
+		responses: []*repoPRQuery{
+			makeRepoPRQuery(11, "Rebased", "deadbeef", "build", "CI", 4900, time.Time{}, committed, created),
+		},
+	}
+
+	prs, _, err := fetchRepoCheckRunsGraphQL(context.Background(), mock, "owner", "repo")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if got := prs[11].CycleStartTime; !got.Equal(created) {
+		t.Errorf("CycleStartTime = %v, want %v (creation must clamp committedDate fallback)", got, created)
+	}
+}
+
+// TestFetchRepoCheckRunsGraphQLCycleStartCreationOnly asserts that when
+// neither pushedDate nor committedDate is present, the PR creation time
+// anchors the cycle — a strictly better fallback than zero (issue #518).
+func TestFetchRepoCheckRunsGraphQLCycleStartCreationOnly(t *testing.T) {
+	created := time.Date(2024, 6, 4, 9, 0, 0, 0, time.UTC)
+	mock := &repoMockQuerier{
+		responses: []*repoPRQuery{
+			makeRepoPRQuery(12, "No dates", "deadbeef", "build", "CI", 4900, time.Time{}, time.Time{}, created),
+		},
+	}
+
+	prs, _, err := fetchRepoCheckRunsGraphQL(context.Background(), mock, "owner", "repo")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if got := prs[12].CycleStartTime; !got.Equal(created) {
+		t.Errorf("CycleStartTime = %v, want %v (creation-only fallback)", got, created)
 	}
 }

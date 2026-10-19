@@ -19,11 +19,14 @@ import (
 // rebuilt from the current visible runs on every RepoRunsUpdateMsg (not
 // appended to) and preserved across PR-checks polls so extras don't flicker
 // out between runs ticks. The view layer merges the two for rendering.
+// CycleStartTime is the PR's cycle start anchor — the later of the head
+// commit's push time and the PR's creation time (issue #518) — backing the
+// queue-latency column.
 type PRViewData struct {
 	Title          string
 	CheckRuns      []ghclient.CheckRunInfo
 	ExtraCheckRuns []ghclient.CheckRunInfo
-	HeadPushedTime time.Time
+	CycleStartTime time.Time
 	HeadSHA        string
 }
 

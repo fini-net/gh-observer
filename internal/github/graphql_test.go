@@ -881,10 +881,11 @@ func FuzzBigIntUnmarshalJSON(f *testing.F) {
 	})
 }
 
-// makeTestQueryWithPushTime builds a *pullRequestQuery like makeTestQuery but
-// also populates the head commit's PushedDate and CommittedDate so callers
-// can exercise the push-time extraction path in FetchCheckRunsGraphQL.
-func makeTestQueryWithPushTime(pushedDate, committedDate time.Time, rateLimitRemaining int) *pullRequestQuery {
+// makeTestQueryWithCycleTimes builds a *pullRequestQuery like makeTestQuery
+// but also populates the PR's CreatedAt and the head commit's PushedDate and
+// CommittedDate so callers can exercise the cycle-start extraction path in
+// FetchCheckRunsGraphQL (issues #349, #518).
+func makeTestQueryWithCycleTimes(pushedDate, committedDate, prCreatedAt time.Time, rateLimitRemaining int) *pullRequestQuery {
 	q := makeTestQuery([]string{"lint"}, false, "", rateLimitRemaining)
 	commit := &q.Repository.PullRequest.Commits.Nodes[0]
 	if !pushedDate.IsZero() {
@@ -893,18 +894,23 @@ func makeTestQueryWithPushTime(pushedDate, committedDate time.Time, rateLimitRem
 	if !committedDate.IsZero() {
 		commit.Commit.CommittedDate.Time = committedDate
 	}
+	if !prCreatedAt.IsZero() {
+		q.Repository.PullRequest.CreatedAt.Time = prCreatedAt
+	}
 	return q
 }
 
-// TestFetchCheckRunsGraphQL_HeadPushedTimeFromPushedDate asserts the push
-// time returned by FetchCheckRunsGraphQL is sourced from pushedDate when
-// both pushedDate and committedDate are present (issue #349).
-func TestFetchCheckRunsGraphQL_HeadPushedTimeFromPushedDate(t *testing.T) {
+// TestFetchCheckRunsGraphQL_CycleStartFromPushedDate asserts the anchor
+// returned by FetchCheckRunsGraphQL is sourced from pushedDate when both
+// pushedDate and committedDate are present and PR creation is older
+// (issues #349, #518).
+func TestFetchCheckRunsGraphQL_CycleStartFromPushedDate(t *testing.T) {
 	pushed := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
 	committed := pushed.Add(-2 * time.Hour) // older than pushed
+	created := pushed.Add(-24 * time.Hour)  // PR predates the push
 	mock := &mockQuerier{
 		responses: []mockResponse{
-			{query: makeTestQueryWithPushTime(pushed, committed, 4999)},
+			{query: makeTestQueryWithCycleTimes(pushed, committed, created, 4999)},
 		},
 	}
 
@@ -913,17 +919,19 @@ func TestFetchCheckRunsGraphQL_HeadPushedTimeFromPushedDate(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !got.Equal(pushed) {
-		t.Errorf("HeadPushedTime = %v, want %v (pushedDate should win over committedDate)", got, pushed)
+		t.Errorf("CycleStartTime = %v, want %v (pushedDate should win over committedDate and creation)", got, pushed)
 	}
 }
 
-// TestFetchCheckRunsGraphQL_HeadPushedTimeFallsBackToCommittedDate
-// asserts that when pushedDate is absent (zero), committedDate is used.
-func TestFetchCheckRunsGraphQL_HeadPushedTimeFallsBackToCommittedDate(t *testing.T) {
+// TestFetchCheckRunsGraphQL_CycleStartFallsBackToCommittedDate
+// asserts that when pushedDate is absent (zero), committedDate is used
+// (creation still older, so the fallback wins the max).
+func TestFetchCheckRunsGraphQL_CycleStartFallsBackToCommittedDate(t *testing.T) {
 	committed := time.Date(2024, 6, 1, 10, 0, 0, 0, time.UTC)
+	created := committed.Add(-24 * time.Hour)
 	mock := &mockQuerier{
 		responses: []mockResponse{
-			{query: makeTestQueryWithPushTime(time.Time{}, committed, 4999)},
+			{query: makeTestQueryWithCycleTimes(time.Time{}, committed, created, 4999)},
 		},
 	}
 
@@ -932,17 +940,17 @@ func TestFetchCheckRunsGraphQL_HeadPushedTimeFallsBackToCommittedDate(t *testing
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !got.Equal(committed) {
-		t.Errorf("HeadPushedTime = %v, want %v (committedDate fallback)", got, committed)
+		t.Errorf("CycleStartTime = %v, want %v (committedDate fallback)", got, committed)
 	}
 }
 
-// TestFetchCheckRunsGraphQL_HeadPushedTimeZeroWhenAbsent asserts that when
-// neither pushedDate nor committedDate is present, the zero time is
-// returned so callers can render the fallback header.
-func TestFetchCheckRunsGraphQL_HeadPushedTimeZeroWhenAbsent(t *testing.T) {
+// TestFetchCheckRunsGraphQL_CycleStartZeroWhenAbsent asserts that when
+// neither pushedDate, committedDate, nor PR creation time is present, the
+// zero time is returned so callers can render the fallback header.
+func TestFetchCheckRunsGraphQL_CycleStartZeroWhenAbsent(t *testing.T) {
 	mock := &mockQuerier{
 		responses: []mockResponse{
-			{query: makeTestQueryWithPushTime(time.Time{}, time.Time{}, 4999)},
+			{query: makeTestQueryWithCycleTimes(time.Time{}, time.Time{}, time.Time{}, 4999)},
 		},
 	}
 
@@ -951,6 +959,91 @@ func TestFetchCheckRunsGraphQL_HeadPushedTimeZeroWhenAbsent(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !got.IsZero() {
-		t.Errorf("HeadPushedTime = %v, want zero", got)
+		t.Errorf("CycleStartTime = %v, want zero", got)
+	}
+}
+
+// TestFetchCheckRunsGraphQL_CycleStartClampedByPRCreation asserts the PR
+// creation time clamps a push that predates the PR: a PR opened from an
+// already-pushed branch must not anchor queue latency or the "Started Xs
+// ago" header to the stale push (issue #518).
+func TestFetchCheckRunsGraphQL_CycleStartClampedByPRCreation(t *testing.T) {
+	pushed := time.Date(2024, 6, 1, 9, 0, 0, 0, time.UTC) // 3 days before creation
+	created := time.Date(2024, 6, 4, 9, 0, 0, 0, time.UTC)
+	mock := &mockQuerier{
+		responses: []mockResponse{
+			{query: makeTestQueryWithCycleTimes(pushed, time.Time{}, created, 4999)},
+		},
+	}
+
+	_, got, _, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Equal(created) {
+		t.Errorf("CycleStartTime = %v, want %v (creation must clamp stale push)", got, created)
+	}
+}
+
+// TestFetchCheckRunsGraphQL_CycleStartPushWinsAfterCreation asserts a push
+// newer than the PR creation (the force-push-after-creation case) keeps the
+// push time, so the common case is unchanged (issue #518).
+func TestFetchCheckRunsGraphQL_CycleStartPushWinsAfterCreation(t *testing.T) {
+	created := time.Date(2024, 6, 1, 9, 0, 0, 0, time.UTC)
+	pushed := time.Date(2024, 6, 4, 9, 0, 0, 0, time.UTC) // push after creation
+	mock := &mockQuerier{
+		responses: []mockResponse{
+			{query: makeTestQueryWithCycleTimes(pushed, time.Time{}, created, 4999)},
+		},
+	}
+
+	_, got, _, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Equal(pushed) {
+		t.Errorf("CycleStartTime = %v, want %v (push must win after creation)", got, pushed)
+	}
+}
+
+// TestFetchCheckRunsGraphQL_CycleStartCommittedFallbackClamped asserts the
+// committedDate fallback (engaged when pushedDate is absent) is clamped by
+// the PR creation time, so a rebase dragging in an ancient committer date
+// can't anchor the cycle before the PR existed (issue #518).
+func TestFetchCheckRunsGraphQL_CycleStartCommittedFallbackClamped(t *testing.T) {
+	committed := time.Date(2024, 6, 1, 9, 0, 0, 0, time.UTC) // stale committer date
+	created := time.Date(2024, 6, 4, 9, 0, 0, 0, time.UTC)
+	mock := &mockQuerier{
+		responses: []mockResponse{
+			{query: makeTestQueryWithCycleTimes(time.Time{}, committed, created, 4999)},
+		},
+	}
+
+	_, got, _, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Equal(created) {
+		t.Errorf("CycleStartTime = %v, want %v (creation must clamp committedDate fallback)", got, created)
+	}
+}
+
+// TestFetchCheckRunsGraphQL_CycleStartCreationOnly asserts that when
+// neither pushedDate nor committedDate is present, the PR creation time
+// anchors the cycle — a strictly better fallback than zero (issue #518).
+func TestFetchCheckRunsGraphQL_CycleStartCreationOnly(t *testing.T) {
+	created := time.Date(2024, 6, 4, 9, 0, 0, 0, time.UTC)
+	mock := &mockQuerier{
+		responses: []mockResponse{
+			{query: makeTestQueryWithCycleTimes(time.Time{}, time.Time{}, created, 4999)},
+		},
+	}
+
+	_, got, _, err := fetchCheckRunsGraphQL(context.Background(), mock, "owner", "repo", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Equal(created) {
+		t.Errorf("CycleStartTime = %v, want %v (creation-only fallback)", got, created)
 	}
 }

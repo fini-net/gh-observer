@@ -129,10 +129,10 @@ func (m RepoModel) renderPRGroup(b *strings.Builder, prNum int, prData PRViewDat
 	}
 
 	SortCheckRuns(merged)
-	widths := CalculateColumnWidths(merged, prData.HeadPushedTime, nil)
+	widths := CalculateColumnWidths(merged, prData.CycleStartTime, nil)
 
 	for _, check := range merged {
-		line := m.renderRepoCheckRun(check, prData.HeadPushedTime, widths)
+		line := m.renderRepoCheckRun(check, prData.CycleStartTime, widths)
 		b.WriteString(line)
 	}
 
@@ -141,9 +141,9 @@ func (m RepoModel) renderPRGroup(b *strings.Builder, prNum int, prData PRViewDat
 
 // renderRepoCheckRun renders one PR check row, indented two spaces under the PR header.
 // Reuses display.go helpers (no HistAvg column — jobAverages is nil in repo mode).
-func (m RepoModel) renderRepoCheckRun(check ghclient.CheckRunInfo, headPushedTime time.Time, widths ColumnWidths) string {
+func (m RepoModel) renderRepoCheckRun(check ghclient.CheckRunInfo, cycleStartTime time.Time, widths ColumnWidths) string {
 	nameCol := BuildNameColumn(check, widths, m.enableLinks)
-	queueText := FormatQueueLatency(check, headPushedTime)
+	queueText := FormatQueueLatency(check, cycleStartTime)
 	durationText := FormatDuration(check)
 	avgText := FormatAvg(check, nil)
 

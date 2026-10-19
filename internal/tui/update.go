@@ -166,7 +166,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.prTitle = stripVariationSelectors(msg.Title)
 		m.headSHA = msg.HeadSHA
-		m.prCreatedAt = msg.CreatedAt
 
 		cmds := []tea.Cmd{
 			fetchCheckRuns(m.ctx, m.token, m.host, m.owner, m.repo, m.prNumber),
@@ -212,10 +211,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// push. See copilotGateSatisfied and the TickMsg poll gate below.
 				//
 				// Both are provisional here, anchored to PR-info time (now) as a
-				// fallback in case the real push time never arrives. handleChecksUpdate
-				// re-anchors them to the actual push time (m.headPushedTime) as soon
-				// as it's known, so copilot_max_wait means "since push" like queue
-				// latency does, not "since gh-observer attached".
+				// fallback in case the real cycle start never arrives.
+				// handleChecksUpdate re-anchors them to the actual cycle start
+				// (m.cycleStartTime — the later of push and PR creation, issue
+				// #518) as soon as it's known, so copilot_max_wait means
+				// "since the CI cycle began" like queue latency does, not
+				// "since gh-observer attached".
 				m.copilotWaitStartTime = time.Now()
 				m.copilotPollStartTime = time.Now().Add(m.copilotInitialDelay)
 				debug.Log("copilot gate armed",
@@ -418,38 +419,42 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 
 	m.checkRuns = msg.CheckRuns
 	SortCheckRuns(m.checkRuns)
-	// Adopt the GraphQL-sourced push time on the first successful poll
-	// where it is non-zero. Subsequent polls overwrite with the same
+	// Adopt the GraphQL-sourced cycle start anchor on the first successful
+	// poll where it is non-zero. Subsequent polls overwrite with the same
 	// value; if a later poll returns zero (e.g. transient query shape
 	// change), preserve the last known value rather than dropping the
-	// user-facing "Pushed Xs ago" header.
-	if !msg.HeadPushedTime.IsZero() {
-		firstPushTime := m.headPushedTime.IsZero()
-		m.headPushedTime = msg.HeadPushedTime
+	// user-facing "Started Xs ago" header.
+	if !msg.CycleStartTime.IsZero() {
+		firstAnchor := m.cycleStartTime.IsZero()
+		m.cycleStartTime = msg.CycleStartTime
 
-		// Re-anchor the Copilot wait budget to the real push time instead of
-		// the PRInfoMsg-arrival fallback, so copilot_max_wait is measured
-		// "since push" (matching queue latency) and a review request that's
-		// already older than the budget on attach doesn't get a fresh
-		// timeout. Only before the first poll, so the countdown/elapsed text
-		// never jumps mid-poll.
+		// Re-anchor the Copilot wait budget to the real cycle start instead
+		// of the PRInfoMsg-arrival fallback, so copilot_max_wait is measured
+		// "since the CI cycle began" (matching queue latency) and a review
+		// request that's already older than the budget on attach doesn't get
+		// a fresh timeout. Only before the first poll, so the countdown/
+		// elapsed text never jumps mid-poll.
 		//
-		// The initial-delay window is also skipped when the push is already
+		// The initial-delay window is also skipped when the cycle is already
 		// older than copilotInitialDelay (issue #442): the delay exists to
 		// give GitHub time to create the review request after a push, but a
-		// push that long predates the watch means any request already exists
+		// cycle that long predates the watch means any request already exists
 		// (or will never exist) — waiting the delay only delays the
 		// two-consecutive-not-requested resolution for repos that don't use
 		// Copilot, the vast majority case.
-		if firstPushTime && m.waitForCopilot && !m.copilotWaitStartTime.IsZero() && m.copilotLastPoll.IsZero() {
-			m.copilotWaitStartTime = msg.HeadPushedTime
-			if time.Since(msg.HeadPushedTime) > m.copilotInitialDelay {
+		//
+		// The anchor is max(push, PR creation) as of issue #518, so a PR
+		// opened from an already-pushed branch no longer pre-exhausts the
+		// budget or spuriously skips the delay off a stale push time.
+		if firstAnchor && m.waitForCopilot && !m.copilotWaitStartTime.IsZero() && m.copilotLastPoll.IsZero() {
+			m.copilotWaitStartTime = msg.CycleStartTime
+			if time.Since(msg.CycleStartTime) > m.copilotInitialDelay {
 				m.copilotPollStartTime = time.Now()
-				debug.Log("copilot gate re-anchored to push time (initial delay skipped; push already older)",
+				debug.Log("copilot gate re-anchored to cycle start (initial delay skipped; cycle already older)",
 					"wait_start", m.copilotWaitStartTime, "poll_start", m.copilotPollStartTime)
 			} else {
-				m.copilotPollStartTime = msg.HeadPushedTime.Add(m.copilotInitialDelay)
-				debug.Log("copilot gate re-anchored to push time",
+				m.copilotPollStartTime = msg.CycleStartTime.Add(m.copilotInitialDelay)
+				debug.Log("copilot gate re-anchored to cycle start",
 					"wait_start", m.copilotWaitStartTime, "poll_start", m.copilotPollStartTime)
 			}
 		}
@@ -575,9 +580,9 @@ func copilotGateSatisfied(m *Model) bool {
 		return true
 	}
 	// Max wait elapsed — stop waiting and proceed. copilot_max_wait measures
-	// from the real push time once handleChecksUpdate re-anchors
-	// copilotWaitStartTime to it (falling back to PR-info time if the push
-	// time never arrives), so this includes the initial-delay window
+	// from the real cycle start once handleChecksUpdate re-anchors
+	// copilotWaitStartTime to it (falling back to PR-info time if the anchor
+	// never arrives), so this includes the initial-delay window
 	// (issue #409). In practice the TickMsg timeout check above already
 	// clears copilotPending once this elapses, so this branch is a safety
 	// net for exit timing that races ahead of the next tick.
@@ -702,19 +707,15 @@ func fetchPRInfo(ctx context.Context, token, host, owner, repo string, prNumber 
 			return PRInfoMsg{Err: err}
 		}
 
-		createdAt, err := ghclient.ParseTimestamp(prInfo.CreatedAt)
-		if err != nil {
-			debug.Log("timestamp parse error", "field", "CreatedAt", "value", prInfo.CreatedAt, "err", err)
-		}
-
-		// The head push time arrives via ChecksUpdateMsg from the GraphQL
-		// check-runs query (FetchCheckRunsGraphQL), not from PRInfo (issue #349).
+		// The timing anchor — the later of the head commit's push time and
+		// the PR's creation time (issue #518) — arrives via ChecksUpdateMsg
+		// from the GraphQL check-runs query (FetchCheckRunsGraphQL), not from
+		// PRInfo (issue #349).
 
 		return PRInfoMsg{
-			Number:    prInfo.Number,
-			Title:     prInfo.Title,
-			HeadSHA:   prInfo.HeadSHA,
-			CreatedAt: createdAt,
+			Number:  prInfo.Number,
+			Title:   prInfo.Title,
+			HeadSHA: prInfo.HeadSHA,
 		}
 	}
 }
@@ -758,14 +759,14 @@ func fetchWorkflowHistory(ctx context.Context, token, host, owner, repo string, 
 // fetchCheckRuns fetches check runs using GraphQL
 func fetchCheckRuns(ctx context.Context, token, host, owner, repo string, prNumber int) tea.Cmd {
 	return func() tea.Msg {
-		checkRuns, headPushedTime, rateLimit, err := ghclient.FetchCheckRunsGraphQL(ctx, token, host, owner, repo, prNumber)
+		checkRuns, cycleStart, rateLimit, err := ghclient.FetchCheckRunsGraphQL(ctx, token, host, owner, repo, prNumber)
 		if err != nil {
 			return ChecksUpdateMsg{Err: err}
 		}
 
 		return ChecksUpdateMsg{
 			CheckRuns:          checkRuns,
-			HeadPushedTime:     headPushedTime,
+			CycleStartTime:     cycleStart,
 			RateLimitRemaining: rateLimit,
 		}
 	}

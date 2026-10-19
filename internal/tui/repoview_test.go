@@ -386,7 +386,7 @@ func TestRenderPRGroup(t *testing.T) {
 					{Name: "build", WorkflowName: "CI", Status: "in_progress", StartedAt: ptrTime(now.Add(-1 * time.Minute))},
 					{Name: "lint", WorkflowName: "CI", Status: "completed", Conclusion: "success", StartedAt: ptrTime(now.Add(-2 * time.Minute)), CompletedAt: ptrTime(now.Add(-1 * time.Minute))},
 				},
-				HeadPushedTime: pushed,
+				CycleStartTime: pushed,
 			},
 		}
 
@@ -428,7 +428,7 @@ func TestRenderPRGroup(t *testing.T) {
 				CheckRuns: []ghclient.CheckRunInfo{
 					{Name: "test", WorkflowName: "CI", Status: "completed", Conclusion: "failure", StartedAt: ptrTime(now.Add(-3 * time.Minute)), CompletedAt: &failureCompleted},
 				},
-				HeadPushedTime: pushed,
+				CycleStartTime: pushed,
 			},
 		}
 
@@ -455,7 +455,7 @@ func TestRenderPRGroup(t *testing.T) {
 				ExtraCheckRuns: []ghclient.CheckRunInfo{
 					{Name: "coding-agent", WorkflowName: "Copilot", AppName: "Copilot", Status: "in_progress"},
 				},
-				HeadPushedTime: pushed,
+				CycleStartTime: pushed,
 			},
 		}
 
@@ -690,7 +690,7 @@ func TestRepoViewRendering(t *testing.T) {
 	t.Run("fetch error status line", func(t *testing.T) {
 		m := makeRepoModelForRender()
 		m.prs = map[int]PRViewData{
-			1: {Title: "One", CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress", Name: "build"}}, HeadPushedTime: pushed},
+			1: {Title: "One", CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress", Name: "build"}}, CycleStartTime: pushed},
 		}
 		m.fetchErrChecks = errors.New("504 Gateway Timeout")
 		m.fetchErrChecksAt = now.Add(-5 * time.Second)
@@ -707,7 +707,7 @@ func TestRepoViewRendering(t *testing.T) {
 	t.Run("runs-source error line takes precedence when newer", func(t *testing.T) {
 		m := makeRepoModelForRender()
 		m.prs = map[int]PRViewData{
-			1: {Title: "One", CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress", Name: "build"}}, HeadPushedTime: pushed},
+			1: {Title: "One", CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress", Name: "build"}}, CycleStartTime: pushed},
 		}
 		m.fetchErrChecks = errors.New("graphql boom")
 		m.fetchErrChecksAt = now.Add(-30 * time.Second)
@@ -738,8 +738,8 @@ func TestRepoViewRendering(t *testing.T) {
 	t.Run("full view with PRs and standalone runs", func(t *testing.T) {
 		m := makeRepoModelForRender()
 		m.prs = map[int]PRViewData{
-			1: {Title: "First PR", CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress", Name: "build", WorkflowName: "CI", StartedAt: ptrTime(now.Add(-1 * time.Minute))}}, HeadPushedTime: pushed},
-			2: {Title: "Second PR", CheckRuns: []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success", Name: "test", WorkflowName: "CI", CompletedAt: ptrTime(now.Add(-1 * time.Minute))}}, HeadPushedTime: pushed},
+			1: {Title: "First PR", CheckRuns: []ghclient.CheckRunInfo{{Status: "in_progress", Name: "build", WorkflowName: "CI", StartedAt: ptrTime(now.Add(-1 * time.Minute))}}, CycleStartTime: pushed},
+			2: {Title: "Second PR", CheckRuns: []ghclient.CheckRunInfo{{Status: "completed", Conclusion: "success", Name: "test", WorkflowName: "CI", CompletedAt: ptrTime(now.Add(-1 * time.Minute))}}, CycleStartTime: pushed},
 		}
 		m.standaloneRuns = []ghclient.BranchRunData{
 			{RunID: 1, DisplayTitle: "Post-merge run", HeadBranch: "main", Event: "push", Status: "in_progress", RunStartedAt: now.Add(-1 * time.Minute)},

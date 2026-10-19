@@ -379,7 +379,7 @@ func runSnapshot(ctx context.Context, token, host, owner, repo string, prNumber 
 		return 1
 	}
 
-	checkRuns, headPushedTime, _, err := ghclient.FetchCheckRunsGraphQL(ctx, token, host, owner, repo, prNumber)
+	checkRuns, cycleStart, _, err := ghclient.FetchCheckRunsGraphQL(ctx, token, host, owner, repo, prNumber)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to fetch check runs: %v\n", err)
 		return 1
@@ -388,9 +388,9 @@ func runSnapshot(ctx context.Context, token, host, owner, repo string, prNumber 
 	fmt.Printf("PR #%d: %s\n\n", prNumber, prInfo.Title)
 
 	if len(checkRuns) == 0 {
-		if !headPushedTime.IsZero() {
-			sincePush := time.Since(headPushedTime)
-			fmt.Printf("No checks found (commit pushed %s ago)\n", timing.FormatDuration(sincePush))
+		if !cycleStart.IsZero() {
+			sinceStart := time.Since(cycleStart)
+			fmt.Printf("No checks found (started %s ago)\n", timing.FormatDuration(sinceStart))
 		} else {
 			fmt.Println("No checks found")
 		}
@@ -411,7 +411,7 @@ func runSnapshot(ctx context.Context, token, host, owner, repo string, prNumber 
 	}
 	ghclient.ApplyPresumedAverages(jobAverages, checkRuns, presumedAverages, host)
 
-	widths := tui.CalculateColumnWidths(checkRuns, headPushedTime, jobAverages)
+	widths := tui.CalculateColumnWidths(checkRuns, cycleStart, jobAverages)
 
 	headerQueue, headerName, headerDuration, headerAvg := tui.FormatHeaderColumns(widths)
 	fmt.Printf("%s   %s  %s  %s\n\n", headerQueue, headerName, headerDuration, headerAvg)
@@ -419,7 +419,7 @@ func runSnapshot(ctx context.Context, token, host, owner, repo string, prNumber 
 	exitCode := 0
 	for _, check := range checkRuns {
 		nameCol := tui.BuildNameColumn(check, widths, enableLinks)
-		queueText := tui.FormatQueueLatency(check, headPushedTime)
+		queueText := tui.FormatQueueLatency(check, cycleStart)
 		durationText := tui.FormatDuration(check)
 		avgText := tui.FormatAvg(check, jobAverages)
 		icon := tui.GetCheckIcon(check.Status, check.Conclusion)

@@ -20,8 +20,7 @@ type Model struct {
 	// PR metadata
 	prTitle        string
 	headSHA        string
-	prCreatedAt    time.Time
-	headPushedTime time.Time
+	cycleStartTime time.Time
 
 	// Check runs
 	checkRuns []ghclient.CheckRunInfo
@@ -95,10 +94,11 @@ type Model struct {
 	// before timing out and proceeding. copilotPollStartTime is initially set
 	// to that fallback time + initialDelay and gates when the first Copilot
 	// review poll may fire (gives GitHub time to create the review request
-	// after a push). Both are re-anchored to the real push time
-	// (m.headPushedTime) in handleChecksUpdate as soon as it's known and no
-	// poll has fired yet, so copilot_max_wait is measured "since push" like
-	// queue latency, not "since gh-observer attached".
+	// after a push). Both are re-anchored to the real cycle start time
+	// (m.cycleStartTime — the later of push and PR creation, issue #518) in
+	// handleChecksUpdate as soon as it's known and no poll has fired yet, so
+	// copilot_max_wait is measured "since the CI cycle began" like queue
+	// latency, not "since gh-observer attached".
 	waitForCopilot        bool
 	copilotMaxWait        time.Duration
 	copilotPollInterval   time.Duration

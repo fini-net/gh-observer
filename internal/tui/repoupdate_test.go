@@ -378,7 +378,7 @@ func TestRepoChecksUpdateErrorNonFatal(t *testing.T) {
 					{Status: "in_progress", Name: "build"},
 					{Status: "completed", Conclusion: "success", Name: "lint", CompletedAt: &goodCompletedAt},
 				},
-				HeadPushedTime: now.Add(-2 * time.Minute),
+				CycleStartTime: now.Add(-2 * time.Minute),
 			},
 		},
 		fadeSuccess:        fadeSuccess,
