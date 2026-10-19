@@ -28,4 +28,18 @@ jobs:
           go-version-file: go.mod
 
       - name: Run tests
-        run: go test ./...
+        run: go test ./... -covermode=atomic -coverprofile=coverage.out
+
+      # publishes the coverage report that the README badge links to; requires
+      # the ORG_CODECOV_TOKEN secret - an org-level secret (fini-net Settings
+      # -> Secrets and variables -> Actions), not a repo-level one - because
+      # codecov no longer supports tokenless uploads from CI pushes
+      - name: Upload coverage to Codecov
+        # fork PRs don't get secrets, so the upload can't authenticate there -
+        # skip the doomed attempt; same-repo PRs and pushes to main still run
+        if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: coverage.out
+          token: ${{ secrets.ORG_CODECOV_TOKEN }}
+          disable_search: true

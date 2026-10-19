@@ -27,9 +27,12 @@ Every commit **must** include a `Signed-off-by:` trailer to satisfy the Develope
 ### Testing
 
 - `just test` or `go test ./...` - Run all unit tests
+- `just cover` - Run tests with a coverage profile and per-function summary
 - `go test ./internal/timing/...` - Run a specific package's tests
 
 The TUI and live GitHub API interactions are tested manually via `just build` against a real PR.
+
+CI (`ci.yml`) also uploads the coverage profile to [codecov.io/gh/fini-net/gh-observer](https://codecov.io/gh/fini-net/gh-observer) (README badge). The upload token is the **org-level** secret `ORG_CODECOV_TOKEN` - it lives in fini-net org Settings → Secrets and variables → Actions, *not* in this repo's settings, so don't go hunting for it there.
 
 ### Code quality
 

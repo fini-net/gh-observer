@@ -11,6 +11,9 @@ GitHub:
 ![GitHub License](https://img.shields.io/github/license/fini-net/gh-observer)
 ![GitHub watchers](https://img.shields.io/github/watchers/fini-net/gh-observer)
 
+Coverage:
+[![codecov](https://codecov.io/gh/fini-net/gh-observer/graph/badge.svg)](https://codecov.io/gh/fini-net/gh-observer)
+
 A GitHub PR check, Actions run, and repo watcher that improves on
 `gh pr checks --watch` by showing runtime metrics, queue latency, and better
 handling of startup delays. It can also persistently watch all active

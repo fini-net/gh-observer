@@ -48,6 +48,12 @@ test2cast-repo repo="fini-net/gh-observer": build
 test:
 	go test ./...
 
+# run tests with coverage and print a per-function summary
+[group('Testing')]
+cover:
+	go test ./... -covermode=atomic -coverprofile=coverage.out
+	go tool cover -func=coverage.out
+
 # run Go native fuzz targets for short bursts (opt-in; CI runs the seed
 # corpora as ordinary unit tests via 'just test', so this is for deeper
 # local exploration). Each target runs for the given -fuzztime.
