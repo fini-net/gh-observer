@@ -76,10 +76,7 @@ build:
 
 # [positional-arguments] keeps this recipe self-contained in derived
 # repos, whose root justfile lacks `set positional-arguments` (#367)
-# check release workflow status, audit signature bundles (#521), and
-# verify cosign signatures against the downloaded release assets;
-# target selects the binary to verify: the host platform pair by
-# default, an exact asset name (e.g. darwin-arm64), or 'all'
+# check the latest release: workflow runs, signature audit, cosign verify
 [group('Process')]
 [positional-arguments]
 release_status target="":
@@ -129,11 +126,16 @@ release_status target="":
 		exit 1
 	fi
 
-	# binaries = assets that are not signature bundles or provenance
-	binaries=$(grep -Ev '\.(sigstore\.json|bundle|sig|pem|intoto\.jsonl)$' <<<"$assets" || true)
+	# binaries = assets matching the release workflow's own binary globs
+	# (darwin-* linux-* freebsd-* windows-*), minus the signature
+	# artifacts. Mirroring release.yml keeps auxiliary assets (checksums,
+	# SBOMs) from being reported as unsigned binaries, and a rename that
+	# misses the workflow glob fails loudly here the same way CI does.
+	binaries=$(grep -E '^(darwin|freebsd|linux|windows)-' <<<"$assets" \
+		| grep -Ev '\.(sigstore\.json|bundle|sig|pem)$' || true)
 
 	if [[ -z "$binaries" ]]; then
-		echo "{{RED}}Error: no binary assets found on $release_tag{{NORMAL}}"
+		echo "{{RED}}Error: no <os>-<arch> binary assets found on $release_tag{{NORMAL}}"
 		exit 1
 	fi
 
@@ -170,7 +172,10 @@ release_status target="":
 			*.sig) echo "  ? $asset {{YELLOW}}(detached signature){{NORMAL}}" ;;
 			*.pem) echo "  ? $asset {{YELLOW}}(certificate){{NORMAL}}" ;;
 			*.intoto.jsonl) echo "  ✓ $asset {{GREEN}}(SLSA provenance){{NORMAL}}" ;;
-			*) ;;
+			*)
+				grep -qx -F -- "$asset" <<<"$binaries" \
+					|| echo "  - $asset {{BLUE}}(auxiliary asset - not signature-audited){{NORMAL}}"
+				;;
 		esac
 	done <<< "$assets"
 
@@ -181,17 +186,29 @@ release_status target="":
 		exit 1
 	fi
 
-	# Verify signatures with the exact README "Option 2" command, against
-	# assets downloaded from the release - the check that would have
-	# caught #521's README documenting verification against files that
-	# don't exist. Missing cosign skips with a warning; a bad signature
-	# fails loudly.
+	# Verify signatures with the README "Option 2" verification - bundle +
+	# identity + OIDC issuer, the same check users are told to run -
+	# against assets downloaded from the release. This is the check that
+	# would have caught #521's README documenting verification against
+	# files that don't exist. A bad signature fails loudly; missing cosign
+	# skips with a distinct status line so callers can tell "verified"
+	# from "skipped" without parsing warnings.
 	if ! command -v cosign >/dev/null 2>&1; then
 		echo ""
-		echo "{{YELLOW}}Warning: cosign not on PATH - skipping signature verification{{NORMAL}}"
-		echo "         install with: brew install cosign"
+		echo "{{YELLOW}}Audit passed; signature verification SKIPPED - cosign not on PATH{{NORMAL}}"
+		echo "                            install with: brew install cosign"
 		exit 0
 	fi
+
+	# Derive the cosign identity from the repo remote so derived repos
+	# and forks verify against their own workflow identity, not ours -
+	# a hardcoded fini-net/gh-observer would fail every signed asset
+	# outside this repo. GitHub names allow only [A-Za-z0-9._-], so
+	# escaping the dots makes the name safe to embed in the regexp.
+	# Legacy .bundle assets share this identity: the workflow path has
+	# been .github/workflows/release.yml since signing landed (#222).
+	repo_name=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+	identity_regexp="^https://github\\.com/${repo_name//./\\.}/\\.github/workflows/release\\.yml@refs/tags/"
 
 	target="${1:-}"
 
@@ -246,8 +263,18 @@ release_status target="":
 			rc=1
 			continue
 		fi
+		# guarded download (#326 convention): a gh failure lands in the
+		# error branch below instead of aborting the whole recipe under
+		# set -e before the message can print
+		dl_rc=0
 		gh release download "$release_tag" --dir "$tmpdir" \
-			--pattern "$binary" --pattern "$sig" --clobber
+			--pattern "$binary" --pattern "$sig" --clobber \
+			|| dl_rc=$?
+		if [[ "$dl_rc" -ne 0 ]]; then
+			echo "  ✗ $binary {{RED}}(download failed: gh exit $dl_rc){{NORMAL}}"
+			rc=1
+			continue
+		fi
 		if [[ ! -f "$tmpdir/$binary" ]]; then
 			echo "  ✗ $binary {{RED}}(download failed){{NORMAL}}"
 			rc=1
@@ -260,7 +287,7 @@ release_status target="":
 		fi
 		verify_rc=0
 		cosign verify-blob "$tmpdir/$binary" --bundle "$tmpdir/$sig" \
-			--certificate-identity-regexp '^https://github\.com/fini-net/gh-observer/\.github/workflows/release\.yml@refs/tags/' \
+			--certificate-identity-regexp "$identity_regexp" \
 			--certificate-oidc-issuer https://token.actions.githubusercontent.com \
 			|| verify_rc=$?
 		if [[ "$verify_rc" -eq 0 ]]; then
@@ -269,6 +296,9 @@ release_status target="":
 			echo "  ✗ $binary {{RED}}(signature verification FAILED){{NORMAL}}"
 			rc=1
 		fi
+		# free each pair after its verdict so 'all' mode does not
+		# accumulate ~10MB of binaries on disk before the trap cleans up
+		rm -f "$tmpdir/$binary" "$tmpdir/$sig"
 	done <<< "$verify_binaries"
 
 	echo ""
