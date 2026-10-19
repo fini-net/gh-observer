@@ -35,9 +35,12 @@ jobs:
       # -> Secrets and variables -> Actions), not a repo-level one - because
       # codecov no longer supports tokenless uploads from CI pushes
       - name: Upload coverage to Codecov
-        # fork PRs don't get secrets, so the upload can't authenticate there -
-        # skip the doomed attempt; same-repo PRs and pushes to main still run
-        if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+        # fork PRs and Dependabot PRs don't get secrets (GitHub treats
+        # Dependabot pull_request runs like forks even though its branches
+        # live in this repo), so the upload can't authenticate there -
+        # skip the doomed attempt; same-repo PRs (incl. Renovate) and
+        # pushes to main still run
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && github.actor != 'dependabot[bot]'
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: coverage.out
