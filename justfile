@@ -74,9 +74,15 @@ build:
 	gh ext remove gh-observer
 	gh ext install .
 
-# check release workflow status and list binaries
+# [positional-arguments] keeps this recipe self-contained in derived
+# repos, whose root justfile lacks `set positional-arguments` (#367)
+# check release workflow status, audit signature bundles (#521), and
+# verify cosign signatures against the downloaded release assets;
+# target selects the binary to verify: the host platform pair by
+# default, an exact asset name (e.g. darwin-arm64), or 'all'
 [group('Process')]
-release_status:
+[positional-arguments]
+release_status target="":
 	#!/usr/bin/env bash
 	set -euo pipefail
 
@@ -111,11 +117,167 @@ release_status:
 	gh run list --workflow=release.yml --limit 5
 	echo ""
 
-	# List release assets
+	# Audit release assets: every binary must ship a Sigstore bundle -
+	# .sigstore.json since v4.1.1, .bundle on older releases. The v4.1-era
+	# upload loops silently skipped missing files and stayed green, so
+	# this checks the pairing instead of just listing names with checkmarks.
 	echo "{{BLUE}}Release assets for $release_tag:{{NORMAL}}"
-	gh release view "$release_tag" --json assets --jq '.assets[].name' | while read -r asset; do
-		echo "  ✓ $asset"
-	done
+	assets=$(gh release view "$release_tag" --json assets --jq '.assets[].name')
+
+	if [[ -z "$assets" ]]; then
+		echo "{{RED}}Error: no assets on $release_tag{{NORMAL}}"
+		exit 1
+	fi
+
+	# binaries = assets that are not signature bundles or provenance
+	binaries=$(grep -Ev '\.(sigstore\.json|bundle|sig|pem|intoto\.jsonl)$' <<<"$assets" || true)
+
+	if [[ -z "$binaries" ]]; then
+		echo "{{RED}}Error: no binary assets found on $release_tag{{NORMAL}}"
+		exit 1
+	fi
+
+	# signature asset for a binary: .sigstore.json preferred, legacy
+	# .bundle otherwise; empty when the binary is unsigned. Ends in
+	# return 0 so a binary with no bundle doesn't leak grep's non-zero
+	# status into the sig=$(sig_of ...) assignment (#326 convention).
+	sig_of() {
+		if grep -qx -F -- "$1.sigstore.json" <<<"$assets"; then
+			printf '%s' "$1.sigstore.json"
+		elif grep -qx -F -- "$1.bundle" <<<"$assets"; then
+			printf '%s' "$1.bundle"
+		fi
+		return 0
+	}
+
+	missing=""
+	while IFS= read -r binary; do
+		[[ -z "$binary" ]] && continue
+		sig=$(sig_of "$binary")
+		if [[ -n "$sig" ]]; then
+			echo "  ✓ $binary {{GREEN}}(signed: $sig){{NORMAL}}"
+		else
+			echo "  ✗ $binary {{RED}}(missing signature bundle){{NORMAL}}"
+			missing+="$binary"$'\n'
+		fi
+	done <<< "$binaries"
+
+	while IFS= read -r asset; do
+		[[ -z "$asset" ]] && continue
+		case "$asset" in
+			*.sigstore.json) echo "  ✓ $asset {{GREEN}}(sigstore bundle){{NORMAL}}" ;;
+			*.bundle) echo "  ✓ $asset {{GREEN}}(legacy bundle){{NORMAL}}" ;;
+			*.sig) echo "  ? $asset {{YELLOW}}(detached signature){{NORMAL}}" ;;
+			*.pem) echo "  ? $asset {{YELLOW}}(certificate){{NORMAL}}" ;;
+			*.intoto.jsonl) echo "  ✓ $asset {{GREEN}}(SLSA provenance){{NORMAL}}" ;;
+			*) ;;
+		esac
+	done <<< "$assets"
+
+	if [[ -n "$missing" ]]; then
+		echo ""
+		echo "{{RED}}Error: unsigned binaries on $release_tag - see #521:{{NORMAL}}"
+		printf '%s' "$missing" | sed 's/^/  ✗ /'
+		exit 1
+	fi
+
+	# Verify signatures with the exact README "Option 2" command, against
+	# assets downloaded from the release - the check that would have
+	# caught #521's README documenting verification against files that
+	# don't exist. Missing cosign skips with a warning; a bad signature
+	# fails loudly.
+	if ! command -v cosign >/dev/null 2>&1; then
+		echo ""
+		echo "{{YELLOW}}Warning: cosign not on PATH - skipping signature verification{{NORMAL}}"
+		echo "         install with: brew install cosign"
+		exit 0
+	fi
+
+	target="${1:-}"
+
+	# pick the binaries to verify: the named asset, the host platform
+	# pair by default, or every binary for 'all'
+	case "$target" in
+		all)
+			verify_binaries="$binaries"
+			;;
+		"")
+			case "$(uname -s)" in
+				Darwin) host_os="darwin" ;;
+				Linux) host_os="linux" ;;
+				FreeBSD) host_os="freebsd" ;;
+				*) host_os="" ;;
+			esac
+			case "$(uname -m)" in
+				arm64 | aarch64) host_arch="arm64" ;;
+				x86_64 | amd64) host_arch="amd64" ;;
+				*) host_arch="" ;;
+			esac
+			if [[ -n "$host_os" && -n "$host_arch" ]] \
+				&& grep -qx -F -- "${host_os}-${host_arch}" <<<"$binaries"; then
+				verify_binaries="${host_os}-${host_arch}"
+			else
+				verify_binaries=$(head -n 1 <<<"$binaries")
+				echo "{{YELLOW}}Host platform binary not on $release_tag - verifying $verify_binaries{{NORMAL}}"
+			fi
+			;;
+		*)
+			if ! grep -qx -F -- "$target" <<<"$binaries"; then
+				echo "{{RED}}Error: '$target' is not a binary asset on $release_tag:{{NORMAL}}"
+				printf '%s' "$binaries" | sed 's/^/  /'
+				exit 1
+			fi
+			verify_binaries="$target"
+			;;
+	esac
+
+	echo ""
+	echo "{{BLUE}}Verifying signatures with cosign (README Option 2 command)...{{NORMAL}}"
+
+	tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/release-status.XXXXXX")
+	trap 'rm -rf "$tmpdir"' EXIT
+
+	rc=0
+	while IFS= read -r binary; do
+		[[ -z "$binary" ]] && continue
+		sig=$(sig_of "$binary")
+		if [[ -z "$sig" ]]; then
+			echo "  ✗ $binary {{RED}}(no signature bundle found){{NORMAL}}"
+			rc=1
+			continue
+		fi
+		gh release download "$release_tag" --dir "$tmpdir" \
+			--pattern "$binary" --pattern "$sig" --clobber
+		if [[ ! -f "$tmpdir/$binary" ]]; then
+			echo "  ✗ $binary {{RED}}(download failed){{NORMAL}}"
+			rc=1
+			continue
+		fi
+		if [[ ! -f "$tmpdir/$sig" ]]; then
+			echo "  ✗ $binary {{RED}}(bundle download failed: $sig){{NORMAL}}"
+			rc=1
+			continue
+		fi
+		verify_rc=0
+		cosign verify-blob "$tmpdir/$binary" --bundle "$tmpdir/$sig" \
+			--certificate-identity-regexp '^https://github\.com/fini-net/gh-observer/\.github/workflows/release\.yml@refs/tags/' \
+			--certificate-oidc-issuer https://token.actions.githubusercontent.com \
+			|| verify_rc=$?
+		if [[ "$verify_rc" -eq 0 ]]; then
+			echo "  ✓ $binary {{GREEN}}(signature verified){{NORMAL}}"
+		else
+			echo "  ✗ $binary {{RED}}(signature verification FAILED){{NORMAL}}"
+			rc=1
+		fi
+	done <<< "$verify_binaries"
+
+	echo ""
+	if [[ "$rc" -eq 0 ]]; then
+		echo "{{GREEN}}All checked signatures on $release_tag verified{{NORMAL}}"
+	else
+		echo "{{RED}}Signature verification failed on $release_tag{{NORMAL}}"
+	fi
+	exit "$rc"
 
 # show openssf scorecard details
 [group('Testing/Security')]
