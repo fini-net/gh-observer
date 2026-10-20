@@ -316,12 +316,13 @@ func TestGetTokenForHostGhCLIDefaultHost(t *testing.T) {
 // TestGetTokenForHostGhCLIInvocation pins the exact gh CLI surface the
 // token lookup shells out to (issue #479): the enterprise host must be
 // passed as --hostname — the only host flag `gh auth token` accepts —
-// after an earlier version passed --host, which a real gh rejects with
-// "unknown flag" even when `gh auth status` shows the host logged in.
-// A stub gh on PATH records its arguments and yields a token; each
-// subtest asserts the exact invocation and the token round-trip. This
-// complements TestGetTokenForHostGhCLIDefaultHost, which exercises a
-// real gh and skips when one is unavailable.
+// in the single-token --hostname=<host> form, so a host can never be
+// misparsed as a flag. An earlier version passed --host, which a real
+// gh rejects with "unknown flag" even when `gh auth status` shows the
+// host logged in. A stub gh on PATH records its arguments and yields a
+// token; each subtest asserts the exact invocation and the token
+// round-trip. This complements TestGetTokenForHostGhCLIDefaultHost,
+// which exercises a real gh and skips when one is unavailable.
 func TestGetTokenForHostGhCLIInvocation(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script gh stub not runnable on windows")
@@ -335,9 +336,11 @@ func TestGetTokenForHostGhCLIInvocation(t *testing.T) {
 
 	// The stub gh is the only executable on PATH. It appends its
 	// arguments to the args file (one per line) and prints a token.
+	// The path is single-quoted so a TMPDIR containing spaces cannot
+	// break the redirect (Claude review of #540, suggestion 1).
 	stubDir := t.TempDir()
 	argsFile := filepath.Join(stubDir, "args")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + argsFile + "\necho stub-token\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '" + argsFile + "'\necho stub-token\n"
 	if err := os.WriteFile(filepath.Join(stubDir, "gh"), []byte(script), 0o755); err != nil {
 		t.Fatalf("writing gh stub: %v", err)
 	}
@@ -365,9 +368,9 @@ func TestGetTokenForHostGhCLIInvocation(t *testing.T) {
 		if token != "stub-token" {
 			t.Errorf("token = %q, want stub-token", token)
 		}
-		want := "auth\ntoken\n--hostname\ngithub.example.com\n"
+		want := "auth\ntoken\n--hostname=github.example.com\n"
 		if args := stubArgs(t); args != want {
-			t.Errorf("gh invocation args = %q, want %q (--hostname is the only host flag gh auth token accepts)", args, want)
+			t.Errorf("gh invocation args = %q, want %q (--hostname=<host> is the only host flag gh auth token accepts, in the single-token form so a host cannot be misparsed as a flag)", args, want)
 		}
 	})
 

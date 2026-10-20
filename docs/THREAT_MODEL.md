@@ -174,7 +174,8 @@ detection. When running inside a jj (Jujutsu) repository, it also executes
   derived from a user-supplied URL, git remote, `--repo` argument, or
   `GH_HOST` (validated: hostname-only characters `[a-zA-Z0-9.-]` via
   the URL/remote regexes or `isValidHost` for `GH_HOST`; not
-  shell-expanded)
+  shell-expanded; passed as a single `--hostname=<host>` token so it
+  cannot be misparsed as a flag)
 - `gh pr view --json number,url` — no user-supplied arguments (auto-detect mode)
 - `gh pr view <PR_NUMBER> --json number,url` — user-supplied PR number
   (validated as an integer via `strconv.Atoi` before being passed to the

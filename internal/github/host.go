@@ -240,11 +240,14 @@ func tokenFromGhCLI() (string, error) {
 }
 
 // tokenFromGhCLIForHost shells out to `gh auth token --hostname <host>` for
-// an enterprise host token. The long flag form is used in messages because
-// the gh CLI accepts -h/--hostname only — `--host` fails with
-// "unknown flag" (issue #479).
+// an enterprise host token. The gh CLI accepts -h/--hostname only — `--host`
+// fails with "unknown flag" (issue #479). The host is passed as a single
+// --hostname=<host> token so it can never be misparsed as a flag: every
+// host entry point anchors the first character to alphanumeric (the
+// URL/remote regexes, isValidHost for GH_HOST), and the = form keeps that
+// guarantee even if one of them ever loosens.
 func tokenFromGhCLIForHost(host string) (string, error) {
-	cmd := exec.Command("gh", "auth", "token", "--hostname", host)
+	cmd := exec.Command("gh", "auth", "token", "--hostname="+host)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		debug.Log("gh auth token --hostname failed", "host", host, "err", err, "output", strings.TrimSpace(string(output)))
