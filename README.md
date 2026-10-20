@@ -257,17 +257,24 @@ the enterprise host you configured it for. This mirrors go-gh's own env-var
 semantics, but since hosts can come from arbitrary pasted URLs, avoid exporting
 these env vars on machines where untrusted URLs get pasted; prefer
 `gh auth login --hostname`, which binds credentials to a specific host.
+`GH_OBSERVER_API_URL` (see Limitations below) has the same multi-host shape:
+it redirects the API calls — token included — of *every* non-github.com host
+to one base URL, so only set it on machines where that's true, and never
+point it at anything that isn't yours.
 
 Limitations: API endpoints are derived using the `api.<host>` subdomain
-convention (`https://api.<host>/` and `https://api.<host>/graphql`). Enterprise
-instances that don't use that layout can override both endpoints with
-`GH_OBSERVER_API_URL`: set it to an absolute http(s) base URL and every
-non-github.com host gets REST at `<url>/` and GraphQL at `<url>/graphql` —
-for example `GH_OBSERVER_API_URL=https://ghe.example.com/api` covers a
-path-style `/api/v3` install. Invalid values are ignored with a debug log
-(`--debug`), and the public host is never redirected. Hostnames with ports
-are not supported in arguments, though the override URL may carry one
-(handy for testing).
+convention (`https://api.<host>/` and `https://api.<host>/graphql`). For hosts
+that aren't reachable that way — e.g. a reverse proxy serving both endpoints
+under one base — set `GH_OBSERVER_API_URL`: every non-github.com host then
+gets REST at `<url>/` (go-github appends `api/v3/` for hosts not under
+`api.*`) and GraphQL at `<url>/graphql`. One URL cannot express GitHub
+Enterprise Server's split layout (REST `/api/v3` + GraphQL `/api/graphql`) —
+that still needs the `api.<host>` convention (see #532). The value must be
+`https`, or plain `http` on a loopback host, since the bearer token rides
+every request to the override target. Invalid values are ignored with a
+debug log (`--debug`), and the public host is never redirected. Hostnames
+with ports are not supported in arguments, though the override URL may
+carry one (tests rely on that).
 
 ### Watch an Actions workflow run
 

@@ -1599,9 +1599,9 @@ func TestTickMsg_CopilotTimeout(t *testing.T) {
 		m.copilotMaxWait = 100 * time.Millisecond
 		m.copilotWaitStartTime = time.Now().Add(-200 * time.Millisecond)
 		m.copilotPollStartTime = time.Now().Add(-100 * time.Millisecond)
-		m.copilotLastPoll = time.Time{} // no poll has fired yet
-		m.fetchReceived = false         // no successful response yet
-		m.rateLimitRemaining = 0        // pre-first-fetch zero value
+		m.copilotLastPoll = time.Time{}  // no poll has fired yet
+		m.fetchReceived = false          // no successful response yet
+		m.rateLimitRemaining = 0         // pre-first-fetch zero value
 
 		model, _ := m.Update(TickMsg(time.Now()))
 		result := model.(Model)
@@ -2191,12 +2191,34 @@ func TestFetchPRInfoCmdError(t *testing.T) {
 	}
 }
 
+// newGraphQLTestServer starts a fake GitHub API serving resp for GraphQL
+// queries and failing loudly on any other route, asserting each query
+// arrives as POST /graphql — the endpoint contract the
+// GH_OBSERVER_API_URL override documents. The override is pointed at the
+// server for the test's lifetime.
+func newGraphQLTestServer(t *testing.T, resp string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/graphql") || r.Method != http.MethodPost {
+			t.Errorf("unexpected request to fake API: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(resp))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv(ghclient.APIURLEnvOverride, server.URL)
+	return server
+}
+
 // fetchChecksGraphQL builds the GraphQL response the fetchCheckRuns cmd
 // decodes: a head commit with pushedDate and one successful CheckRun
 // context named "build", plus the PR createdAt. pushedDate/createdAt are
 // the cycle-start anchor inputs (issue #518): the emitted ChecksUpdateMsg
 // must carry max(pushedDate, createdAt) as CycleStartTime.
-func fetchChecksGraphQL(pushedAt, createdAt time.Time) string {
+func fetchChecksGraphQL(t *testing.T, pushedAt, createdAt time.Time) string {
+	t.Helper()
 	commit := map[string]any{
 		"pushedDate": pushedAt.UTC().Format(time.RFC3339),
 		"statusCheckRollup": map[string]any{
@@ -2233,7 +2255,7 @@ func fetchChecksGraphQL(pushedAt, createdAt time.Time) string {
 	}
 	b, err := json.Marshal(resp)
 	if err != nil {
-		return ""
+		t.Fatalf("marshal GraphQL fixture: %v", err)
 	}
 	return string(b)
 }
@@ -2250,17 +2272,7 @@ func TestFetchCheckRunsCmdSuccess(t *testing.T) {
 		pushed := time.Now().Add(-10 * time.Minute).Truncate(time.Second)
 		created := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !strings.Contains(r.URL.Path, "/graphql") || r.Method != http.MethodPost {
-				t.Errorf("unexpected request to fake API: %s %s", r.Method, r.URL.Path)
-				w.WriteHeader(http.StatusNotFound)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(fetchChecksGraphQL(pushed, created)))
-		}))
-		t.Cleanup(server.Close)
-		t.Setenv(ghclient.APIURLEnvOverride, server.URL)
+		newGraphQLTestServer(t, fetchChecksGraphQL(t, pushed, created))
 
 		cmd := fetchCheckRuns(context.Background(), "test-token", fetchCmdHost, "owner", "repo", 7)
 		msg := cmd()
@@ -2284,12 +2296,7 @@ func TestFetchCheckRunsCmdSuccess(t *testing.T) {
 		pushed := time.Now().Add(-3 * time.Hour).Truncate(time.Second)
 		created := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(fetchChecksGraphQL(pushed, created)))
-		}))
-		t.Cleanup(server.Close)
-		t.Setenv(ghclient.APIURLEnvOverride, server.URL)
+		newGraphQLTestServer(t, fetchChecksGraphQL(t, pushed, created))
 
 		cmd := fetchCheckRuns(context.Background(), "test-token", fetchCmdHost, "owner", "repo", 7)
 		msg := cmd()

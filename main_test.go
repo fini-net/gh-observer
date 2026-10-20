@@ -297,7 +297,8 @@ type fakeCheck struct {
 // #518). Zero pushedAt/createdAt are omitted from the response, which the
 // decoder reads as zero times. With zero pushedAt and no checks the commit
 // list is empty — the zero-anchor no-checks shape.
-func buildChecksGraphQL(pushedAt, createdAt time.Time, checks []fakeCheck) string {
+func buildChecksGraphQL(t *testing.T, pushedAt, createdAt time.Time, checks []fakeCheck) string {
+	t.Helper()
 	nodes := make([]any, 0, len(checks))
 	for _, c := range checks {
 		node := map[string]any{
@@ -357,7 +358,7 @@ func buildChecksGraphQL(pushedAt, createdAt time.Time, checks []fakeCheck) strin
 	}
 	b, err := json.Marshal(resp)
 	if err != nil {
-		return ""
+		t.Fatalf("marshal GraphQL fixture: %v", err)
 	}
 	return string(b)
 }
@@ -412,7 +413,7 @@ func TestRunSnapshotNoChecks(t *testing.T) {
 		// Push 30s ago, PR created 2h ago: the anchor is the later of the
 		// two (issue #518), so the message must read as ~30s, not 2h.
 		newSnapshotServer(t, snapshotPR,
-			buildChecksGraphQL(time.Now().Add(-30*time.Second), time.Now().Add(-2*time.Hour), nil))
+			buildChecksGraphQL(t, time.Now().Add(-30*time.Second), time.Now().Add(-2*time.Hour), nil))
 
 		code, out := callRunSnapshot(t, true, false)
 
@@ -433,7 +434,7 @@ func TestRunSnapshotNoChecks(t *testing.T) {
 	t.Run("without cycle start prints plain message", func(t *testing.T) {
 		// No commits and no createdAt: zero anchor must not render a
 		// "started X ago" suffix.
-		newSnapshotServer(t, snapshotPR, buildChecksGraphQL(time.Time{}, time.Time{}, nil))
+		newSnapshotServer(t, snapshotPR, buildChecksGraphQL(t, time.Time{}, time.Time{}, nil))
 
 		code, out := callRunSnapshot(t, true, false)
 
@@ -459,7 +460,7 @@ func TestRunSnapshotAllChecksPass(t *testing.T) {
 		{Name: "lint", Status: "IN_PROGRESS", StartedAt: now.Add(-1 * time.Minute), RunID: 112, WorkflowID: 43, Workflow: "CI"},
 		{Name: "e2e", Status: "QUEUED", RunID: 113, WorkflowID: 44, Workflow: "CI"},
 	}
-	newSnapshotServer(t, snapshotPR, buildChecksGraphQL(now.Add(-10*time.Minute), now.Add(-2*time.Hour), checks))
+	newSnapshotServer(t, snapshotPR, buildChecksGraphQL(t, now.Add(-10*time.Minute), now.Add(-2*time.Hour), checks))
 
 	// quick=false exercises the averages fetch path (empty history from the
 	// fake API).
@@ -487,7 +488,7 @@ func TestRunSnapshotFailingCheck(t *testing.T) {
 		{Name: "build", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: now.Add(-9 * time.Minute), CompletedAt: now.Add(-8 * time.Minute), RunID: 111, WorkflowID: 42, Workflow: "CI"},
 		{Name: "test", Status: "COMPLETED", Conclusion: "FAILURE", StartedAt: now.Add(-9 * time.Minute), CompletedAt: now.Add(-7 * time.Minute), RunID: 114, WorkflowID: 45, Workflow: "CI"},
 	}
-	newSnapshotServer(t, snapshotPR, buildChecksGraphQL(now.Add(-10*time.Minute), now.Add(-2*time.Hour), checks))
+	newSnapshotServer(t, snapshotPR, buildChecksGraphQL(t, now.Add(-10*time.Minute), now.Add(-2*time.Hour), checks))
 
 	// quick=true also covers the averages-skip branch.
 	code, out := callRunSnapshot(t, true, false)
@@ -505,7 +506,7 @@ func TestRunSnapshotFailingCheck(t *testing.T) {
 
 func TestRunSnapshotFetchFailures(t *testing.T) {
 	t.Run("PR info fetch failure exits 1", func(t *testing.T) {
-		newSnapshotServer(t, "", buildChecksGraphQL(time.Now(), time.Time{}, nil))
+		newSnapshotServer(t, "", buildChecksGraphQL(t, time.Now(), time.Time{}, nil))
 
 		code, _ := callRunSnapshot(t, true, false)
 
@@ -534,7 +535,7 @@ func TestRunSnapshotCopilotNotAvailableOnHost(t *testing.T) {
 	checks := []fakeCheck{
 		{Name: "build", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: now.Add(-9 * time.Minute), CompletedAt: now.Add(-8 * time.Minute), RunID: 111, WorkflowID: 42, Workflow: "CI"},
 	}
-	newSnapshotServer(t, snapshotPR, buildChecksGraphQL(now.Add(-10*time.Minute), now.Add(-2*time.Hour), checks))
+	newSnapshotServer(t, snapshotPR, buildChecksGraphQL(t, now.Add(-10*time.Minute), now.Add(-2*time.Hour), checks))
 
 	code, out := callRunSnapshot(t, true, true)
 

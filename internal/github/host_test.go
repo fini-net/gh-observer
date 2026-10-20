@@ -1,6 +1,9 @@
 package github
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -64,8 +67,12 @@ func TestAPIURLsForHostOverride(t *testing.T) {
 		wantREST    string
 		wantGraphQL string
 	}{
-		{"http base", "http://127.0.0.1:54321", "http://127.0.0.1:54321/", "http://127.0.0.1:54321/graphql"},
-		{"https base", "https://ghe.corp.local/api", "https://ghe.corp.local/api/", "https://ghe.corp.local/api/graphql"},
+		{"https anywhere", "https://ghe.corp.local/api", "https://ghe.corp.local/api/", "https://ghe.corp.local/api/graphql"},
+		{"https any host accepted", "https://ghe.example.com", "https://ghe.example.com/", "https://ghe.example.com/graphql"},
+		{"http loopback accepted (IPv4)", "http://127.0.0.1:54321", "http://127.0.0.1:54321/", "http://127.0.0.1:54321/graphql"},
+		{"http loopback accepted (localhost)", "http://localhost:54321", "http://localhost:54321/", "http://localhost:54321/graphql"},
+		{"http loopback accepted (IPv6)", "http://[::1]:54321", "http://[::1]:54321/", "http://[::1]:54321/graphql"},
+		{"http off loopback ignored (token safety)", "http://ghe.example.com", "https://api.ghe.example.com/", "https://api.ghe.example.com/graphql"},
 		{"trailing slash trimmed", "http://127.0.0.1:54321/", "http://127.0.0.1:54321/", "http://127.0.0.1:54321/graphql"},
 		{"whitespace trimmed", "  http://127.0.0.1:54321  ", "http://127.0.0.1:54321/", "http://127.0.0.1:54321/graphql"},
 		{"invalid (no scheme) ignored", "127.0.0.1:54321", "https://api.ghe.example.com/", "https://api.ghe.example.com/graphql"},
@@ -94,6 +101,50 @@ func TestAPIURLsForHostOverride(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestFetchCheckRunsGraphQLOverrideEndpoint pins the GraphQL endpoint the
+// override produces (review of #531): with GH_OBSERVER_API_URL set, the
+// exported FetchCheckRunsGraphQL must send its query as POST <url>/graphql
+// exactly — the contract the README documents. Together with the "override
+// redirects enterprise client" case in TestNewClientFromTokenHostRouting
+// (REST base <url>/api/v3/), this pins the endpoint pair a configured
+// override yields. It also exercises the real client construction
+// (newGraphQLClient, newAuthenticatedHTTPClient) that in-package mock
+// tests bypass.
+func TestFetchCheckRunsGraphQLOverrideEndpoint(t *testing.T) {
+	requests := make(chan [2]string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- [2]string{r.Method, r.URL.Path}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": {
+				"repository": {"pullRequest": {"commits": {"nodes": []}}},
+				"rateLimit": {"limit": 5000, "remaining": 4999}
+			}
+		}`))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv(APIURLEnvOverride, server.URL)
+
+	checkRuns, anchor, rateLimit, err := FetchCheckRunsGraphQL(context.Background(), "test-token", "ghe.example.com", "owner", "repo", 1)
+	if err != nil {
+		t.Fatalf("FetchCheckRunsGraphQL() error: %v", err)
+	}
+	if len(checkRuns) != 0 || !anchor.IsZero() {
+		t.Errorf("empty-commits response should parse to zero runs and a zero anchor, got %d runs, anchor %v", len(checkRuns), anchor)
+	}
+	if rateLimit != 4999 {
+		t.Errorf("rateLimit = %d, want 4999", rateLimit)
+	}
+	select {
+	case req := <-requests:
+		if req[0] != http.MethodPost || req[1] != "/graphql" {
+			t.Errorf("GraphQL request = %s %s, want POST /graphql", req[0], req[1])
+		}
+	default:
+		t.Error("expected exactly one GraphQL request, got none")
+	}
 }
 
 func TestGetTokenForHostEnvPrecedence(t *testing.T) {
