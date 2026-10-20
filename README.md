@@ -257,24 +257,30 @@ the enterprise host you configured it for. This mirrors go-gh's own env-var
 semantics, but since hosts can come from arbitrary pasted URLs, avoid exporting
 these env vars on machines where untrusted URLs get pasted; prefer
 `gh auth login --hostname`, which binds credentials to a specific host.
-`GH_OBSERVER_API_URL` (see Limitations below) has the same multi-host shape:
-it redirects the API calls — token included — of *every* non-github.com host
-to one base URL, so only set it on machines where that's true, and never
-point it at anything that isn't yours.
+The API override env vars (see Limitations below) have the same multi-host
+shape: `GH_OBSERVER_API_URL` redirects both endpoint families and
+`GH_OBSERVER_GRAPHQL_URL` redirects GraphQL alone — token included — for
+*every* non-github.com host, so only set them on machines where that's
+true, and never point them at anything that isn't yours.
 
-Limitations: API endpoints are derived using the `api.<host>` subdomain
-convention (`https://api.<host>/` and `https://api.<host>/graphql`). For hosts
-that aren't reachable that way — e.g. a reverse proxy serving both endpoints
-under one base — set `GH_OBSERVER_API_URL`: every non-github.com host then
-gets REST at `<url>/` (go-github appends `api/v3/` for hosts not under
-`api.*`) and GraphQL at `<url>/graphql`. One URL cannot express GitHub
-Enterprise Server's split layout (REST `/api/v3` + GraphQL `/api/graphql`) —
-that still needs the `api.<host>` convention (see #532). The value must be
-`https`, or plain `http` on a loopback host, since the bearer token rides
-every request to the override target. Invalid values are ignored with a
-debug log (`--debug`), and the public host is never redirected. Hostnames
-with ports are not supported in arguments, though the override URL may
-carry one (tests rely on that).
+Limitations: API endpoints are derived from the host, mirroring the gh
+CLI's go-gh library: `*.ghe.com` tenants (GitHub Enterprise Cloud) use the
+`api.<host>` subdomain convention; every other enterprise host — GitHub
+Enterprise Server and custom domains — uses the path-based endpoints GHES
+documents (`https://<host>/api/v3` and `https://<host>/api/graphql`). For
+hosts whose API lives elsewhere — e.g. a reverse proxy — set
+`GH_OBSERVER_API_URL`: every non-github.com host then gets REST at
+`<url>/` (go-github appends `api/v3/` unless the base already ends in
+`/api/v3`) and GraphQL at `<url>/graphql`. `GH_OBSERVER_GRAPHQL_URL`
+overrides just the GraphQL endpoint and wins over what the API override
+derives, so the pair can express split layouts like GHES behind a proxy:
+`GH_OBSERVER_API_URL=https://ghe.example.com` plus
+`GH_OBSERVER_GRAPHQL_URL=https://ghe.example.com/api/graphql`. Override
+values must be `https`, or plain `http` on a loopback host, since the
+bearer token rides every request to the override targets. Invalid values
+are ignored with a debug log (`--debug`), and the public host is never
+redirected. Hostnames with ports are not supported in arguments, though
+the override URLs may carry one (tests rely on that).
 
 ### Watch an Actions workflow run
 

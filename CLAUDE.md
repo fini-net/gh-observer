@@ -125,7 +125,7 @@ Check names display as "Workflow Name / Job Name". Failed checks include inline 
 
 - PR detection: `gh pr view` + JSON parsing; supports both SSH (`git@github.com:owner/repo.git`) and HTTPS remote formats
 - GraphQL for check runs (single query gets workflow names); REST for PR metadata
-- Enterprise API endpoints derive from the host via `APIURLsForHost` (`api.<host>` subdomain convention); `GH_OBSERVER_API_URL` overrides both REST and GraphQL endpoints for non-github.com hosts (https only, or loopback http) — it doubles as the test seam that lets httptest-based tests in the root package and `internal/tui` reach host-based client construction (issue #530)
+- Enterprise API endpoints derive from the host via `APIURLsForHost`, mirroring go-gh (the gh CLI's library): `api.<host>` for `*.ghe.com` tenants, path-based `/api/v3` + `/api/graphql` for everything else; `GH_OBSERVER_API_URL` overrides both endpoints and `GH_OBSERVER_GRAPHQL_URL` overrides GraphQL alone (https only, or loopback http) — the pair also serves as the test seam that lets httptest-based tests in the root package and `internal/tui` reach host-based client construction (issue #530)
 - Network errors during polling are non-fatal (stored in `m.err`, polling continues)
 - Startup phase: TUI shows "Startup Phase" message while waiting for checks (typically 30-90s after PR creation)
 - `.repo.toml` configures repo metadata for Claude/Copilot review just recipes

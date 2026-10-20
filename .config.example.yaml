@@ -73,3 +73,34 @@ copilot_poll_interval: 10s
 # PR): any review request already exists by then, so polling starts
 # immediately.
 copilot_initial_delay: 15s
+
+# GitHub Enterprise API endpoints (issues #479/#485/#532). These are
+# environment variables rather than config.yaml keys, documented here for
+# discoverability. gh-observer derives them from the host, mirroring the
+# gh CLI's go-gh library:
+#
+#   - github.com: library defaults (api.github.com)
+#   - *.ghe.com (GitHub Enterprise Cloud tenants): the api.<host>
+#     subdomain convention
+#   - anything else (GitHub Enterprise Server, custom enterprise domains):
+#     the path-based endpoints GHES documents — https://<host>/api/v3
+#     for REST and https://<host>/api/graphql for GraphQL
+#
+# Two environment variables override the derivation for non-github.com
+# hosts:
+#
+#   GH_OBSERVER_API_URL      overrides both endpoints: REST at <url>/
+#                            (go-github appends api/v3 unless the base
+#                            already ends in /api/v3) and GraphQL at
+#                            <url>/graphql
+#   GH_OBSERVER_GRAPHQL_URL  overrides just the GraphQL endpoint and
+#                            wins over the URL the API override derives
+#
+# Together they express split layouts, e.g. a GHES behind a proxy:
+#
+#   GH_OBSERVER_API_URL=https://ghe.example.com
+#   GH_OBSERVER_GRAPHQL_URL=https://ghe.example.com/api/graphql
+#
+# Values must be https (or plain http on a loopback host): the bearer
+# token rides every request to the override targets. Invalid values are
+# ignored with a debug log (--debug), and github.com is never redirected.

@@ -49,7 +49,7 @@ func isValidHost(s string) bool {
 // APIURLEnvOverride names the environment variable that overrides the
 // derived enterprise API endpoints: when set, REST uses <url>/ and
 // GraphQL uses <url>/graphql for every non-github.com host. This serves
-// hosts whose API is not reachable via the api.<host> subdomain
+// hosts whose API is not reachable via either GitHub Enterprise
 // convention (e.g. a reverse proxy serving both endpoints under one
 // base), and gives out-of-package tests a seam to point host-based
 // client construction at a local httptest server (issue #530) — the
@@ -58,36 +58,94 @@ func isValidHost(s string) bool {
 //
 // The value must be an absolute https URL (or plain http on a loopback
 // host): the bearer token rides every request to the override target,
-// so plaintext stops at loopback. One URL cannot express GHES's split
-// layout (REST /api/v3, GraphQL /api/graphql) — see issue #532.
+// so plaintext stops at loopback.
 const APIURLEnvOverride = "GH_OBSERVER_API_URL"
 
-// APIURLsForHost derives the REST and GraphQL API base URLs for a host.
-// The public github.com host returns empty strings so callers keep the
-// library defaults (api.github.com and githubv4's default endpoint); a
-// stray GH_OBSERVER_API_URL never redirects public-host traffic.
-// Any other host is treated as a GitHub Enterprise instance using the
-// api.<host> subdomain convention: REST at https://api.<host>/ and
-// GraphQL at https://api.<host>/graphql — unless GH_OBSERVER_API_URL
-// overrides both (see APIURLEnvOverride). An unusable override value —
-// unparseable, non-http(s), non-https off loopback — is ignored with a
-// debug log, mirroring the GH_HOST validation precedent: clients would
-// otherwise fail confusingly at request time.
+// GraphQLURLEnvOverride names the environment variable that overrides
+// just the GraphQL endpoint for every non-github.com host. It is the
+// companion to APIURLEnvOverride: one base URL cannot express GHES's
+// split layout (REST /api/v3, GraphQL /api/graphql), but the pair can —
+// GH_OBSERVER_API_URL=https://ghe.example.com plus
+// GH_OBSERVER_GRAPHQL_URL=https://ghe.example.com/api/graphql (issue
+// #532). A valid value wins over the GraphQL endpoint APIURLEnvOverride
+// derives. The same token-safety rules apply: https only, or plain http
+// on a loopback host, since the bearer token rides every GraphQL
+// request to the override target.
+const GraphQLURLEnvOverride = "GH_OBSERVER_GRAPHQL_URL"
+
+// gheCloudTenantSuffix is the GitHub Enterprise Cloud tenant domain.
+// Hosts under *.ghe.com (e.g. octocorp.ghe.com) serve their API via the
+// api.<host> subdomain convention, unlike GitHub Enterprise Server and
+// other custom enterprise domains, which serve the path-based endpoints
+// GHES documents.
+const gheCloudTenantSuffix = ".ghe.com"
+
+// APIURLsForHost derives the REST and GraphQL API base URLs for a host,
+// mirroring go-gh — the gh CLI's own endpoint resolution — so gh-observer
+// reaches the same endpoints the gh CLI does for any host:
+//
+//   - the public github.com host returns empty strings so callers keep the
+//     library defaults (api.github.com and githubv4's default endpoint);
+//     a stray override never redirects public-host traffic
+//   - GitHub Enterprise Cloud tenants (*.ghe.com) use the api.<host>
+//     subdomain convention: REST at https://api.<host>/ and GraphQL at
+//     https://api.<host>/graphql
+//   - every other enterprise host — GitHub Enterprise Server and custom
+//     enterprise domains — uses the path-based endpoints GHES documents:
+//     REST at https://<host>/api/v3/ and GraphQL at
+//     https://<host>/api/graphql. Many GHES installs also serve the
+//     subdomain form via subdomain isolation plus wildcard DNS, but
+//     only the path form is reachable without it (issue #485).
+//
+// GH_OBSERVER_API_URL overrides both endpoints (REST at <url>/, which
+// go-github's WithEnterpriseURLs completes to <url>/api/v3/ unless the
+// base already ends in /api/v3/, and GraphQL at <url>/graphql), and
+// GH_OBSERVER_GRAPHQL_URL overrides just the GraphQL endpoint, winning
+// over the URL APIURLEnvOverride derives — together they express split
+// API layouts (issue #532). Unusable override values — unparseable,
+// non-http(s), non-https off loopback — are ignored with a debug log,
+// mirroring the GH_HOST validation precedent: clients would otherwise
+// fail confusingly at request time.
 func APIURLsForHost(host string) (restURL, graphqlURL string) {
 	if host == "" || strings.EqualFold(host, DefaultGitHubHost) {
 		return "", ""
 	}
+	restURL, graphqlURL = enterpriseURLs(host)
 	if base := strings.TrimSpace(os.Getenv(APIURLEnvOverride)); base != "" {
 		if validAPIURL(base) {
 			base = strings.TrimSuffix(base, "/")
-			return base + "/", base + "/graphql"
+			restURL, graphqlURL = base+"/", base+"/graphql"
+		} else {
+			debug.Log("ignoring invalid "+APIURLEnvOverride, "value", base)
 		}
-		debug.Log("ignoring invalid "+APIURLEnvOverride, "value", base)
 	}
-	return fmt.Sprintf("https://api.%s/", host), fmt.Sprintf("https://api.%s/graphql", host)
+	if gql := strings.TrimSpace(os.Getenv(GraphQLURLEnvOverride)); gql != "" {
+		if validAPIURL(gql) {
+			graphqlURL = gql
+		} else {
+			debug.Log("ignoring invalid "+GraphQLURLEnvOverride, "value", gql)
+		}
+	}
+	return restURL, graphqlURL
 }
 
-// validAPIURL reports whether the GH_OBSERVER_API_URL value is usable: an
+// enterpriseURLs derives the endpoint pair for an enterprise host,
+// mirroring go-gh's restPrefix/graphQLEndpoint split: *.ghe.com tenants
+// get the api.<host> subdomain convention, everything else gets the
+// path-based GHES endpoints. The REST URL carries the /api/v3/ suffix
+// explicitly — go-github's WithEnterpriseURLs appends api/v3/ only to
+// bases lacking it (a base ending in /api/v3/ or under api.* is left
+// untouched), so the derived URL is the actual endpoint rather than one
+// that still needs completing.
+func enterpriseURLs(host string) (restURL, graphqlURL string) {
+	if strings.HasSuffix(strings.ToLower(host), gheCloudTenantSuffix) {
+		return fmt.Sprintf("https://api.%s/", host), fmt.Sprintf("https://api.%s/graphql", host)
+	}
+	return fmt.Sprintf("https://%s/api/v3/", host), fmt.Sprintf("https://%s/api/graphql", host)
+}
+
+// validAPIURL reports whether an API endpoint override value
+// (GH_OBSERVER_API_URL or GH_OBSERVER_GRAPHQL_URL) is usable: an
 // absolute https URL with a host, or a plain http URL on a loopback host.
 // The bearer token rides every request to the override target, so
 // plaintext http is confined to loopback (local test doubles, a local

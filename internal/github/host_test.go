@@ -44,8 +44,17 @@ func TestAPIURLsForHost(t *testing.T) {
 		{"", "", ""},
 		{"github.com", "", ""},
 		{"GitHub.com", "", ""},
-		{"github.example.com", "https://api.github.example.com/", "https://api.github.example.com/graphql"},
-		{"ghe.corp.local", "https://api.ghe.corp.local/", "https://api.ghe.corp.local/graphql"},
+		// GHES and custom enterprise hosts: path-based endpoints
+		// (issue #485, mirroring go-gh: plain GHES serves
+		// https://<host>/api/v3 and https://<host>/api/graphql).
+		{"github.example.com", "https://github.example.com/api/v3/", "https://github.example.com/api/graphql"},
+		{"ghe.corp.local", "https://ghe.corp.local/api/v3/", "https://ghe.corp.local/api/graphql"},
+		// GitHub Enterprise Cloud tenants (*.ghe.com): api.<host>
+		// subdomain convention.
+		{"octocorp.ghe.com", "https://api.octocorp.ghe.com/", "https://api.octocorp.ghe.com/graphql"},
+		// The tenant suffix requires a leading label: the apex is not
+		// a tenant, so it derives like any other enterprise host.
+		{"ghe.com", "https://ghe.com/api/v3/", "https://ghe.com/api/graphql"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.host, func(t *testing.T) {
@@ -72,13 +81,13 @@ func TestAPIURLsForHostOverride(t *testing.T) {
 		{"http loopback accepted (IPv4)", "http://127.0.0.1:54321", "http://127.0.0.1:54321/", "http://127.0.0.1:54321/graphql"},
 		{"http loopback accepted (localhost)", "http://localhost:54321", "http://localhost:54321/", "http://localhost:54321/graphql"},
 		{"http loopback accepted (IPv6)", "http://[::1]:54321", "http://[::1]:54321/", "http://[::1]:54321/graphql"},
-		{"http off loopback ignored (token safety)", "http://ghe.example.com", "https://api.ghe.example.com/", "https://api.ghe.example.com/graphql"},
+		{"http off loopback ignored (token safety)", "http://ghe.example.com", "https://ghe.example.com/api/v3/", "https://ghe.example.com/api/graphql"},
 		{"trailing slash trimmed", "http://127.0.0.1:54321/", "http://127.0.0.1:54321/", "http://127.0.0.1:54321/graphql"},
 		{"whitespace trimmed", "  http://127.0.0.1:54321  ", "http://127.0.0.1:54321/", "http://127.0.0.1:54321/graphql"},
-		{"invalid (no scheme) ignored", "127.0.0.1:54321", "https://api.ghe.example.com/", "https://api.ghe.example.com/graphql"},
-		{"invalid (unsupported scheme) ignored", "ftp://example.com", "https://api.ghe.example.com/", "https://api.ghe.example.com/graphql"},
-		{"invalid (no host) ignored", "http://", "https://api.ghe.example.com/", "https://api.ghe.example.com/graphql"},
-		{"empty ignored", "", "https://api.ghe.example.com/", "https://api.ghe.example.com/graphql"},
+		{"invalid (no scheme) ignored", "127.0.0.1:54321", "https://ghe.example.com/api/v3/", "https://ghe.example.com/api/graphql"},
+		{"invalid (unsupported scheme) ignored", "ftp://example.com", "https://ghe.example.com/api/v3/", "https://ghe.example.com/api/graphql"},
+		{"invalid (no host) ignored", "http://", "https://ghe.example.com/api/v3/", "https://ghe.example.com/api/graphql"},
+		{"empty ignored", "", "https://ghe.example.com/api/v3/", "https://ghe.example.com/api/graphql"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -95,6 +104,52 @@ func TestAPIURLsForHostOverride(t *testing.T) {
 
 	t.Run("override never applies to the public host", func(t *testing.T) {
 		t.Setenv(APIURLEnvOverride, "http://127.0.0.1:54321")
+		for _, host := range []string{"", "github.com", "GitHub.com"} {
+			if rest, gql := APIURLsForHost(host); rest != "" || gql != "" {
+				t.Errorf("APIURLsForHost(%q) = %q/%q, want empty strings (public host keeps library defaults)", host, rest, gql)
+			}
+		}
+	})
+}
+
+// TestAPIURLsForHostGraphQLOverride pins GH_OBSERVER_GRAPHQL_URL
+// (issue #532): it overrides just the GraphQL endpoint for
+// non-github.com hosts and wins over the GraphQL URL
+// GH_OBSERVER_API_URL derives — which is what makes split API layouts
+// (REST and GraphQL under different bases) expressible with the pair.
+func TestAPIURLsForHostGraphQLOverride(t *testing.T) {
+	tests := []struct {
+		name        string
+		apiOverride string
+		gqlOverride string
+		wantREST    string
+		wantGraphQL string
+	}{
+		{"GraphQL only: REST stays derived", "", "https://gql.corp.example.com/api/graphql", "https://ghe.example.com/api/v3/", "https://gql.corp.example.com/api/graphql"},
+		{"split layout: API override plus GraphQL override", "https://ghe.example.com", "https://ghe.example.com/api/graphql", "https://ghe.example.com/", "https://ghe.example.com/api/graphql"},
+		{"GraphQL override wins over API override's derivation", "https://ghe.example.com", "https://gql.corp.example.com/api/graphql", "https://ghe.example.com/", "https://gql.corp.example.com/api/graphql"},
+		{"invalid GraphQL override ignored, API override stands", "https://ghe.example.com", "ftp://example.com", "https://ghe.example.com/", "https://ghe.example.com/graphql"},
+		{"off-loopback http GraphQL override ignored (token safety)", "https://ghe.example.com", "http://gql.corp.example.com", "https://ghe.example.com/", "https://ghe.example.com/graphql"},
+		{"loopback http GraphQL override accepted", "", "http://127.0.0.1:54321/api/graphql", "https://ghe.example.com/api/v3/", "http://127.0.0.1:54321/api/graphql"},
+		{"whitespace trimmed", "", "  https://gql.corp.example.com/api/graphql  ", "https://ghe.example.com/api/v3/", "https://gql.corp.example.com/api/graphql"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(APIURLEnvOverride, tt.apiOverride)
+			t.Setenv(GraphQLURLEnvOverride, tt.gqlOverride)
+			rest, gql := APIURLsForHost("ghe.example.com")
+			if rest != tt.wantREST {
+				t.Errorf("APIURLsForHost() rest = %q, want %q", rest, tt.wantREST)
+			}
+			if gql != tt.wantGraphQL {
+				t.Errorf("APIURLsForHost() graphql = %q, want %q", gql, tt.wantGraphQL)
+			}
+		})
+	}
+
+	t.Run("override never applies to the public host", func(t *testing.T) {
+		t.Setenv(APIURLEnvOverride, "http://127.0.0.1:54321")
+		t.Setenv(GraphQLURLEnvOverride, "http://127.0.0.1:54321/api/graphql")
 		for _, host := range []string{"", "github.com", "GitHub.com"} {
 			if rest, gql := APIURLsForHost(host); rest != "" || gql != "" {
 				t.Errorf("APIURLsForHost(%q) = %q/%q, want empty strings (public host keeps library defaults)", host, rest, gql)
@@ -271,13 +326,27 @@ func TestNewClientFromTokenHostRouting(t *testing.T) {
 		}
 	})
 
-	t.Run("enterprise host targets api.<host>", func(t *testing.T) {
+	t.Run("GHES host targets <host>/api/v3/", func(t *testing.T) {
 		client, err := NewClientFromToken("tok", "github.example.com")
 		if err != nil {
 			t.Fatalf("NewClientFromToken() error: %v", err)
 		}
-		if got := client.BaseURL(); got != "https://api.github.example.com/" {
-			t.Errorf("BaseURL = %q, want https://api.github.example.com/", got)
+		// WithEnterpriseURLs leaves a base ending in /api/v3/ untouched,
+		// so the derived REST URL is the BaseURL verbatim.
+		if got := client.BaseURL(); got != "https://github.example.com/api/v3/" {
+			t.Errorf("BaseURL = %q, want https://github.example.com/api/v3/", got)
+		}
+	})
+
+	t.Run("GHEC tenant targets api.<host>", func(t *testing.T) {
+		client, err := NewClientFromToken("tok", "octocorp.ghe.com")
+		if err != nil {
+			t.Fatalf("NewClientFromToken() error: %v", err)
+		}
+		// The api. host prefix suppresses WithEnterpriseURLs' api/v3/
+		// completion, so the subdomain base is used verbatim.
+		if got := client.BaseURL(); got != "https://api.octocorp.ghe.com/" {
+			t.Errorf("BaseURL = %q, want https://api.octocorp.ghe.com/", got)
 		}
 	})
 
@@ -365,5 +434,88 @@ func TestNewClientFromTokenCredentialOriginRestriction(t *testing.T) {
 		}
 	default:
 		t.Error("no redirect hop reached the redirect target")
+	}
+}
+
+// TestSplitLayoutOverrides pins the GH_OBSERVER_API_URL +
+// GH_OBSERVER_GRAPHQL_URL pair end to end (issue #532): split API
+// layouts — REST and GraphQL under different bases — must be
+// expressible, and each override must send only its own protocol to
+// its own target. With the pair pointing at two distinct local
+// servers, the REST request lands under /api/v3/ on the API-override
+// server while the GraphQL query POSTs to /api/graphql on the
+// GraphQL-override server. This exercises the real client construction
+// both overrides flow through (NewClientFromToken, newGraphQLClient,
+// newAuthenticatedHTTPClient), the paths in-package mock tests bypass.
+func TestSplitLayoutOverrides(t *testing.T) {
+	restPaths := make(chan string, 2)
+	restServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case restPaths <- r.URL.Path:
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number": 42, "state": "open", "head": {"sha": "abc123def456"}}`))
+	}))
+	t.Cleanup(restServer.Close)
+
+	graphqlPaths := make(chan string, 2)
+	graphqlServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case graphqlPaths <- r.URL.Path:
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": {
+				"repository": {"pullRequest": {"commits": {"nodes": []}}},
+				"rateLimit": {"limit": 5000, "remaining": 4999}
+			}
+		}`))
+	}))
+	t.Cleanup(graphqlServer.Close)
+
+	t.Setenv(APIURLEnvOverride, restServer.URL)
+	t.Setenv(GraphQLURLEnvOverride, graphqlServer.URL+"/api/graphql")
+
+	// REST: the pull-request fetch lands under /api/v3/ (go-github's
+	// WithEnterpriseURLs completes the override base) on the REST server.
+	client, err := NewClientFromToken("test-token", "ghe.example.com")
+	if err != nil {
+		t.Fatalf("NewClientFromToken() error: %v", err)
+	}
+	if _, _, err := client.PullRequests.Get(context.Background(), "owner", "repo", 42); err != nil {
+		t.Fatalf("PullRequests.Get() error: %v", err)
+	}
+	select {
+	case path := <-restPaths:
+		if !strings.HasPrefix(path, "/api/v3/") {
+			t.Errorf("REST request path = %q, want /api/v3/ prefix", path)
+		}
+	default:
+		t.Error("expected a REST request on the API-override server, got none")
+	}
+
+	// GraphQL: the check-runs query POSTs to /api/graphql exactly on the
+	// GraphQL server, not to the API override.
+	_, _, rateLimit, err := FetchCheckRunsGraphQL(context.Background(), "test-token", "ghe.example.com", "owner", "repo", 42)
+	if err != nil {
+		t.Fatalf("FetchCheckRunsGraphQL() error: %v", err)
+	}
+	if rateLimit != 4999 {
+		t.Errorf("rateLimit = %d, want 4999", rateLimit)
+	}
+	select {
+	case path := <-graphqlPaths:
+		if path != "/api/graphql" {
+			t.Errorf("GraphQL request path = %q, want /api/graphql", path)
+		}
+	default:
+		t.Error("expected a GraphQL request on the GraphQL-override server, got none")
+	}
+	select {
+	case path := <-restPaths:
+		t.Errorf("unexpected REST-side request %q during the GraphQL fetch", path)
+	default:
 	}
 }
