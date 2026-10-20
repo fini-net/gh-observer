@@ -295,3 +295,75 @@ func TestNewClientFromTokenHostRouting(t *testing.T) {
 		}
 	})
 }
+
+// TestNewClientFromTokenCredentialOriginRestriction pins go-github v93's
+// credential-origin contract (go-github #4564, the v92→v93 breaking
+// change): the bearer token rides only requests aimed at the client's
+// configured API origin, and a redirect hop to any other origin goes out
+// unauthenticated. v92 attached the token below the http.Client redirect
+// layer, so it followed cross-origin hops — the class of leak the change
+// closes. gh-observer builds every enterprise client through
+// NewClientFromToken (WithAuthToken plus WithEnterpriseURLs, so the
+// configured origin is the derived or overridden API base), which makes
+// this the path that must keep holding across future major bumps.
+func TestNewClientFromTokenCredentialOriginRestriction(t *testing.T) {
+	authorizationA := make(chan string, 1)
+	authorizationB := make(chan string, 1)
+
+	// Server B is the redirect target: its own port makes it a different
+	// origin than the configured API base, per go-github's sameOrigin
+	// (scheme, host, and port must all match).
+	serverB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case authorizationB <- r.Header.Get("Authorization"):
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"login": "octocat"}`))
+	}))
+	t.Cleanup(serverB.Close)
+
+	// Server A is the configured origin. Every request it receives is
+	// redirected to server B, so one API call exercises both hops.
+	serverA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case authorizationA <- r.Header.Get("Authorization"):
+		default:
+		}
+		http.Redirect(w, r, serverB.URL+r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(serverA.Close)
+
+	t.Setenv(APIURLEnvOverride, serverA.URL)
+
+	client, err := NewClientFromToken("tok", "ghe.example.com")
+	if err != nil {
+		t.Fatalf("NewClientFromToken() error: %v", err)
+	}
+	user, _, err := client.Users.Get(context.Background(), "octocat")
+	if err != nil {
+		t.Fatalf("Users.Get() error: %v", err)
+	}
+	if user.GetLogin() != "octocat" {
+		t.Errorf("login = %q, want octocat", user.GetLogin())
+	}
+
+	// The configured origin received the bearer token...
+	select {
+	case auth := <-authorizationA:
+		if auth != "Bearer tok" {
+			t.Errorf("Authorization at configured origin = %q, want %q", auth, "Bearer tok")
+		}
+	default:
+		t.Error("no request reached the configured origin")
+	}
+	// ...and the redirect hop did not.
+	select {
+	case auth := <-authorizationB:
+		if auth != "" {
+			t.Errorf("Authorization on redirect hop = %q, want empty (credentials must not follow a redirect off the configured origin)", auth)
+		}
+	default:
+		t.Error("no redirect hop reached the redirect target")
+	}
+}
