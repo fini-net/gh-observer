@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
-	"github.com/google/go-github/v92/github"
+	"github.com/google/go-github/v93/github"
 )
 
 // makeRunModel builds a RunModel with initialized maps for handler tests.

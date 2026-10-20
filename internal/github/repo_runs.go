@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/fini-net/gh-observer/internal/debug"
-	"github.com/google/go-github/v92/github"
+	"github.com/google/go-github/v93/github"
 )
 
 // BranchRunData holds a standalone (non-PR) workflow run and its jobs.
