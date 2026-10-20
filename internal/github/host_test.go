@@ -4,6 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -308,6 +311,79 @@ func TestGetTokenForHostGhCLIDefaultHost(t *testing.T) {
 	if token == "" {
 		t.Fatal("token must be non-empty on success")
 	}
+}
+
+// TestGetTokenForHostGhCLIInvocation pins the exact gh CLI surface the
+// token lookup shells out to (issue #479): the enterprise host must be
+// passed as --hostname — the only host flag `gh auth token` accepts —
+// after an earlier version passed --host, which a real gh rejects with
+// "unknown flag" even when `gh auth status` shows the host logged in.
+// A stub gh on PATH records its arguments and yields a token; each
+// subtest asserts the exact invocation and the token round-trip. This
+// complements TestGetTokenForHostGhCLIDefaultHost, which exercises a
+// real gh and skips when one is unavailable.
+func TestGetTokenForHostGhCLIInvocation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script gh stub not runnable on windows")
+	}
+
+	// Env vars cleared so every lookup below falls through to the CLI.
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_ENTERPRISE_TOKEN", "")
+	t.Setenv("GITHUB_ENTERPRISE_TOKEN", "")
+
+	// The stub gh is the only executable on PATH. It appends its
+	// arguments to the args file (one per line) and prints a token.
+	stubDir := t.TempDir()
+	argsFile := filepath.Join(stubDir, "args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + argsFile + "\necho stub-token\n"
+	if err := os.WriteFile(filepath.Join(stubDir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatalf("writing gh stub: %v", err)
+	}
+	t.Setenv("PATH", stubDir)
+
+	// stubArgs returns the recorded invocation and resets the args file
+	// so subtests stay order-independent.
+	stubArgs := func(t *testing.T) string {
+		t.Helper()
+		args, err := os.ReadFile(argsFile)
+		if err != nil {
+			t.Fatal("stub gh was never invoked")
+		}
+		if err := os.WriteFile(argsFile, nil, 0o644); err != nil {
+			t.Fatalf("resetting args file: %v", err)
+		}
+		return string(args)
+	}
+
+	t.Run("enterprise host passes --hostname", func(t *testing.T) {
+		token, err := GetTokenForHost("github.example.com")
+		if err != nil {
+			t.Fatalf("GetTokenForHost() error: %v", err)
+		}
+		if token != "stub-token" {
+			t.Errorf("token = %q, want stub-token", token)
+		}
+		want := "auth\ntoken\n--hostname\ngithub.example.com\n"
+		if args := stubArgs(t); args != want {
+			t.Errorf("gh invocation args = %q, want %q (--hostname is the only host flag gh auth token accepts)", args, want)
+		}
+	})
+
+	t.Run("default host is flagless", func(t *testing.T) {
+		token, err := GetTokenForHost("github.com")
+		if err != nil {
+			t.Fatalf("GetTokenForHost() error: %v", err)
+		}
+		if token != "stub-token" {
+			t.Errorf("token = %q, want stub-token", token)
+		}
+		want := "auth\ntoken\n"
+		if args := stubArgs(t); args != want {
+			t.Errorf("gh invocation args = %q, want %q", args, want)
+		}
+	})
 }
 
 func TestNewClientFromTokenHostRouting(t *testing.T) {

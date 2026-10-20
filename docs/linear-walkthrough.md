@@ -255,7 +255,7 @@ token, err := ghclient.GetTokenForHost(parsed.host)
 Token acquisition strategy (`GetTokenForHost`):
 
 1. **github.com (or `GH_HOST`) host**: `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`
-2. **Any other (enterprise) host**: `GH_ENTERPRISE_TOKEN`, then `GITHUB_ENTERPRISE_TOKEN`, then `gh auth token --host <host>`
+2. **Any other (enterprise) host**: `GH_ENTERPRISE_TOKEN`, then `GITHUB_ENTERPRISE_TOKEN`, then `gh auth token --hostname <host>`
 3. **Error**: Return message if all fail
 
 #### Step 8: Mode Selection (`main.go`)
@@ -302,7 +302,7 @@ func NewClientFromToken(token, host string) (*github.Client, error) {
 Uses `google/go-github` with token authentication. The token itself is
 resolved by `GetTokenForHost(host)`: env vars first (`GH_TOKEN` /
 `GITHUB_TOKEN`, or the enterprise equivalents for non-github.com hosts),
-then `gh auth token [--host <host>]`.
+then `gh auth token [--hostname <host>]`.
 
 ### GraphQL Client Creation (`internal/github/graphql.go`)
 

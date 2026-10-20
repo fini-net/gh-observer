@@ -249,7 +249,7 @@ Authentication follows the gh CLI's resolution order:
 
 1. `GH_TOKEN` / `GITHUB_TOKEN` for github.com (or the `GH_HOST` host)
 2. `GH_ENTERPRISE_TOKEN` / `GITHUB_ENTERPRISE_TOKEN` for enterprise hosts
-3. `gh auth token --host <host>` (log in once with `gh auth login --hostname`)
+3. `gh auth token --hostname <host>` (log in once with `gh auth login --hostname`)
 
 Caveat: `GH_ENTERPRISE_TOKEN` / `GITHUB_ENTERPRISE_TOKEN` are host-agnostic —
 the value is sent as a Bearer credential to *any* non-github.com host, not just

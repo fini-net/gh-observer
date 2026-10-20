@@ -185,7 +185,7 @@ func isLoopbackHost(host string) bool {
 //   - github.com (or GH_HOST when set): GH_TOKEN, then GITHUB_TOKEN, then
 //     `gh auth token`
 //   - any other host: GH_ENTERPRISE_TOKEN, then GITHUB_ENTERPRISE_TOKEN,
-//     then `gh auth token --host <host>`
+//     then `gh auth token --hostname <host>`
 //
 // The env-var split matches go-gh's auth.TokenForHost so users who already
 // have enterprise tokens exported for other gh-based tools work unchanged.
@@ -209,7 +209,7 @@ func getTokenForDefaultHost() (string, error) {
 }
 
 // getTokenForEnterpriseHost resolves the token for a GitHub Enterprise
-// host: enterprise env vars first, then `gh auth token --host <host>`.
+// host: enterprise env vars first, then `gh auth token --hostname <host>`.
 func getTokenForEnterpriseHost(host string) (string, error) {
 	for _, name := range []string{"GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"} {
 		if token := strings.TrimSpace(os.Getenv(name)); token != "" {
@@ -239,18 +239,20 @@ func tokenFromGhCLI() (string, error) {
 	return token, nil
 }
 
-// tokenFromGhCLIForHost shells out to `gh auth token --host <host>` for an
-// enterprise host token.
+// tokenFromGhCLIForHost shells out to `gh auth token --hostname <host>` for
+// an enterprise host token. The long flag form is used in messages because
+// the gh CLI accepts -h/--hostname only — `--host` fails with
+// "unknown flag" (issue #479).
 func tokenFromGhCLIForHost(host string) (string, error) {
-	cmd := exec.Command("gh", "auth", "token", "--host", host)
+	cmd := exec.Command("gh", "auth", "token", "--hostname", host)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		debug.Log("gh auth token --host failed", "host", host, "err", err, "output", strings.TrimSpace(string(output)))
-		return "", fmt.Errorf("gh auth token --host %s failed", host)
+		debug.Log("gh auth token --hostname failed", "host", host, "err", err, "output", strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("gh auth token --hostname %s failed", host)
 	}
 	token := strings.TrimSpace(string(output))
 	if token == "" {
-		return "", fmt.Errorf("`gh auth token --host %s` returned empty", host)
+		return "", fmt.Errorf("`gh auth token --hostname %s` returned empty", host)
 	}
 	return token, nil
 }

@@ -169,7 +169,12 @@ The application executes `gh` as a subprocess for token retrieval and PR
 detection. When running inside a jj (Jujutsu) repository, it also executes
 `jj git root` to locate the internal git directory. The commands are:
 
-- `gh auth token` — no user-supplied arguments
+- `gh auth token` — no user-supplied arguments (default host)
+- `gh auth token --hostname <host>` — enterprise hosts; the host is
+  derived from a user-supplied URL, git remote, `--repo` argument, or
+  `GH_HOST` (validated: hostname-only characters `[a-zA-Z0-9.-]` via
+  the URL/remote regexes or `isValidHost` for `GH_HOST`; not
+  shell-expanded)
 - `gh pr view --json number,url` — no user-supplied arguments (auto-detect mode)
 - `gh pr view <PR_NUMBER> --json number,url` — user-supplied PR number
   (validated as an integer via `strconv.Atoi` before being passed to the
@@ -178,10 +183,12 @@ detection. When running inside a jj (Jujutsu) repository, it also executes
 - `jj git root` — no user-supplied arguments (only executed when a `.jj/`
   directory is detected)
 
-The only user-supplied argument passed to a subprocess is the PR number in
-explicit PR mode (`gh-observer 123`). The PR number is validated as an integer
-before being passed to `gh pr view`, preventing injection of arbitrary flags
-or shell metacharacters.
+The user-supplied arguments passed to a subprocess are the PR number in
+explicit PR mode (`gh-observer 123`) and the hostname in the enterprise
+token lookup (derived from a user-supplied URL, git remote, `--repo`
+argument, or `GH_HOST`). The PR number is validated as an integer and the
+hostname is restricted to hostname-only characters before being passed,
+preventing injection of arbitrary flags or shell metacharacters.
 
 **Risk:** A compromised `gh` binary on the PATH could execute arbitrary code
 with the user's privileges. This is a standard PATH-based attack vector common
@@ -189,11 +196,12 @@ to all tools that invoke `gh`.
 
 **Mitigations:**
 
-- The only user-supplied subprocess argument is the PR number, validated as an integer via `strconv.Atoi` before being passed to `gh pr view`
+- User-supplied subprocess arguments are limited to the PR number (validated as an integer via `strconv.Atoi` before being passed to `gh pr view`) and the enterprise hostname (restricted to hostname-only characters by the URL/remote regexes or `isValidHost` for `GH_HOST`)
 - The application validates all subprocess output (JSON parsing, regex
   validation, cross-field consistency checks)
 - `ParsePRURL` re-validates the URL returned by `gh pr view` against an
-  anchored regex (`^https?://github\.com/...`)
+  anchored regex that restricts every segment, including the host, to
+  hostname-safe characters
 - PR numbers from `gh` output are cross-checked against the URL
 
 **Accepted risk:** PATH-based substitution is outside the scope of this
@@ -318,7 +326,7 @@ point at repos they control.
 
 | ID | Threat | Category | Impact | Mitigation | Status |
 | -- | ------ | -------- | ------ | ---------- | ------ |
-| TV-1 | Attacker crafts a PR URL pointing to a malicious host | Spoofing | gh-observer sends API requests (with auth token) to an unintended owner/repo | `ParsePRURL` only accepts `github.com`; extracted values are used in API calls to `api.github.com`, not arbitrary hosts | **Mitigated** |
+| TV-1 | Attacker crafts a PR URL pointing to a malicious host | Spoofing | gh-observer sends API requests (with auth token) to the attacker's fake GitHub instance | Any host is accepted since GitHub Enterprise support (#479): requests go to the host's own derived API endpoints with credentials resolved for that host (`gh auth login --hostname` per host). The host-agnostic `GH_ENTERPRISE_TOKEN` is the residual vector, documented as a README caveat | **Partially mitigated**—avoid exporting enterprise env vars where untrusted URLs get pasted |
 | TV-2 | Attacker supplies a PR URL with path traversal characters | Tampering | Could cause unexpected API paths | `go-github` library URL-encodes path components; API returns 404 for invalid paths | **Mitigated** |
 | TV-3 | Attacker supplies an extremely large PR number | DoS | `strconv.Atoi` converts it to an int; API call fails with 404 | No resource exhaustion possible; Go's int overflow wraps to negative, failing API validation | **Mitigated** |
 
