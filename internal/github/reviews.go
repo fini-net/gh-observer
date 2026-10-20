@@ -29,40 +29,61 @@ func CopilotReviewFails(state string) bool {
 	return state == "changes_requested"
 }
 
+// requestNode represents a single requested reviewer from the
+// reviewRequests connection. The ... on Bot / ... on User inline fragments
+// matter because GitHub silently drops Bot reviewers from the REST
+// requested_reviewers endpoint (issue #288); GraphQL surfaces them.
+type requestNode struct {
+	RequestedReviewer struct {
+		Typename string `graphql:"__typename"`
+		Bot      struct {
+			Login string
+		} `graphql:"... on Bot"`
+		User struct {
+			Login string
+		} `graphql:"... on User"`
+	}
+}
+
+// reviewNode represents a single submitted review from the reviews
+// connection.
+type reviewNode struct {
+	Author struct {
+		Login string
+	}
+	State       string
+	SubmittedAt githubv4.DateTime
+	Commit      struct {
+		OID string
+	}
+	Body string
+}
+
 // copilotReviewQuery fetches Copilot review requests and submitted reviews
-// via a second GraphQL path alongside the check-runs query. The
-// reviewRequests fragment uses ... on Bot / ... on User because GitHub
-// silently drops Bot reviewers from the REST requested_reviewers endpoint
-// (issue #288), but GraphQL surfaces them via inline fragments.
+// via a second GraphQL path alongside the check-runs query. Both
+// connections are cursor-paginated (issue #486) so a PR with more than 25
+// reviews or more than 10 requested reviewers cannot hide Copilot state:
+// reviewRequests walks forward (first: 10, after: $requestsCursor) and
+// reviews walks backward (last: 25, before: $reviewsCursor), mirroring the
+// contexts pagination in graphql.go. PRs whose data fits on the first page
+// of both connections still cost a single round trip.
 type copilotReviewQuery struct {
 	Repository struct {
 		PullRequest struct {
 			ReviewRequests struct {
-				Nodes []struct {
-					RequestedReviewer struct {
-						Typename string `graphql:"__typename"`
-						Bot      struct {
-							Login string
-						} `graphql:"... on Bot"`
-						User struct {
-							Login string
-						} `graphql:"... on User"`
-					}
+				Nodes    []requestNode
+				PageInfo struct {
+					HasNextPage bool
+					EndCursor   githubv4.String
 				}
-			} `graphql:"reviewRequests(first: 10)"`
+			} `graphql:"reviewRequests(first: 10, after: $requestsCursor)"`
 			Reviews struct {
-				Nodes []struct {
-					Author struct {
-						Login string
-					}
-					State       string
-					SubmittedAt githubv4.DateTime
-					Commit      struct {
-						OID string
-					}
-					Body string
+				Nodes    []reviewNode
+				PageInfo struct {
+					HasPreviousPage bool
+					StartCursor     githubv4.String
 				}
-			} `graphql:"reviews(last: 25)"`
+			} `graphql:"reviews(last: 25, before: $reviewsCursor)"`
 		} `graphql:"pullRequest(number: $prNumber)"`
 	} `graphql:"repository(owner: $owner, name: $repo)"`
 	RateLimit struct {
@@ -76,36 +97,146 @@ type copilotReviewQuery struct {
 // Returns the review state, the GraphQL rate limit remaining, and any error.
 // The host selects the GraphQL endpoint ("" or github.com = public; else
 // enterprise).
+//
+// Both connections paginate (issue #486): reviewRequests walks forward until
+// the Copilot request is found or the connection is exhausted, and reviews
+// walks backward until a Copilot review targeting HEAD is found or the
+// connection is exhausted. A PR with more than 25 reviews after the newest
+// Copilot review, or more than 10 requested reviewers, can therefore no
+// longer hide Copilot state.
 func FetchCopilotReview(ctx context.Context, token, host, owner, repo string, prNumber int, headSHA string) (CopilotReview, int, error) {
 	httpClient := newAuthenticatedHTTPClient(ctx, token)
 	client := newGraphQLClient(host, httpClient)
 	return fetchCopilotReview(ctx, client, owner, repo, prNumber, headSHA)
 }
 
+// containsCopilotRequest reports whether any requested reviewer on a page
+// is the Copilot app.
+func containsCopilotRequest(nodes []requestNode) bool {
+	for _, req := range nodes {
+		login := req.RequestedReviewer.Bot.Login
+		if login == "" {
+			login = req.RequestedReviewer.User.Login
+		}
+		if strings.EqualFold(login, copilotReviewerLogin) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsCopilotHeadReview reports whether any review on a page is
+// authored by Copilot and targets headSHA.
+func containsCopilotHeadReview(nodes []reviewNode, headSHA string) bool {
+	for _, node := range nodes {
+		if strings.EqualFold(node.Author.Login, copilotReviewerLogin) && node.Commit.OID == headSHA {
+			return true
+		}
+	}
+	return false
+}
+
 func fetchCopilotReview(ctx context.Context, client graphqlQuerier, owner, repo string, prNumber int, headSHA string) (CopilotReview, int, error) {
-	var query copilotReviewQuery
 	prNum, err := safeGraphQLInt(prNumber)
 	if err != nil {
 		return CopilotReview{}, UnknownRateLimit, err
 	}
-	variables := map[string]any{
-		"owner":    githubv4.String(owner),
-		"repo":     githubv4.String(repo),
-		"prNumber": prNum,
+
+	var allRequests []requestNode
+	var allReviews []reviewNode
+	var requestsCursor, reviewsCursor *githubv4.String
+	requestsDone, reviewsDone := false, false
+	rateLimitRemaining := UnknownRateLimit
+
+	for {
+		var query copilotReviewQuery
+		variables := map[string]any{
+			"owner":    githubv4.String(owner),
+			"repo":     githubv4.String(repo),
+			"prNumber": prNum,
+		}
+		if requestsCursor != nil {
+			variables["requestsCursor"] = *requestsCursor
+		} else {
+			variables["requestsCursor"] = (*githubv4.String)(nil)
+		}
+		if reviewsCursor != nil {
+			variables["reviewsCursor"] = *reviewsCursor
+		} else {
+			variables["reviewsCursor"] = (*githubv4.String)(nil)
+		}
+
+		if err := client.Query(ctx, &query, variables); err != nil {
+			debug.Log("copilot review query failed", "owner", owner, "repo", repo, "pr", prNumber, "err", err)
+			return CopilotReview{}, rateLimitRemaining, err
+		}
+
+		debug.Log("copilot review query success", "owner", owner, "repo", repo, "pr", prNumber,
+			"rate_limit_remaining", query.RateLimit.Remaining,
+			"review_requests", len(query.Repository.PullRequest.ReviewRequests.Nodes),
+			"reviews", len(query.Repository.PullRequest.Reviews.Nodes))
+
+		// Normalize per page: an enterprise host with rate limiting
+		// disabled returns null here (zero-value struct), which must not
+		// look like a "0 remaining" quota (see normalizeRateLimit). Keep
+		// the minimum across pages, mirroring fetchCheckRunsGraphQL.
+		remaining := normalizeRateLimit(query.RateLimit.Limit, query.RateLimit.Remaining)
+		if remaining < rateLimitRemaining {
+			rateLimitRemaining = remaining
+		}
+
+		pr := query.Repository.PullRequest
+
+		// Requests walk forward (oldest page first), so append preserves
+		// connection order. Stop once the Copilot request is in hand;
+		// remaining pages cannot change the requested/not-requested
+		// outcome.
+		if !requestsDone {
+			allRequests = append(allRequests, pr.ReviewRequests.Nodes...)
+			if containsCopilotRequest(pr.ReviewRequests.Nodes) {
+				requestsDone = true
+			} else if pr.ReviewRequests.PageInfo.HasNextPage {
+				cursor := pr.ReviewRequests.PageInfo.EndCursor
+				requestsCursor = &cursor
+			} else {
+				requestsDone = true
+			}
+		}
+
+		// Reviews walk backward (newest page first), so prepend each page
+		// to keep the accumulated slice in ascending submission order —
+		// parseCopilotReview's newest-wins reverse iteration relies on it.
+		// Stop once a Copilot review targeting HEAD is in hand: pages
+		// further back are strictly older, so they cannot change which
+		// Copilot review is the newest one on HEAD. Keep walking past
+		// stale (non-HEAD) Copilot reviews, though — an older review may
+		// still target HEAD (e.g. a force-push back to a previous commit).
+		if !reviewsDone {
+			allReviews = append(pr.Reviews.Nodes, allReviews...)
+			if containsCopilotHeadReview(pr.Reviews.Nodes, headSHA) {
+				reviewsDone = true
+			} else if pr.Reviews.PageInfo.HasPreviousPage {
+				cursor := pr.Reviews.PageInfo.StartCursor
+				reviewsCursor = &cursor
+			} else {
+				reviewsDone = true
+			}
+		}
+
+		// A connection that is done keeps its cursor pinned for any
+		// remaining round trips the other connection still needs; its
+		// re-fetched pages are simply not accumulated.
+
+		if reviewsDone && requestsDone {
+			break
+		}
 	}
 
-	if err := client.Query(ctx, &query, variables); err != nil {
-		debug.Log("copilot review query failed", "owner", owner, "repo", repo, "pr", prNumber, "err", err)
-		return CopilotReview{}, UnknownRateLimit, err
-	}
-
-	debug.Log("copilot review query success", "owner", owner, "repo", repo, "pr", prNumber,
-		"rate_limit_remaining", query.RateLimit.Remaining,
-		"review_requests", len(query.Repository.PullRequest.ReviewRequests.Nodes),
-		"reviews", len(query.Repository.PullRequest.Reviews.Nodes))
-
-	review := parseCopilotReview(&query, headSHA)
-	return review, normalizeRateLimit(query.RateLimit.Limit, query.RateLimit.Remaining), nil
+	var result copilotReviewQuery
+	result.Repository.PullRequest.ReviewRequests.Nodes = allRequests
+	result.Repository.PullRequest.Reviews.Nodes = allReviews
+	review := parseCopilotReview(&result, headSHA)
+	return review, rateLimitRemaining, nil
 }
 
 // parseCopilotReview extracts the Copilot review state from a GraphQL response,
@@ -128,25 +259,16 @@ func parseCopilotReview(query *copilotReviewQuery, headSHA string) CopilotReview
 	}
 
 	// Scan reviews for the latest Copilot-authored review targeting HEAD
-	var headReview *struct {
-		Author struct {
-			Login string
-		}
-		State       string
-		SubmittedAt githubv4.DateTime
-		Commit      struct {
-			OID string
-		}
-		Body string
-	}
+	var headReview *reviewNode
 
 	sawStale := false
 	// The reviews connection returns nodes in chronological (ascending)
 	// submission order — oldest first, newest last — whether fetched via
-	// `reviews(first: N)` or `reviews(last: N)`. We query `last: 25` so the
-	// most recent 25 reviews (across all reviewers) are returned; iterate in
-	// reverse so the first HEAD-matching node encountered is the most recent
-	// review on that commit.
+	// `reviews(first: N)` or `reviews(last: N)`. fetchCopilotReview walks
+	// backward pages and prepends them, so the accumulated slice here is a
+	// contiguous ascending window ending at the newest review; iterate in
+	// reverse so the first HEAD-matching node encountered is the most
+	// recent review on that commit.
 	for i := len(query.Repository.PullRequest.Reviews.Nodes) - 1; i >= 0; i-- {
 		node := &query.Repository.PullRequest.Reviews.Nodes[i]
 		if !strings.EqualFold(node.Author.Login, copilotReviewerLogin) {
