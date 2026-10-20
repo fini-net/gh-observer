@@ -11,6 +11,14 @@ import (
 // copilotReviewerLogin is the GitHub App login for Copilot code reviews.
 const copilotReviewerLogin = "copilot-pull-request-reviewer"
 
+// maxCopilotQueryPages bounds the pagination walk (review of #535): a PR
+// whose newest Copilot review is stale and no HEAD review exists walks
+// every review page backward — and repeats the walk on every poll cycle,
+// a recurring API cost that grows with PR age. Ten pages spans 250
+// reviews and 100 requested reviewers; past that, give up on deeper
+// history and parse what was gathered rather than risk unbounded walks.
+const maxCopilotQueryPages = 10
+
 // CopilotReview represents the state of a GitHub Copilot code review on a PR.
 // Unlike CheckRunInfo, reviews have no startedAt/completedAt timestamps, so
 // they must not participate in timing calculations.
@@ -103,7 +111,9 @@ type copilotReviewQuery struct {
 // walks backward until a Copilot review targeting HEAD is found or the
 // connection is exhausted. A PR with more than 25 reviews after the newest
 // Copilot review, or more than 10 requested reviewers, can therefore no
-// longer hide Copilot state.
+// longer hide Copilot state. The walk is bounded by maxCopilotQueryPages so
+// a PR with deep non-Copilot review history cannot drive unbounded API
+// traffic on every poll cycle.
 func FetchCopilotReview(ctx context.Context, token, host, owner, repo string, prNumber int, headSHA string) (CopilotReview, int, error) {
 	httpClient := newAuthenticatedHTTPClient(ctx, token)
 	client := newGraphQLClient(host, httpClient)
@@ -148,7 +158,7 @@ func fetchCopilotReview(ctx context.Context, client graphqlQuerier, owner, repo 
 	requestsDone, reviewsDone := false, false
 	rateLimitRemaining := UnknownRateLimit
 
-	for {
+	for pages := 1; ; pages++ {
 		var query copilotReviewQuery
 		variables := map[string]any{
 			"owner":    githubv4.String(owner),
@@ -168,6 +178,12 @@ func fetchCopilotReview(ctx context.Context, client graphqlQuerier, owner, repo 
 
 		if err := client.Query(ctx, &query, variables); err != nil {
 			debug.Log("copilot review query failed", "owner", owner, "repo", repo, "pr", prNumber, "err", err)
+			// Partial state is discarded on purpose: pages gathered before
+			// the failure are an incomplete window (the walk had not yet
+			// reached the page that could hold the Copilot review), so a
+			// state derived from them could answer "not requested" when
+			// the unfetched page held the opposite. Callers treat fetch
+			// errors as transient and the next poll refetches from page 1.
 			return CopilotReview{}, rateLimitRemaining, err
 		}
 
@@ -225,9 +241,19 @@ func fetchCopilotReview(ctx context.Context, client graphqlQuerier, owner, repo 
 
 		// A connection that is done keeps its cursor pinned for any
 		// remaining round trips the other connection still needs; its
-		// re-fetched pages are simply not accumulated.
+		// re-fetched pages are simply not accumulated. The re-fetch is a
+		// known, accepted cost: both connections share one query document,
+		// so skipping a done connection would require a second,
+		// dynamically built query — more complexity than the spare page
+		// is worth (review of #535).
 
 		if reviewsDone && requestsDone {
+			break
+		}
+		if pages >= maxCopilotQueryPages {
+			debug.Log("copilot review pagination hit page cap",
+				"owner", owner, "repo", repo, "pr", prNumber,
+				"pages", pages, "max_pages", maxCopilotQueryPages)
 			break
 		}
 	}
