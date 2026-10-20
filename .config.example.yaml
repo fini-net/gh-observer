@@ -95,7 +95,9 @@ copilot_initial_delay: 15s
 #                            already ends in /api/v3) and GraphQL at
 #                            <url>/graphql
 #   GH_OBSERVER_GRAPHQL_URL  overrides just the GraphQL endpoint and
-#                            wins over the URL the API override derives
+#                            wins over the URL the API override derives.
+#                            The value is the complete endpoint URL —
+#                            nothing is appended to it
 #
 # Together they express split layouts, e.g. a GHES behind a proxy:
 #

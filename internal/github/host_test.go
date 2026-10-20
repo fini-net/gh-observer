@@ -368,6 +368,25 @@ func TestNewClientFromTokenHostRouting(t *testing.T) {
 			t.Errorf("BaseURL = %q, want http://127.0.0.1:54321/api/v3/", got)
 		}
 	})
+
+	// The documented escape hatch for GHES installs that serve only the
+	// api.<host> subdomain form (README, PR notes): GH_OBSERVER_API_URL
+	// set to https://api.<host> must restore both pre-#485 endpoints —
+	// REST verbatim, since the api. host prefix suppresses go-github's
+	// api/v3/ completion, and GraphQL as <url>/graphql.
+	t.Run("subdomain-form restore via api.<host> override", func(t *testing.T) {
+		t.Setenv(APIURLEnvOverride, "https://api.ghe.example.com")
+		client, err := NewClientFromToken("tok", "ghe.example.com")
+		if err != nil {
+			t.Fatalf("NewClientFromToken() error: %v", err)
+		}
+		if got := client.BaseURL(); got != "https://api.ghe.example.com/" {
+			t.Errorf("BaseURL = %q, want https://api.ghe.example.com/", got)
+		}
+		if _, gql := APIURLsForHost("ghe.example.com"); gql != "https://api.ghe.example.com/graphql" {
+			t.Errorf("graphql URL = %q, want https://api.ghe.example.com/graphql", gql)
+		}
+	})
 }
 
 // TestNewClientFromTokenCredentialOriginRestriction pins go-github v93's

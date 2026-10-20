@@ -106,7 +106,9 @@ const gheCloudTenantSuffix = ".ghe.com"
 // API layouts (issue #532). Unusable override values — unparseable,
 // non-http(s), non-https off loopback — are ignored with a debug log,
 // mirroring the GH_HOST validation precedent: clients would otherwise
-// fail confusingly at request time.
+// fail confusingly at request time. The resolved pair is debug-logged
+// so `--debug` shows which endpoints each enterprise client uses — the
+// first thing to check when a GHES host fails to connect.
 func APIURLsForHost(host string) (restURL, graphqlURL string) {
 	if host == "" || strings.EqualFold(host, DefaultGitHubHost) {
 		return "", ""
@@ -127,6 +129,7 @@ func APIURLsForHost(host string) (restURL, graphqlURL string) {
 			debug.Log("ignoring invalid "+GraphQLURLEnvOverride, "value", gql)
 		}
 	}
+	debug.Log("enterprise API endpoints", "host", host, "rest", restURL, "graphql", graphqlURL)
 	return restURL, graphqlURL
 }
 
