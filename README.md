@@ -268,7 +268,8 @@ CLI's go-gh library: `*.ghe.com` tenants (GitHub Enterprise Cloud) use the
 `api.<host>` subdomain convention; every other enterprise host — GitHub
 Enterprise Server and custom domains — uses the path-based endpoints GHES
 documents (`https://<host>/api/v3` and `https://<host>/api/graphql`). For
-hosts whose API lives elsewhere — e.g. a reverse proxy — set
+hosts whose API lives elsewhere — e.g. a GHES install that serves only
+the `api.<host>` subdomain form, or a reverse proxy — set
 `GH_OBSERVER_API_URL`: every non-github.com host then gets REST at
 `<url>/` (go-github appends `api/v3/` unless the base already ends in
 `/api/v3`) and GraphQL at `<url>/graphql`. `GH_OBSERVER_GRAPHQL_URL`

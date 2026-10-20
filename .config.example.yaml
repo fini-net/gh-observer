@@ -87,7 +87,8 @@ copilot_initial_delay: 15s
 #     for REST and https://<host>/api/graphql for GraphQL
 #
 # Two environment variables override the derivation for non-github.com
-# hosts:
+# hosts whose API is not reachable through it — e.g. a GHES install
+# that serves only the api.<host> subdomain form, or a reverse proxy:
 #
 #   GH_OBSERVER_API_URL      overrides both endpoints: REST at <url>/
 #                            (go-github appends api/v3 unless the base

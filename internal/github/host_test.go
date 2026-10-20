@@ -50,8 +50,12 @@ func TestAPIURLsForHost(t *testing.T) {
 		{"github.example.com", "https://github.example.com/api/v3/", "https://github.example.com/api/graphql"},
 		{"ghe.corp.local", "https://ghe.corp.local/api/v3/", "https://ghe.corp.local/api/graphql"},
 		// GitHub Enterprise Cloud tenants (*.ghe.com): api.<host>
-		// subdomain convention.
+		// subdomain convention. Mixed case pins that the suffix check is
+		// case-insensitive while the URL preserves the given case
+		// (hosts arrive lowercased in practice, but APIURLsForHost is
+		// exported and github.com already gets EqualFold treatment).
 		{"octocorp.ghe.com", "https://api.octocorp.ghe.com/", "https://api.octocorp.ghe.com/graphql"},
+		{"Octocorp.GHE.com", "https://api.Octocorp.GHE.com/", "https://api.Octocorp.GHE.com/graphql"},
 		// The tenant suffix requires a leading label: the apex is not
 		// a tenant, so it derives like any other enterprise host.
 		{"ghe.com", "https://ghe.com/api/v3/", "https://ghe.com/api/graphql"},
@@ -131,6 +135,7 @@ func TestAPIURLsForHostGraphQLOverride(t *testing.T) {
 		{"invalid GraphQL override ignored, API override stands", "https://ghe.example.com", "ftp://example.com", "https://ghe.example.com/", "https://ghe.example.com/graphql"},
 		{"off-loopback http GraphQL override ignored (token safety)", "https://ghe.example.com", "http://gql.corp.example.com", "https://ghe.example.com/", "https://ghe.example.com/graphql"},
 		{"loopback http GraphQL override accepted", "", "http://127.0.0.1:54321/api/graphql", "https://ghe.example.com/api/v3/", "http://127.0.0.1:54321/api/graphql"},
+		{"trailing slash trimmed like the API override", "", "https://gql.corp.example.com/api/graphql/", "https://ghe.example.com/api/v3/", "https://gql.corp.example.com/api/graphql"},
 		{"whitespace trimmed", "", "  https://gql.corp.example.com/api/graphql  ", "https://ghe.example.com/api/v3/", "https://gql.corp.example.com/api/graphql"},
 	}
 	for _, tt := range tests {

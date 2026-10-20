@@ -70,7 +70,8 @@ const APIURLEnvOverride = "GH_OBSERVER_API_URL"
 // #532). A valid value wins over the GraphQL endpoint APIURLEnvOverride
 // derives. The same token-safety rules apply: https only, or plain http
 // on a loopback host, since the bearer token rides every GraphQL
-// request to the override target.
+// request to the override target. Like APIURLEnvOverride, a trailing
+// slash is trimmed so <url>/graphql and <url>/graphql/ behave the same.
 const GraphQLURLEnvOverride = "GH_OBSERVER_GRAPHQL_URL"
 
 // gheCloudTenantSuffix is the GitHub Enterprise Cloud tenant domain.
@@ -121,7 +122,7 @@ func APIURLsForHost(host string) (restURL, graphqlURL string) {
 	}
 	if gql := strings.TrimSpace(os.Getenv(GraphQLURLEnvOverride)); gql != "" {
 		if validAPIURL(gql) {
-			graphqlURL = gql
+			graphqlURL = strings.TrimSuffix(gql, "/")
 		} else {
 			debug.Log("ignoring invalid "+GraphQLURLEnvOverride, "value", gql)
 		}
@@ -136,7 +137,9 @@ func APIURLsForHost(host string) (restURL, graphqlURL string) {
 // explicitly — go-github's WithEnterpriseURLs appends api/v3/ only to
 // bases lacking it (a base ending in /api/v3/ or under api.* is left
 // untouched), so the derived URL is the actual endpoint rather than one
-// that still needs completing.
+// that still needs completing. go-gh additionally special-cases its own
+// test hosts (github.localhost and *.localhost); those gh-CLI-internal
+// aliases are intentionally not mirrored here.
 func enterpriseURLs(host string) (restURL, graphqlURL string) {
 	if strings.HasSuffix(strings.ToLower(host), gheCloudTenantSuffix) {
 		return fmt.Sprintf("https://api.%s/", host), fmt.Sprintf("https://api.%s/graphql", host)
