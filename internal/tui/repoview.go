@@ -22,6 +22,14 @@ import (
 // error is surfaced as a red status line so the user knows something is wrong
 // while polling continues and self-heals when the API returns.
 func (m RepoModel) View() tea.View {
+	if m.height == 0 {
+		return newAltScreenView(m.renderHeader() + m.renderBody() + m.renderFooter())
+	}
+	return newAltScreenView(m.renderHeader() + m.viewport.View() + "\n" + strings.TrimSuffix(m.renderFooter(), "\n"))
+}
+
+// renderHeader renders the pinned repo header and summary line.
+func (m RepoModel) renderHeader() string {
 	var b strings.Builder
 
 	utcTime := time.Now().UTC().Format("15:04:05 UTC")
@@ -44,7 +52,14 @@ func (m RepoModel) View() tea.View {
 	fmt.Fprintf(&b, "%s\n", summaryLine)
 	b.WriteString("\n")
 
-	if prCount == 0 && branchRunCount == 0 {
+	return b.String()
+}
+
+// renderBody renders the scrollable PR groups and standalone branch runs.
+func (m RepoModel) renderBody() string {
+	var b strings.Builder
+
+	if len(m.prs) == 0 && len(m.standaloneRuns) == 0 {
 		fmt.Fprintf(&b, "%s ", m.spinner.View())
 		b.WriteString(m.styles.Running.Render("No active PRs or branch runs..."))
 		b.WriteString("\n\n")
@@ -52,10 +67,17 @@ func (m RepoModel) View() tea.View {
 		for _, prNum := range m.sortedPRNumbers() {
 			m.renderPRGroup(&b, prNum, m.prs[prNum])
 		}
-		if branchRunCount > 0 {
+		if len(m.standaloneRuns) > 0 {
 			m.renderStandaloneRunsSection(&b)
 		}
 	}
+
+	return b.String()
+}
+
+// renderFooter renders the pinned status lines and key hint.
+func (m RepoModel) renderFooter() string {
+	var b strings.Builder
 
 	// Two-tier rate-limit indicator: red under minRateLimitForFetch, yellow
 	// under rateWarningThreshold. Only render once we've actually received a
@@ -95,10 +117,43 @@ func (m RepoModel) View() tea.View {
 	b.WriteString("\n")
 
 	if !m.quitting {
-		b.WriteString("Press q to quit\n")
+		if m.scrollable() {
+			b.WriteString(m.scrollHint())
+			b.WriteString("\n")
+		} else {
+			b.WriteString("Press q to quit\n")
+		}
 	}
 
-	return newAltScreenView(b.String())
+	return b.String()
+}
+
+// scrollable reports whether the body overflows the viewport.
+func (m RepoModel) scrollable() bool {
+	return m.height > 0 && m.viewport.TotalLineCount() > m.viewport.Height()
+}
+
+// scrollHint returns the key hints and ruler, dropping hints from the end
+// until the line fits the terminal so the ruler is never cut off.
+func (m RepoModel) scrollHint() string {
+	ruler := fmt.Sprintf("  [%s]", m.scrollPosition())
+	hints := []string{"j/k scroll", "^f/^b page", "^d/^u half", "gg/G top/bottom", "q quit"}
+	for len(hints) > 0 && lipgloss.Width(strings.Join(hints, " • ")+ruler) > m.width {
+		hints = hints[:len(hints)-1]
+	}
+	return strings.Join(hints, " • ") + ruler
+}
+
+// scrollPosition returns a vim-style ruler: Top, Bot, or a percentage.
+func (m RepoModel) scrollPosition() string {
+	switch {
+	case m.viewport.AtTop():
+		return "Top"
+	case m.viewport.AtBottom():
+		return "Bot"
+	default:
+		return fmt.Sprintf("%d%%", int(m.viewport.ScrollPercent()*100))
+	}
 }
 
 // truncateFetchError shortens an error message to fit within maxWidth terminal

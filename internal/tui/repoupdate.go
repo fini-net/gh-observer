@@ -2,10 +2,12 @@ package tui
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/fini-net/gh-observer/internal/debug"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
@@ -47,10 +49,17 @@ func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
+		return m.handleScrollKey(msg)
+
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.syncViewport()
+		return m, nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
+		m.syncViewport()
 		return m, cmd
 
 	case RepoTickMsg:
@@ -70,13 +79,62 @@ func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case RepoChecksUpdateMsg:
-		return m.handleRepoChecksUpdate(msg)
+		// The handlers return &m, so syncing m afterwards updates the returned model.
+		model, cmd := m.handleRepoChecksUpdate(msg)
+		m.syncViewport()
+		return model, cmd
 
 	case RepoRunsUpdateMsg:
-		return m.handleRepoRunsUpdate(msg)
+		model, cmd := m.handleRepoRunsUpdate(msg)
+		m.syncViewport()
+		return model, cmd
 	}
 
 	return m, nil
+}
+
+// handleScrollKey applies vim-style scroll keys to the body viewport.
+func (m RepoModel) handleScrollKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.height == 0 {
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "G", "end":
+		m.pendingG = false
+		m.viewport.GotoBottom()
+		return m, nil
+	case "home":
+		m.pendingG = false
+		m.viewport.GotoTop()
+		return m, nil
+	case "g":
+		if m.pendingG {
+			m.viewport.GotoTop()
+		}
+		m.pendingG = !m.pendingG
+		return m, nil
+	}
+
+	m.pendingG = false
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+// syncViewport sizes the viewport to the space between the pinned header and
+// footer and refreshes its content. A no-op until the terminal size is known.
+func (m *RepoModel) syncViewport() {
+	if m.height == 0 {
+		return
+	}
+	// bubbletea clips long lines instead of wrapping them, so each line is one row.
+	header := lipgloss.Height(strings.TrimSuffix(m.renderHeader(), "\n"))
+	footer := lipgloss.Height(strings.TrimSuffix(m.renderFooter(), "\n"))
+	bodyHeight := max(m.height-header-footer, 1)
+	m.viewport.SetWidth(m.width)
+	m.viewport.SetHeight(bodyHeight)
+	m.viewport.SetContent(strings.TrimSuffix(m.renderBody(), "\n"))
 }
 
 // handleRepoChecksUpdate applies fade-out filtering to PR checks and stores
