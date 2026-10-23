@@ -16,3 +16,4 @@ claude = true
 claude-review = true
 copilot-review = true
 standard-release = true
+asciinema-record = true
