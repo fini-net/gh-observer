@@ -32,6 +32,13 @@ Every commit **must** include a `Signed-off-by:` trailer to satisfy the Develope
 
 The TUI and live GitHub API interactions are tested manually via `just build` against a real PR.
 
+### README animations
+
+- `just gifs` - Re-record the automatable demo scenarios (newest merged non-bot PR, remote-repo URL) and re-render all four README GIFs at the speeds README.md documents; needs network + gh auth
+- `just cast-merged-pr [pr]` - Record the merged-PR scenario to `.cache/merged-pr.cast` (renovate/dependabot authors skipped; red non-blocking checks are tolerated)
+- `just cast-uncloned-repo [url]` - Record the remote-PR scenario to `.cache/uncloned-repo.cast` (default: the nautilus URL the README documents)
+- `just gif <target> [speed] [cast]` - Re-render one README GIF; targets `merged-pr2` (1x), `uncloned-repo` (1x), `active-pr` (2x), `descriptions2` (10x); `active-pr` pulls the newest `.cache/pr*.cast` recording, `descriptions2` the newest one showing super-linter; casts sourced from `.cache/` are archived to `docs/` next to their GIF (headless recordings borrow the committed cast's theme), and `docs/dev-process.gif` (template asset) is never touched
+
 CI (`ci.yml`) also uploads the coverage profile to [codecov.io/gh/fini-net/gh-observer](https://codecov.io/gh/fini-net/gh-observer) (README badge). The upload token is the **org-level** secret `ORG_CODECOV_TOKEN` - it lives in fini-net org Settings → Secrets and variables → Actions, *not* in this repo's settings, so don't go hunting for it there.
 
 ### Code quality

@@ -23,14 +23,15 @@ test2cast pr="25": build
 	asciinema record -c "./gh-observer {{ pr }}" --overwrite ".cache/pr-{{ pr }}.cast"
 
 # record a cast for repo mode to help AI understand problems
-# repo mode is persistent (never auto-quits), so we wrap gh-observer in
-# GNU `timeout`, which sends SIGTERM after 60s; bubbletea treats SIGTERM as
-# a clean QuitMsg and exits, letting asciinema finalize the cast.
-# Requires GNU coreutils `timeout` (brew install coreutils on macOS).
 [group('Testing')]
 test2cast-repo repo="fini-net/gh-observer": build
 	#!/usr/bin/env bash
 	set -euo pipefail
+	# repo mode is persistent (never auto-quits), so we wrap gh-observer
+	# in GNU `timeout`, which sends SIGTERM after 60s; bubbletea treats
+	# SIGTERM as a clean QuitMsg and exits, letting asciinema finalize the
+	# cast. Requires GNU coreutils `timeout` (brew install coreutils on
+	# macOS).
 	repo="{{ repo }}"
 	owner="${repo%/*}"
 	name="${repo#*/}"
@@ -43,6 +44,222 @@ test2cast-repo repo="fini-net/gh-observer": build
 	asciinema record --headless --idle-time-limit 2 --overwrite \
 		--command "$TIMEOUT --signal=SIGTERM 60 ./gh-observer --repo ${repo}" "$out"
 
+# record the merged-PR demo cast (feeds 'just gif merged-pr2')
+[group('Testing')]
+cast-merged-pr pr="": build
+	#!/usr/bin/env bash
+	set -euo pipefail
+
+	# watches the newest merged PR by a human author (renovate/dependabot
+	# PRs are skipped - version bumps make dull demos); pass a PR number
+	# to override. Headless with the command echoed first so the GIF
+	# shows what was run, and no --idle-time-limit because the README
+	# promises this animation is real-time (not accelerated). Produces
+	# .cache/merged-pr.cast.
+
+	pr="{{ pr }}"
+	if [[ -z "$pr" ]]; then
+		list_rc=0
+		pr=$(gh pr list --state merged --limit 20 --json number,author \
+			--jq '[.[] | select(((.author.login // "") | test("renovate|dependabot"; "i")) | not)][0].number') || list_rc=$?
+		if [[ "$list_rc" -ne 0 ]]; then
+			echo "{{RED}}Error: 'gh pr list' failed - is gh authenticated?{{NORMAL}}" >&2
+			exit 1
+		fi
+		if [[ -z "$pr" || "$pr" == "null" ]]; then
+			echo "{{RED}}Error: no non-bot merged PR in the last 20{{NORMAL}}" >&2
+			echo "               pass one explicitly: just cast-merged-pr 123" >&2
+			exit 1
+		fi
+	fi
+
+	mkdir -p .cache
+	echo "{{BLUE}}Recording 'gh observer $pr' (headless, real-time)...{{NORMAL}}"
+	# echo the command first so the GIF opens with the line a user would
+	# type; no --return: gh observer's exit code mirrors the PR's checks
+	# (non-blocking red runs are common on this repo's merged PRs), not
+	# the recording's success
+	inner="echo \"\$ gh observer $pr\"; exec gh observer $pr"
+	asciinema record --headless --overwrite \
+		--command "bash -c '$inner'" .cache/merged-pr.cast
+	if [[ ! -s .cache/merged-pr.cast ]]; then
+		echo "{{RED}}Error: asciinema produced no recording{{NORMAL}}" >&2
+		exit 1
+	fi
+	echo "{{GREEN}}✓ recorded .cache/merged-pr.cast{{NORMAL}}"
+
+# record the remote-repo demo cast (feeds 'just gif uncloned-repo')
+[group('Testing')]
+cast-uncloned-repo url="": build
+	#!/usr/bin/env bash
+	set -euo pipefail
+
+	# watches a PR by full URL on a repo we do not have cloned locally;
+	# defaults to the nautilus URL the README documents (its failing
+	# 'Static checks' job is part of the demo). Headless with the command
+	# echoed first, and no --idle-time-limit: real-time per README.
+	# Produces .cache/uncloned-repo.cast.
+
+	url="{{ url }}"
+	if [[ -z "$url" ]]; then
+		url="https://github.com/MartinDelille/nautilus/pull/13"
+	fi
+	mkdir -p .cache
+	echo "{{BLUE}}Recording 'gh observer $url' (headless, real-time)...{{NORMAL}}"
+	inner="echo \"\$ gh observer $url\"; exec gh observer $url"
+	asciinema record --headless --overwrite \
+		--command "bash -c '$inner'" .cache/uncloned-repo.cast
+	if [[ ! -s .cache/uncloned-repo.cast ]]; then
+		echo "{{RED}}Error: asciinema produced no recording{{NORMAL}}" >&2
+		exit 1
+	fi
+	echo "{{GREEN}}✓ recorded .cache/uncloned-repo.cast{{NORMAL}}"
+
+# re-render one README animation GIF from an asciinema cast
+[group('Utility')]
+gif target="active-pr" speed="" cast="":
+	#!/usr/bin/env bash
+	set -euo pipefail
+
+	# targets: merged-pr2 (1x), uncloned-repo (1x), active-pr (2x),
+	# descriptions2 (10x). Speed defaults follow README.md; pass a
+	# number to override. Cast defaults to a fresh .cache recording when
+	# one exists, the committed docs cast otherwise (pass a path to
+	# override); .cache sources are archived to docs/ next to their GIF
+	# for provenance. usage: just gif <target> [speed] [cast]
+
+	target="{{ target }}"
+	speed="{{ speed }}"
+	cast="{{ cast }}"
+
+	# README-documented playback speed + output/provenance paths per target
+	case "$target" in
+		merged-pr2)
+			doc_speed=1
+			gif=docs/gh-observer-merged-pr2.gif
+			docs_cast=docs/gh-observer-merged-pr2.cast
+			;;
+		uncloned-repo)
+			doc_speed=1
+			gif=docs/gh-observer-uncloned-repo.gif
+			docs_cast=docs/gh-observer-uncloned-repo.cast
+			;;
+		active-pr)
+			doc_speed=2
+			gif=docs/gh-observer-active-pr.gif
+			docs_cast=docs/gh-observer-active-pr.cast
+			;;
+		descriptions2)
+			doc_speed=10
+			gif=docs/gh-observer-descriptions2.gif
+			docs_cast=docs/gh-observer-descriptions2.cast
+			;;
+		*)
+			echo "{{RED}}Error: unknown target '$target' - valid: merged-pr2, uncloned-repo, active-pr, descriptions2{{NORMAL}}" >&2
+			exit 1
+			;;
+	esac
+
+	if [[ -z "$speed" ]]; then
+		speed="$doc_speed"
+	fi
+
+	# resolve the source cast: explicit path > fresh .cache recording >
+	# committed docs cast (mtime wins; 'just pr' flows land in .cache/)
+	if [[ -z "$cast" ]]; then
+		case "$target" in
+			merged-pr2)
+				if [[ -f .cache/merged-pr.cast ]]; then
+					cast=.cache/merged-pr.cast
+				fi
+				;;
+			uncloned-repo)
+				if [[ -f .cache/uncloned-repo.cast ]]; then
+					cast=.cache/uncloned-repo.cast
+				fi
+				;;
+			active-pr)
+				for f in .cache/pr*.cast; do
+					if [[ -f "$f" ]]; then
+						if [[ -z "$cast" || "$f" -nt "$cast" ]]; then
+							cast="$f"
+						fi
+					fi
+				done
+				if [[ -z "$cast" ]]; then
+					echo "{{RED}}Error: no .cache/pr*.cast recordings - create one with 'just pr' or 'just test2cast <pr>'{{NORMAL}}" >&2
+					exit 1
+				fi
+				;;
+			descriptions2)
+				# newest recording that actually shows super-linter, whose
+				# description-field output is the point of this animation
+				for f in .cache/pr*.cast; do
+					if [[ -f "$f" ]]; then
+						if grep -qi "super-linter" "$f"; then
+							if [[ -z "$cast" || "$f" -nt "$cast" ]]; then
+								cast="$f"
+							fi
+						fi
+					fi
+				done
+				if [[ -z "$cast" ]]; then
+					echo "{{YELLOW}}no .cache recording shows super-linter - using the committed cast{{NORMAL}}" >&2
+				fi
+				;;
+		esac
+	fi
+
+	# fall back to the committed provenance cast when nothing fresh exists
+	if [[ -z "$cast" ]]; then
+		cast="$docs_cast"
+		if [[ ! -f "$cast" ]]; then
+			echo "{{RED}}Error: $cast not found{{NORMAL}}" >&2
+			exit 1
+		fi
+	fi
+
+	# archive .cache sources to docs/ so each GIF keeps its provenance
+	# cast; headless recordings carry no embedded terminal theme (no real
+	# terminal answers the OSC color queries), so borrow the committed
+	# cast's theme to keep the re-rendered GIF looking established
+	if [[ "$cast" == .cache/* ]]; then
+		if [[ -f "$docs_cast" ]] \
+			&& ! head -n 1 "$cast" | jq -e '.term.theme != null' >/dev/null 2>&1 \
+			&& head -n 1 "$docs_cast" | jq -e '.term.theme != null' >/dev/null 2>&1; then
+			old_theme=$(head -n 1 "$docs_cast" | jq -c '.term.theme')
+			head -n 1 "$cast" | jq -c --argjson theme "$old_theme" '.term.theme = $theme' > "$docs_cast"
+			tail -n +2 "$cast" >> "$docs_cast"
+			echo "{{BLUE}}archived $cast -> $docs_cast (borrowed theme){{NORMAL}}"
+		else
+			cp "$cast" "$docs_cast"
+			echo "{{BLUE}}archived $cast -> $docs_cast{{NORMAL}}"
+		fi
+		cast="$docs_cast"
+	fi
+
+	if ! command -v agg >/dev/null 2>&1; then
+		echo "{{RED}}Error: agg not found on PATH{{NORMAL}}" >&2
+		echo "               install with: brew install agg" >&2
+		exit 1
+	fi
+	agg --speed "$speed" "$cast" "$gif"
+	echo "{{GREEN}}✓ $gif  <-  $cast  @ ${speed}x{{NORMAL}}"
+
+# re-record the automatable scenarios, then re-render all four README GIFs
+[group('Utility')]
+gifs: cast-merged-pr cast-uncloned-repo
+	#!/usr/bin/env bash
+	set -euo pipefail
+	# the recipe dependencies re-record fresh demo casts first (needs
+	# network + gh auth); speeds follow README.md, and the template's
+	# docs/dev-process.gif is never touched.
+	just gif merged-pr2
+	just gif uncloned-repo
+	just gif active-pr
+	just gif descriptions2
+	echo "{{GREEN}}All four README GIFs re-rendered{{NORMAL}}"
+
 # run unit tests
 [group('Testing')]
 test:
@@ -54,13 +271,14 @@ cover:
 	go test ./... -covermode=atomic -coverprofile=coverage.out
 	go tool cover -func=coverage.out
 
-# run Go native fuzz targets for short bursts (opt-in; CI runs the seed
-# corpora as ordinary unit tests via 'just test', so this is for deeper
-# local exploration). Each target runs for the given -fuzztime.
+# run Go native fuzz targets for short bursts (opt-in)
 [group('Testing')]
 fuzz time="30s":
     #!/usr/bin/env bash
     set -euo pipefail
+    # CI runs the seed corpora as ordinary unit tests via 'just test',
+    # so this opt-in recipe is for deeper local exploration. Each target
+    # runs for the given -fuzztime.
     for target in ParsePRURL ParseActionsRunURL ParsePRViewWithRepo \
                   ParseRepoArg ParseRunIDFromURL BigIntUnmarshalJSON ParseTimestamp; do
         echo "{{BLUE}}Fuzzing Fuzz${target} for {{ time }}...{{NORMAL}}"
@@ -80,14 +298,16 @@ build:
 	gh ext remove gh-observer
 	gh ext install .
 
-# [positional-arguments] keeps this recipe self-contained in derived
-# repos, whose root justfile lacks `set positional-arguments` (#367)
 # check the latest release: workflow runs, signature audit, cosign verify
 [group('Process')]
 [positional-arguments]
 release_status target="":
 	#!/usr/bin/env bash
 	set -euo pipefail
+
+	# the [positional-arguments] attribute keeps this recipe
+	# self-contained in derived repos, whose root justfile lacks
+	# `set positional-arguments` (#367)
 
 	# Check if standard release workflow is enabled
 	if [[ -e ".just/repo-toml.sh" ]]; then
