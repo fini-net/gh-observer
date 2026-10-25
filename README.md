@@ -108,8 +108,9 @@ have cloned locally.  Note: it requires the full URL.
 
 ![animation of watching checks after creating a PR](docs/gh-observer-active-pr.gif)
 
-This was sped up 2x.  In this example, the Claude check fails, illustrating how
-error log output is integrated alongside the list of jobs.
+This was sped up 2x.  In this example, the Super-Linter check fails,
+illustrating how error log output is integrated alongside the list of jobs.
+The same run appears at 10x speed in the descriptions example below.
 
 ### PR that was just created with GHAs that use descriptions
 
