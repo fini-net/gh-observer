@@ -72,12 +72,33 @@ func (s *scrollState) sync(header, body, footer string) {
 		return
 	}
 	// bubbletea clips long lines instead of wrapping them, so each line is one row.
-	headerHeight := lipgloss.Height(strings.TrimSuffix(header, "\n"))
-	footerHeight := lipgloss.Height(strings.TrimSuffix(footer, "\n"))
-	bodyHeight := max(s.height-headerHeight-footerHeight, 1)
+	// lipgloss.Height("") is 1, so empty sections (e.g. a startup-phase footer
+	// or a pre-PRInfoMsg header) must not consume a row.
+	bodyHeight := max(s.height-sectionHeight(header)-sectionHeight(footer), 1)
 	s.viewport.SetWidth(s.width)
 	s.viewport.SetHeight(bodyHeight)
 	s.viewport.SetContent(strings.TrimSuffix(body, "\n"))
+}
+
+// sectionHeight returns the rendered row count of a pinned section, with
+// empty sections counting as zero rows.
+func sectionHeight(s string) int {
+	s = strings.TrimSuffix(s, "\n")
+	if s == "" {
+		return 0
+	}
+	return lipgloss.Height(s)
+}
+
+// composeView stitches the pinned header, scrollable body viewport, and
+// pinned footer into a frame for a sized terminal. footer must be
+// newline-trimmed; an empty footer (e.g. the startup phase) drops the
+// separator newline too.
+func (s scrollState) composeView(header, footer string) string {
+	if footer == "" {
+		return header + s.viewport.View()
+	}
+	return header + s.viewport.View() + "\n" + footer
 }
 
 // scrollable reports whether the body overflows the viewport.

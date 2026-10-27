@@ -87,10 +87,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
+		return m, m.handleKey(msg)
+
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.syncViewport()
+		return m, nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
+		m.syncViewport()
 		return m, cmd
 
 	case TickMsg:
@@ -131,7 +138,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// response doesn't suppress the fetch that would clear that state.
 		if m.fetchReceived && m.rateLimitRemaining < rateBackoffThreshold {
 			debug.Log("rate limit backoff", "remaining", m.rateLimitRemaining, "threshold", rateBackoffThreshold)
-			// Back off if rate limited
+			// Back off if rate limited. Sync first: the Copilot timeout
+			// transition above can have changed the body.
+			m.syncViewport()
 			return m, tick(m.refreshInterval * 3)
 		}
 
@@ -153,6 +162,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, fetchCopilotReview(m.ctx, m.token, m.host, m.owner, m.repo, m.prNumber, m.headSHA))
 		}
 
+		m.syncViewport()
 		return m, tea.Batch(cmds...)
 
 	case PRInfoMsg:
@@ -227,13 +237,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		m.syncViewport()
 		return m, tea.Batch(cmds...)
 
 	case ChecksUpdateMsg:
-		return m.handleChecksUpdate(msg)
+		// The handler returns &m, so syncing m afterwards updates the
+		// returned model (see syncViewport in repoupdate.go for the
+		// repo-mode original of this pattern).
+		model, cmd := m.handleChecksUpdate(msg)
+		m.syncViewport()
+		return model, cmd
 
 	case CopilotReviewMsg:
-		return m.handleCopilotReview(msg)
+		model, cmd := m.handleCopilotReview(msg)
+		m.syncViewport()
+		return model, cmd
 
 	case CopilotProbeMsg:
 		// One-shot host capability result (issue #442). An incapable host
@@ -266,10 +284,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.checksComplete = true
 				if !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 {
 					m.quitting = true
+					m.syncViewport()
 					return m, tea.Quit
 				}
 			}
 		}
+		m.syncViewport()
 		return m, nil
 
 	case WorkflowsDiscoveredMsg:
@@ -319,8 +339,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// If checks already finished while we were fetching, and no pending fetches, quit now
 			if m.checksComplete && len(m.pendingWorkflowFetch) == 0 {
 				m.quitting = true
+				m.syncViewport()
 				return m, tea.Quit
 			}
+			m.syncViewport()
 			return m, tea.Batch(workflowCmds...)
 		}
 
@@ -329,6 +351,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
+		m.syncViewport()
 		return m, nil
 
 	case JobAveragesPartialMsg:
@@ -367,9 +390,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.checksComplete {
 				m.quitting = true
+				m.syncViewport()
 				return m, tea.Quit
 			}
 		}
+		m.syncViewport()
 		return m, nil
 
 	case ErrorMsg:
@@ -378,6 +403,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// syncViewport sizes the viewport to the space between the pinned header and
+// footer and refreshes its content (issue #554). A no-op until the terminal
+// size is known.
+func (m *Model) syncViewport() {
+	m.sync(m.renderHeader(), m.renderBody(), m.renderFooter())
 }
 
 // checkKey returns a unique key for a check run, used to detect new jobs.
