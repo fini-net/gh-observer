@@ -38,8 +38,29 @@ func (m RepoModel) Init() tea.Cmd {
 	)
 }
 
-// Update dispatches messages to the appropriate handlers.
+// Update handles a message and then syncs the viewport on the model it
+// returns, so the body the viewport bakes always reflects the post-message
+// state. Centralizing the sync here means no message path can forget it.
+// The value/pointer split in the type switch matters: handlers with pointer
+// receivers return *RepoModel while inline paths return RepoModel by
+// value, and both the sync and the (possibly mutated) model must be the
+// one handed back to the caller. syncViewport is a no-op until the first
+// tea.WindowSizeMsg arrives.
 func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	switch v := model.(type) {
+	case RepoModel:
+		v.syncViewport()
+		return v, cmd
+	case *RepoModel:
+		v.syncViewport()
+		return v, cmd
+	}
+	return model, cmd
+}
+
+// update dispatches a message to the appropriate repo-mode handler.
+func (m RepoModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -51,13 +72,11 @@ func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.syncViewport()
 		return m, nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		m.syncViewport()
 		return m, cmd
 
 	case RepoTickMsg:
@@ -77,15 +96,10 @@ func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case RepoChecksUpdateMsg:
-		// The handlers return &m, so syncing m afterwards updates the returned model.
-		model, cmd := m.handleRepoChecksUpdate(msg)
-		m.syncViewport()
-		return model, cmd
+		return m.handleRepoChecksUpdate(msg)
 
 	case RepoRunsUpdateMsg:
-		model, cmd := m.handleRepoRunsUpdate(msg)
-		m.syncViewport()
-		return model, cmd
+		return m.handleRepoRunsUpdate(msg)
 	}
 
 	return m, nil

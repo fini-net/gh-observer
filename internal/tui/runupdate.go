@@ -58,8 +58,29 @@ func (m RunModel) Init() tea.Cmd {
 	)
 }
 
-// Update handles messages for run-watching mode.
+// Update handles a message and then syncs the viewport on the model it
+// returns, so the body the viewport bakes always reflects the post-message
+// state (issue #554). Centralizing the sync here means no message path can
+// forget it. The value/pointer split in the type switch matters: handlers
+// with pointer receivers return *RunModel while inline paths return
+// RunModel by value, and both the sync and the (possibly mutated) model
+// must be the one handed back to the caller. syncViewport is a no-op until
+// the first tea.WindowSizeMsg arrives.
 func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	switch v := model.(type) {
+	case RunModel:
+		v.syncViewport()
+		return v, cmd
+	case *RunModel:
+		v.syncViewport()
+		return v, cmd
+	}
+	return model, cmd
+}
+
+// update dispatches a message to the appropriate run-mode handler.
+func (m RunModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -71,13 +92,11 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.syncViewport()
 		return m, nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		m.syncViewport()
 		return m, cmd
 
 	case RunTickMsg:
@@ -108,26 +127,16 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rateLimitRemaining = msg.RateLimitRemaining
 			m.fetchReceived = true
 		}
-		m.syncViewport()
 		return m, fetchRunJobs(m.ctx, m.client, m.owner, m.repo, m.runID)
 
 	case RunJobsUpdateMsg:
-		// The handler returns &m, so syncing m afterwards updates the
-		// returned model (see syncViewport in repoupdate.go for the
-		// repo-mode original of this pattern).
-		model, cmd := m.handleRunJobsUpdate(msg)
-		m.syncViewport()
-		return model, cmd
+		return m.handleRunJobsUpdate(msg)
 
 	case RunWorkflowsDiscoveredMsg:
-		model, cmd := m.handleRunWorkflowsDiscovered(msg)
-		m.syncViewport()
-		return model, cmd
+		return m.handleRunWorkflowsDiscovered(msg)
 
 	case RunJobAveragesPartialMsg:
-		model, cmd := m.handleRunJobAveragesPartial(msg)
-		m.syncViewport()
-		return model, cmd
+		return m.handleRunJobAveragesPartial(msg)
 
 	case RunErrorMsg:
 		m.err = msg.Err

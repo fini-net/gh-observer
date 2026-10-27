@@ -78,8 +78,31 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// Update handles messages
+// Update handles a message and then syncs the viewport on the model it
+// returns, so the body the viewport bakes always reflects the post-message
+// state (issue #554). Centralizing the sync here means no message path can
+// forget it — the alternative is a sync before every mutating return, and
+// one missed path leaves a stale viewport until the next spinner tick. The
+// value/pointer split in the type switch matters: handlers with pointer
+// receivers return *Model while inline paths return Model by value, and
+// both the sync and the (possibly mutated) model must be the one handed
+// back to the caller. syncViewport is a no-op until the first
+// tea.WindowSizeMsg arrives.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	switch v := model.(type) {
+	case Model:
+		v.syncViewport()
+		return v, cmd
+	case *Model:
+		v.syncViewport()
+		return v, cmd
+	}
+	return model, cmd
+}
+
+// update dispatches a message to the appropriate PR-mode handler.
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -91,13 +114,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.syncViewport()
 		return m, nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		m.syncViewport()
 		return m, cmd
 
 	case TickMsg:
@@ -138,9 +159,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// response doesn't suppress the fetch that would clear that state.
 		if m.fetchReceived && m.rateLimitRemaining < rateBackoffThreshold {
 			debug.Log("rate limit backoff", "remaining", m.rateLimitRemaining, "threshold", rateBackoffThreshold)
-			// Back off if rate limited. Sync first: the Copilot timeout
-			// transition above can have changed the body.
-			m.syncViewport()
+			// Back off if rate limited
 			return m, tick(m.refreshInterval * 3)
 		}
 
@@ -162,7 +181,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, fetchCopilotReview(m.ctx, m.token, m.host, m.owner, m.repo, m.prNumber, m.headSHA))
 		}
 
-		m.syncViewport()
 		return m, tea.Batch(cmds...)
 
 	case PRInfoMsg:
@@ -237,21 +255,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		m.syncViewport()
 		return m, tea.Batch(cmds...)
 
 	case ChecksUpdateMsg:
-		// The handler returns &m, so syncing m afterwards updates the
-		// returned model (see syncViewport in repoupdate.go for the
-		// repo-mode original of this pattern).
-		model, cmd := m.handleChecksUpdate(msg)
-		m.syncViewport()
-		return model, cmd
+		return m.handleChecksUpdate(msg)
 
 	case CopilotReviewMsg:
-		model, cmd := m.handleCopilotReview(msg)
-		m.syncViewport()
-		return model, cmd
+		return m.handleCopilotReview(msg)
 
 	case CopilotProbeMsg:
 		// One-shot host capability result (issue #442). An incapable host
@@ -284,12 +294,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.checksComplete = true
 				if !m.avgFetchPending && len(m.pendingWorkflowFetch) == 0 {
 					m.quitting = true
-					m.syncViewport()
 					return m, tea.Quit
 				}
 			}
 		}
-		m.syncViewport()
 		return m, nil
 
 	case WorkflowsDiscoveredMsg:
@@ -339,10 +347,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// If checks already finished while we were fetching, and no pending fetches, quit now
 			if m.checksComplete && len(m.pendingWorkflowFetch) == 0 {
 				m.quitting = true
-				m.syncViewport()
 				return m, tea.Quit
 			}
-			m.syncViewport()
 			return m, tea.Batch(workflowCmds...)
 		}
 
@@ -351,7 +357,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
-		m.syncViewport()
 		return m, nil
 
 	case JobAveragesPartialMsg:
@@ -390,11 +395,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.checksComplete {
 				m.quitting = true
-				m.syncViewport()
 				return m, tea.Quit
 			}
 		}
-		m.syncViewport()
 		return m, nil
 
 	case ErrorMsg:
