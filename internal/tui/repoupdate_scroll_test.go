@@ -133,7 +133,7 @@ func TestScrollHint(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := RepoModel{width: tt.width}
+			m := RepoModel{scrollState: scrollState{width: tt.width}}
 			if got := m.scrollHint(); got != tt.want {
 				t.Errorf("scrollHint() = %q, want %q", got, tt.want)
 			}

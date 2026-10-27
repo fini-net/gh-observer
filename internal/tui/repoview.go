@@ -128,34 +128,6 @@ func (m RepoModel) renderFooter() string {
 	return b.String()
 }
 
-// scrollable reports whether the body overflows the viewport.
-func (m RepoModel) scrollable() bool {
-	return m.height > 0 && m.viewport.TotalLineCount() > m.viewport.Height()
-}
-
-// scrollHint returns the key hints and ruler, dropping hints from the end
-// until the line fits the terminal so the ruler is never cut off.
-func (m RepoModel) scrollHint() string {
-	ruler := fmt.Sprintf("  [%s]", m.scrollPosition())
-	hints := []string{"j/k scroll", "^f/^b page", "^d/^u half", "gg/G top/bottom", "q quit"}
-	for len(hints) > 0 && lipgloss.Width(strings.Join(hints, " • ")+ruler) > m.width {
-		hints = hints[:len(hints)-1]
-	}
-	return strings.Join(hints, " • ") + ruler
-}
-
-// scrollPosition returns a vim-style ruler: Top, Bot, or a percentage.
-func (m RepoModel) scrollPosition() string {
-	switch {
-	case m.viewport.AtTop():
-		return "Top"
-	case m.viewport.AtBottom():
-		return "Bot"
-	default:
-		return fmt.Sprintf("%d%%", int(m.viewport.ScrollPercent()*100))
-	}
-}
-
 // truncateFetchError shortens an error message to fit within maxWidth terminal
 // display cells, appending an ellipsis if truncation occurs. GitHub 504 errors
 // embed a large HTML body that would otherwise span many terminal lines.
