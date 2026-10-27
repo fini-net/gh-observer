@@ -272,6 +272,24 @@ func TestPRViewScrollingStartupPhase(t *testing.T) {
 	}
 }
 
+// TestPRUpdateScrollPreservedAcrossRefresh pins the watcher UX: a
+// same-sized ChecksUpdateMsg — the routine poll refresh — must not yank the
+// scroll position back to the top. SetContent only clamps an offset that
+// exceeds the content, so identical-height content keeps it.
+func TestPRUpdateScrollPreservedAcrossRefresh(t *testing.T) {
+	m := pressPRKeys(t, makePRScrollModel(t, 20), keyJ, keyJ, keyJ) // offset 3
+	refreshed := make([]ghclient.CheckRunInfo, len(m.checkRuns))
+	copy(refreshed, m.checkRuns)
+	newModel, _ := m.Update(ChecksUpdateMsg{CheckRuns: refreshed, RateLimitRemaining: 5000})
+	pm := prModelFrom(t, newModel)
+	if got := pm.viewport.YOffset(); got != 3 {
+		t.Errorf("YOffset = %d after same-sized refresh, want 3", got)
+	}
+}
+
+// TestPRFullViewUnclipped also pins that the quit-time reprint carries no
+// scroll hints: renderFooter gates the hint on !quitting, so the summary
+// lands in scrollback with a plain tail, not a stale "j/k scroll" ruler.
 func TestPRFullViewUnclipped(t *testing.T) {
 	// Auto-quit while scrolled to the bottom: the scrollback reprint
 	// (printFinalFrame) must render the full body, not the scrolled window.
@@ -287,5 +305,8 @@ func TestPRFullViewUnclipped(t *testing.T) {
 		if !strings.Contains(full, want) {
 			t.Errorf("FullView missing %q, got:\n%s", want, full)
 		}
+	}
+	if strings.Contains(full, "j/k scroll") {
+		t.Errorf("FullView should not print scroll hints at quit time, got:\n%s", full)
 	}
 }

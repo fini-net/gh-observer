@@ -67,6 +67,13 @@ func (s *scrollState) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 // sync sizes the viewport to the space between the pinned header and footer
 // and refreshes its content. A no-op until the terminal size is known.
+//
+// Callers must keep their footer's scrollable and plain hint variants at
+// the same row count: the footer is measured before the refreshed content
+// makes scrollable() knowable, so a footer whose height depends on the
+// scroll state would oscillate the viewport size at the overflow boundary.
+// PR and run modes do this by giving the scroll hint the plain hint's
+// leading blank line; repo mode's variants are inherently equal.
 func (s *scrollState) sync(header, body, footer string) {
 	if s.height == 0 {
 		return
