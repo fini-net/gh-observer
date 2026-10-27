@@ -121,7 +121,7 @@ The `--repo` flag uses `NoOptDefVal = "_"` so `--repo` with no value (bare flag)
 
 **Design Decision**: The exit code is captured and passed to `os.Exit()` explicitly. This allows the TUI to clean up properly before exiting.
 
-### URL / Argument Support (`main.go:228-264` via `parseArgs()`)
+### URL / Argument Support (`main.go:229-264` via `parseArgs()`)
 
 `parseArgs()` returns a `runArgs` value whose `mode` and `host` fields select the execution path. It tries, in order:
 
@@ -385,7 +385,7 @@ Every fetch path funnels its rate-limit observation through this normalization a
 
 Snapshot mode runs when stdout is not a terminal (e.g., scripts, CI, redirected output). There are two snapshot variants — one per input mode — selected by `runPRMode` / `runActionsMode`:
 
-### PR snapshot (`runSnapshot`, `main.go:377-474`)
+### PR snapshot (`runSnapshot`, `main.go:378-474`)
 
 #### Step 1: Fetch PR Metadata
 
@@ -489,7 +489,7 @@ if check.Status == "completed" {
 
 Plus exit code 1 when the Copilot review requested changes (above).
 
-### Actions run snapshot (`runRunSnapshot`, `main.go:476-550`)
+### Actions run snapshot (`runRunSnapshot`, `main.go:477-550`)
 
 Mirrors the PR snapshot but for a standalone workflow run:
 
@@ -656,7 +656,7 @@ if m, ok := finalModel.(tui.Model); ok {
 
 Creates a Bubbletea program and enters the event loop. After `p.Run()` returns, `printFinalFrame` re-renders the final state to stdout (see below), then `main()` asserts on the concrete model type (`tui.Model` or `tui.RunModel`) and calls `m.ExitCode()`. For repo mode, the assertion uses a small `exitCoder` interface so it works whether `Update` returned a value or pointer `RepoModel` (the per-message handlers use pointer receivers).
 
-### Alt-Screen Mode & the Final-Frame Reprint (`display.go:141-150`, `main.go:359-375`)
+### Alt-Screen Mode & the Final-Frame Reprint (`display.go:146-150`, `main.go:369-375`)
 
 The TUI runs in the terminal's alternate screen buffer so stale frames from a crashed run can't corrupt the visible screen (issue #451). Every `View()` return path must set `AltScreen` on the returned `tea.View`:
 
@@ -682,7 +682,7 @@ func printFinalFrame(finalModel tea.Model) {
 
 Scrolling models implement `FullView` so the reprint is the complete, unclipped body rather than `View()`'s scrolled window — the whole point of the reprint is the completed-run summary, and PR/run mode auto-quit wherever the user last scrolled (issue #554).
 
-A related width-calculation mitigation lives in `stripVariationSelectors` (`display.go:152-166`): PR titles and run titles are stripped of U+FE0E/U+FE0F variation selectors at ingestion, because those codepoints can make gh-observer's width calculation disagree with bubbletea's grapheme handling and produce off-by-one column errors during partial-line redraw.
+A related width-calculation mitigation lives in `stripVariationSelectors` (`display.go:159-166`): PR titles and run titles are stripped of U+FE0E/U+FE0F variation selectors at ingestion, because those codepoints can make gh-observer's width calculation disagree with bubbletea's grapheme handling and produce off-by-one column errors during partial-line redraw.
 
 ---
 
@@ -1025,7 +1025,7 @@ func SortCheckRuns(checks []ghclient.CheckRunInfo) {
 
 Run mode has no `canTrustCompletion` machinery (jobs come from a bounded, per-run API list — there's no "more jobs may appear" ambiguity) but does keep a `seenJobKeys` map so discovery is only retriggered when new job names appear, not on every poll. Completion uses `ghclient.AllJobsComplete` and `ghclient.DetermineRunExitCode`. Presumed averages are applied on each jobs update for consistency with PR mode.
 
-### Exit Code Determination (`internal/tui/update.go:855-867`)
+### Exit Code Determination (`internal/tui/update.go:857-867`)
 
 ```go
 func determineExitCode(checks []ghclient.CheckRunInfo, copilotState string, waitForCopilot bool) int {
@@ -1542,7 +1542,7 @@ func FormatCheckName(check ghclient.CheckRunInfo) string {
 The synthetic Copilot row reuses the checks-table geometry but is display-only — it never enters `m.checkRuns`, so `SortCheckRuns`, `allChecksComplete`, and `determineExitCode` are unaffected:
 
 - **`buildCopilotCheckRun`** synthesizes a `CheckRunInfo` with `Kind: "review"` and `WorkflowName: "Copilot"`, mapping review state onto a status shape: queued (inside the initial-delay window, duration column counts down "in 15s"), in_progress (elapsed runtime while polling), or completed (terminal states show `-`, since reviews expose no timestamps). It returns nil — no row — when the feature is off, the gate was never armed, the host probe found the host incapable, or no positive evidence has been seen yet (issue #442: repos that never use Copilot see a neutral "Checking for Copilot review…" status line instead of a phantom queued row). Stale and timed-out rows carry a `Summary` line with actionable guidance ("refresh or re-request", "giving up")
-- **`GetCopilotReviewIcon`** (`display.go:107-139`) gives each review state its own icon (✓ approved, ✗ changes_requested, 💬 commented, ⊘ dismissed, ⚠ stale, ⏱ timed_out, ⏸/◐ pending-by-status)
+- **`GetCopilotReviewIcon`** (`display.go:117-139`) gives each review state its own icon (✓ approved, ✗ changes_requested, 💬 commented, ⊘ dismissed, ⚠ stale, ⏱ timed_out, ⏸/◐ pending-by-status)
 - **`copilotDurationText`** is shared between the width calculation (`widenForCopilotRow`) and the row render so the two agree on the exact string — including the "in Xs" countdown that `FormatDuration` alone doesn't synthesize. Without the shared path, a wide countdown would overflow the pre-computed DurationWidth and misalign the row against the header
 - **`renderCopilotStatusLine`** renders a spinner + countdown/elapsed line below the row: "queued, polling in 15s…" during the delay window, "Checking for Copilot review…" pre-evidence, and "in progress… (giving up in 2m 30s)" once evidence exists — the give-up countdown communicates the real wait budget instead of a misleading elapsed time
 
@@ -1653,7 +1653,7 @@ main.go run()
     ├── ghclient.GetTokenForHost(host)   ← early fail-fast check
     │
     ├── runPRMode → Check terminal: term.IsTerminal()
-    │   └── FALSE: runSnapshot()                        [main.go:377]
+    │   └── FALSE: runSnapshot()                        [main.go:378]
     │
     └── runSnapshot()
         │
@@ -1825,7 +1825,7 @@ main.go run() with --repo
     │
     ├── ghclient.GetTokenForHost(host)  ← fail fast on hosts without credentials
     │
-    └── runRepoMode()                                   [main.go:322-357]
+    └── runRepoMode()                                   [main.go:324-357]
         │
         ├── tui.NewRepoModel(refresh=cfg.RepoRefreshInterval,
         │                  fadeSuccess, fadeFailure)
@@ -1950,7 +1950,7 @@ Repo mode is the exception: it's persistent and only quits on `q`/`ctrl+c`, so `
 
 ## 12. Repo Mode
 
-Repo mode (`--repo`, `main.go:322-357` via `runRepoMode()`) is a persistent dashboard for a whole repository: it shows **all active PRs' checks** alongside **standalone (non-PR) branch runs**, fading completed checks out so the view stays focused on what's in flight.
+Repo mode (`--repo`, `main.go:324-357` via `runRepoMode()`) is a persistent dashboard for a whole repository: it shows **all active PRs' checks** alongside **standalone (non-PR) branch runs**, fading completed checks out so the view stays focused on what's in flight.
 
 ### Why it's separate from PR/Run modes
 
@@ -1958,7 +1958,7 @@ Repo mode (`--repo`, `main.go:322-357` via `runRepoMode()`) is a persistent dash
 - **Two data sources**: a batched GraphQL query for all open PRs plus a REST query for standalone workflow runs — these run independently and their errors are tracked separately so a success from one source can't mask an ongoing error from the other
 - **Interactive only**: snapshot mode is rejected in `run()` (an error is printed and `1` returned), since the dashboard only makes sense live
 
-### Arg resolution (`main.go:211-226` via `resolveRepoArg()`)
+### Arg resolution (`main.go:217-226` via `resolveRepoArg()`)
 
 ```go
 func resolveRepoArg(val string) (string, string, string, error) {
