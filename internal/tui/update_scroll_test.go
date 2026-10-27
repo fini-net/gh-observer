@@ -194,11 +194,11 @@ func TestPRViewScrolling(t *testing.T) {
 func TestPRViewScrollsErrorAnnotations(t *testing.T) {
 	m := makePRScrollModel(t, 10)
 	m.checkRuns = append(m.checkRuns, ghclient.CheckRunInfo{
-		Status:      "completed",
-		Conclusion:  "failure",
+		Status:       "completed",
+		Conclusion:   "failure",
 		WorkflowName: "CI",
-		Name:        "flaky",
-		Summary:     "tests failed",
+		Name:         "flaky",
+		Summary:      "tests failed",
 		Annotations: []ghclient.Annotation{
 			{Path: "a_test.go", StartLine: 7, Message: "assert failed"},
 			{Path: "b_test.go", StartLine: 9, Message: "assert failed again"},

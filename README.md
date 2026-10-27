@@ -373,13 +373,20 @@ event annotation, elapsed time) followed by indented job rows. Transient
 fetch errors (e.g. 504 Gateway Timeout) do not replace the screen: the last
 good state stays visible with a red error line so polling can self-heal.
 
-The header stays pinned to the top of the screen and the footer to the
-bottom. When the PR and branch groups don't fit between them, they scroll:
-`j`/`k` (or arrows) by line, `ctrl+f`/`ctrl+b` (or `f`/`b`, `pgdown`/`pgup`,
-and `space` for down) by page, `ctrl+d`/`ctrl+u` (or `d`/`u`) by half page,
-and `gg`/`G` (or `home`/`end`) to the top or bottom. The footer shows a
-vim-style `Top`/`Bot`/percentage position, plus as many key hints as fit
-the terminal width.
+### Scroll through long output
+
+All three interactive modes pin the header to the top of the screen and the
+footer to the bottom. When the content between them doesn't fit — a PR with
+many check runs (failure summaries and error annotations add several lines
+per failed check), a run with a large job matrix, or a repo dashboard with
+many PR and branch groups — it scrolls: `j`/`k` (or arrows) by line,
+`ctrl+f`/`ctrl+b` (or `f`/`b`, `pgdown`/`pgup`, and `space` for down) by
+page, `ctrl+d`/`ctrl+u` (or `d`/`u`) by half page, and `gg`/`G` (or
+`home`/`end`) to the top or bottom. While the content overflows, the footer
+swaps its plain "Press q to quit" for a vim-style `Top`/`Bot`/percentage
+position plus as many key hints as fit the terminal width. `q`/`ctrl+c`
+still quit, and when PR or run mode finishes on its own, the completed
+summary lands in scrollback in full rather than just the visible window.
 
 ### Skip historical averages for a faster snapshot
 
