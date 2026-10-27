@@ -67,10 +67,17 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
+		return m, m.handleKey(msg)
+
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.syncViewport()
+		return m, nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
+		m.syncViewport()
 		return m, cmd
 
 	case RunTickMsg:
@@ -101,16 +108,26 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rateLimitRemaining = msg.RateLimitRemaining
 			m.fetchReceived = true
 		}
+		m.syncViewport()
 		return m, fetchRunJobs(m.ctx, m.client, m.owner, m.repo, m.runID)
 
 	case RunJobsUpdateMsg:
-		return m.handleRunJobsUpdate(msg)
+		// The handler returns &m, so syncing m afterwards updates the
+		// returned model (see syncViewport in repoupdate.go for the
+		// repo-mode original of this pattern).
+		model, cmd := m.handleRunJobsUpdate(msg)
+		m.syncViewport()
+		return model, cmd
 
 	case RunWorkflowsDiscoveredMsg:
-		return m.handleRunWorkflowsDiscovered(msg)
+		model, cmd := m.handleRunWorkflowsDiscovered(msg)
+		m.syncViewport()
+		return model, cmd
 
 	case RunJobAveragesPartialMsg:
-		return m.handleRunJobAveragesPartial(msg)
+		model, cmd := m.handleRunJobAveragesPartial(msg)
+		m.syncViewport()
+		return model, cmd
 
 	case RunErrorMsg:
 		m.err = msg.Err
@@ -118,6 +135,13 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// syncViewport sizes the viewport to the space between the pinned header and
+// footer and refreshes its content (issue #554). A no-op until the terminal
+// size is known.
+func (m *RunModel) syncViewport() {
+	m.sync(m.renderHeader(), m.renderBody(), m.renderFooter())
 }
 
 // handleRunJobsUpdate processes job status updates.

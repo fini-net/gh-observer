@@ -41,6 +41,11 @@ type RunModel struct {
 	refreshInterval time.Duration
 	styles          Styles
 
+	// Scrolling for job lists taller than the terminal (issue #554).
+	// Embedded so the shared scrollState methods (scrollable, scrollHint,
+	// ...) promote onto RunModel like they were its own.
+	scrollState
+
 	// Exit tracking
 	exitCode     int
 	quitting     bool
@@ -97,6 +102,7 @@ func NewRunModel(ctx context.Context, token, host, owner, repo string, runID int
 		lastUpdate:              time.Now(),
 		refreshInterval:         refreshInterval,
 		styles:                  styles,
+		scrollState:             newScrollState(),
 		enableLinks:             enableLinks,
 		noAvg:                   noAvg,
 		jobAverages:             make(map[string]time.Duration),
