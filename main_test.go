@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
@@ -545,4 +546,48 @@ func TestRunSnapshotCopilotNotAvailableOnHost(t *testing.T) {
 	if !strings.Contains(out, "Copilot: not available on this host") {
 		t.Errorf("output missing capability-probe line, got:\n%s", out)
 	}
+}
+
+// stubFrameModel is a minimal tea.Model with no FullView, for exercising
+// printFinalFrame's fallback (issue #554).
+type stubFrameModel struct {
+	view string
+}
+
+func (m stubFrameModel) Init() tea.Cmd                       { return nil }
+func (m stubFrameModel) Update(tea.Msg) (tea.Model, tea.Cmd) { return m, nil }
+func (m stubFrameModel) View() tea.View                      { return tea.NewView(m.view) }
+
+// stubFullFrameModel additionally implements FullView, like the scrolling
+// PR and run modes.
+type stubFullFrameModel struct {
+	stubFrameModel
+	fullView string
+}
+
+func (m stubFullFrameModel) FullView() string { return m.fullView }
+
+// TestPrintFinalFrame locks in the quit-time scrollback contract: models
+// implementing FullView (the scrolling PR and run modes) reprint their
+// complete, unclipped body, while everything else (repo mode, error models)
+// keeps printing View().Content.
+func TestPrintFinalFrame(t *testing.T) {
+	t.Run("full view preferred when implemented", func(t *testing.T) {
+		m := stubFullFrameModel{
+			stubFrameModel: stubFrameModel{view: "scrolled window\n"},
+			fullView:       "entire body\n",
+		}
+		out := captureStdout(t, func() { printFinalFrame(m) })
+		if out != "entire body\n" {
+			t.Errorf("printFinalFrame = %q, want the FullView content", out)
+		}
+	})
+
+	t.Run("view content fallback", func(t *testing.T) {
+		m := stubFrameModel{view: "plain frame\n"}
+		out := captureStdout(t, func() { printFinalFrame(m) })
+		if out != "plain frame\n" {
+			t.Errorf("printFinalFrame = %q, want the View content", out)
+		}
+	})
 }

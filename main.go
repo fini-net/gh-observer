@@ -361,7 +361,16 @@ func runRepoMode(ctx context.Context, cfg *config.Config, styles tui.Styles, hos
 // corruption) restores the pre-launch screen content on exit, so without
 // this the completed run's summary would vanish instead of landing in
 // scrollback.
+//
+// Models that scroll (issue #554) implement FullView so the reprint is the
+// complete, unclipped body rather than View()'s scrolled window — the
+// whole point of the reprint is the completed-run summary, and PR/run mode
+// auto-quit wherever the user last scrolled.
 func printFinalFrame(finalModel tea.Model) {
+	if fv, ok := finalModel.(interface{ FullView() string }); ok {
+		fmt.Print(fv.FullView())
+		return
+	}
 	fmt.Print(finalModel.View().Content)
 }
 
