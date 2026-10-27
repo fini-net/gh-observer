@@ -20,6 +20,7 @@ func makeModel() *Model {
 		owner:                   "test-owner",
 		repo:                    "test-repo",
 		rateLimitRemaining:      5000,
+		scrollState:             newScrollState(),
 		jobAverages:             make(map[string]time.Duration),
 		workflowAverages:        make(map[int64]map[string]time.Duration),
 		advSecMatchWorkflow:     make(map[string]int64),

@@ -33,10 +33,6 @@ func prModelFrom(t *testing.T, m tea.Model) *Model {
 func makePRScrollModel(t *testing.T, checkCount int) *Model {
 	t.Helper()
 	m := makeModel()
-	// The zero-value viewport self-initializes with the DEFAULT keymap
-	// (no ctrl+f/ctrl+b) on first Update, so the fixture must wire the
-	// shared scroll keymap exactly like NewModel does.
-	m.scrollState = newScrollState()
 	m.styles = stylesForTest()
 	m.prTitle = "Scroll Test PR"
 	m.prNumber = 1
@@ -226,6 +222,54 @@ func TestPRViewScrollsErrorAnnotations(t *testing.T) {
 			t.Errorf("bottom view missing summary line, got:\n%s", out)
 		}
 	})
+}
+
+// TestPRUpdateScrollKeysBeforeWindowSize pins the no-op guard in
+// scrollState.handleKey: scroll keys typed before the first
+// tea.WindowSizeMsg must not move an unsized viewport (height 0) and must
+// not panic.
+func TestPRUpdateScrollKeysBeforeWindowSize(t *testing.T) {
+	m := makeModel()
+	m.styles = stylesForTest()
+	keys := []tea.KeyPressMsg{
+		keyJ,
+		keyShiftG,
+		keyG, keyG, // full gg sequence: pendingG toggles, no scroll
+		tea.KeyPressMsg(tea.Key{Text: " ", Code: tea.KeySpace}),
+	}
+	for _, key := range keys {
+		newModel, cmd := m.Update(key)
+		pm := prModelFrom(t, newModel)
+		if got := pm.viewport.YOffset(); got != 0 {
+			t.Errorf("YOffset = %d after %q before WindowSizeMsg, want 0", got, key.String())
+		}
+		if cmd != nil {
+			t.Errorf("Update returned a command after %q before WindowSizeMsg, want nil", key.String())
+		}
+		m = pm
+	}
+}
+
+// TestPRViewScrollingStartupPhase covers the sized-terminal startup path:
+// with no PR info (empty header) and no checks (empty footer), the
+// viewport fills the whole terminal through composeView's empty-footer
+// branch.
+func TestPRViewScrollingStartupPhase(t *testing.T) {
+	m := makeModel()
+	m.styles = stylesForTest()
+	m.startTime = time.Now()
+	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+	pm := prModelFrom(t, newModel)
+	out := stripANSI(pm.View().Content)
+	if lines := strings.Count(out, "\n") + 1; lines != 16 {
+		t.Errorf("view has %d lines, want 16", lines)
+	}
+	if !strings.Contains(out, "Startup Phase") {
+		t.Errorf("view missing startup text, got:\n%s", out)
+	}
+	if strings.Contains(out, "Press q to quit") {
+		t.Errorf("startup-phase footer should be empty, got:\n%s", out)
+	}
 }
 
 func TestPRFullViewUnclipped(t *testing.T) {

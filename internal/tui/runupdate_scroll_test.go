@@ -148,6 +148,50 @@ func TestRunViewScrolling(t *testing.T) {
 	})
 }
 
+// TestRunUpdateScrollKeysBeforeWindowSize pins the no-op guard in
+// scrollState.handleKey: scroll keys typed before the first
+// tea.WindowSizeMsg must not move an unsized viewport (height 0) and must
+// not panic.
+func TestRunUpdateScrollKeysBeforeWindowSize(t *testing.T) {
+	m := makeRunModel()
+	keys := []tea.KeyPressMsg{
+		keyJ,
+		keyShiftG,
+		keyG, keyG,
+		tea.KeyPressMsg(tea.Key{Text: " ", Code: tea.KeySpace}),
+	}
+	for _, key := range keys {
+		newModel, cmd := m.Update(key)
+		rm := runModelFrom(t, newModel)
+		if got := rm.viewport.YOffset(); got != 0 {
+			t.Errorf("YOffset = %d after %q before WindowSizeMsg, want 0", got, key.String())
+		}
+		if cmd != nil {
+			t.Errorf("Update returned a command after %q before WindowSizeMsg, want nil", key.String())
+		}
+		m = rm
+	}
+}
+
+// TestRunViewScrollingStartupPhase covers the sized-terminal startup path:
+// with no run info (empty header) and no jobs (empty footer), the viewport
+// fills the whole terminal through composeView's empty-footer branch.
+func TestRunViewScrollingStartupPhase(t *testing.T) {
+	m := makeRunModel()
+	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+	rm := runModelFrom(t, newModel)
+	out := stripANSI(rm.View().Content)
+	if lines := strings.Count(out, "\n") + 1; lines != 16 {
+		t.Errorf("view has %d lines, want 16", lines)
+	}
+	if !strings.Contains(out, "Loading run info") {
+		t.Errorf("view missing startup text, got:\n%s", out)
+	}
+	if strings.Contains(out, "Press q to quit") {
+		t.Errorf("startup-phase footer should be empty, got:\n%s", out)
+	}
+}
+
 func TestRunFullViewUnclipped(t *testing.T) {
 	// Auto-quit while scrolled to the bottom: the scrollback reprint
 	// (printFinalFrame) must render the full body, not the scrolled window.
