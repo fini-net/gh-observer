@@ -53,7 +53,7 @@ gh-observer follows a clean architecture with distinct layers:
 
 1. **`main.go`** - Cobra CLI, config loading, mode selection. `--repo` is validated and dispatched to `runRepoMode()` before argument parsing; otherwise `parseArgs()` detects PR number, PR URL, or Actions run URL → sets `runMode` enum (`modePR`, `modeRun`, or `modeRepo`)
 2. **`internal/github/`** - GitHub API (REST + GraphQL). Covers checks, PRs, runs, repos, GraphQL queries, and history fetching
-3. **`internal/tui/`** - Bubbletea TUI (Elm Architecture). PR mode: `model.go`/`update.go`/`view.go`. Run mode: `runmodel.go`/`runupdate.go`/`runview.go`. Repo mode: `repomodel.go`/`repoupdate.go`/`repoview.go`. Shared: `display.go`, `styles.go`, `messages.go`, `constants.go`
+3. **`internal/tui/`** - Bubbletea TUI (Elm Architecture). PR mode: `model.go`/`update.go`/`view.go`. Run mode: `runmodel.go`/`runupdate.go`/`runview.go`. Repo mode: `repomodel.go`/`repoupdate.go`/`repoview.go`. Shared: `display.go`, `styles.go`, `messages.go`, `constants.go`, `scroll.go` (embedded `scrollState` — all three modes scroll output taller than the terminal between a pinned header and footer via a viewport, with the key handling and sizing centralized; each mode's `Update` is a thin wrapper that syncs the viewport on whatever model the inner `update` returns, and the auto-quitting PR/run modes implement `FullView()` so the quit-time scrollback reprint in `main.go` is unclipped)
 4. **`internal/config/`** - Viper config from `~/.config/gh-observer/config.yaml`; see `.config.example.yaml`
 5. **`internal/timing/`** - Queue latency, runtime, and duration calculations
 6. **`internal/debug/`** - `slog`-based debug logging to `os.TempDir()/gh-observer-debug/` (enabled via `--debug`/`-d`)
