@@ -121,6 +121,32 @@ func TestRepoViewScrolling(t *testing.T) {
 	})
 }
 
+// TestRepoUpdateScrollKeysBeforeWindowSize pins the no-op guard in
+// scrollState.handleKey: scroll keys typed before the first
+// tea.WindowSizeMsg must not move an unsized viewport (height 0) and must
+// not panic.
+func TestRepoUpdateScrollKeysBeforeWindowSize(t *testing.T) {
+	v := makeRepoModelForRender()
+	m := &v
+	keys := []tea.KeyPressMsg{
+		keyJ,
+		keyShiftG,
+		keyG, keyG,
+		tea.KeyPressMsg(tea.Key{Text: " ", Code: tea.KeySpace}),
+	}
+	for _, key := range keys {
+		newModel, cmd := m.Update(key)
+		rm := repoModelFrom(t, newModel)
+		if got := rm.viewport.YOffset(); got != 0 {
+			t.Errorf("YOffset = %d after %q before WindowSizeMsg, want 0", got, key.String())
+		}
+		if cmd != nil {
+			t.Errorf("Update returned a command after %q before WindowSizeMsg, want nil", key.String())
+		}
+		m = rm
+	}
+}
+
 func TestScrollHint(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -133,7 +159,7 @@ func TestScrollHint(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := RepoModel{width: tt.width}
+			m := RepoModel{scrollState: scrollState{width: tt.width}}
 			if got := m.scrollHint(); got != tt.want {
 				t.Errorf("scrollHint() = %q, want %q", got, tt.want)
 			}

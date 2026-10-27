@@ -40,6 +40,11 @@ type Model struct {
 	refreshInterval time.Duration
 	styles          Styles
 
+	// Scrolling for check tables taller than the terminal (issue #554).
+	// Embedded so the shared scrollState methods (scrollable, scrollHint,
+	// ...) promote onto Model like they were its own.
+	scrollState
+
 	// Exit tracking
 	exitCode int
 	quitting bool
@@ -150,6 +155,7 @@ func NewModel(ctx context.Context, token, host, owner, repo string, prNumber int
 		lastUpdate:              time.Now(),
 		refreshInterval:         refreshInterval,
 		styles:                  styles,
+		scrollState:             newScrollState(),
 		enableLinks:             enableLinks,
 		noAvg:                   noAvg,
 		jobAverages:             make(map[string]time.Duration),

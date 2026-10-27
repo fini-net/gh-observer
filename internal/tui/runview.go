@@ -13,55 +13,91 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// View renders the current state for run-watching mode.
+// View renders the current state for run-watching mode: a pinned run
+// header, the scrollable job table, and a pinned footer (rate-limit
+// indicator + key hint). Before the first tea.WindowSizeMsg arrives
+// (height == 0) all sections render unclipped in a single string; once the
+// terminal size is known, the body scrolls inside a viewport between the
+// pinned sections (issue #554).
 func (m RunModel) View() tea.View {
 	if m.err != nil {
 		return newAltScreenView(m.styles.Error.Render(fmt.Sprintf("Error: %v\n", m.err)))
 	}
+	if m.height == 0 {
+		return newAltScreenView(m.renderHeader() + m.renderBody() + m.renderFooter())
+	}
+	return newAltScreenView(m.composeView(m.renderHeader(), strings.TrimSuffix(m.renderFooter(), "\n")))
+}
+
+// FullView returns the complete, unclipped render. printFinalFrame uses it
+// at quit time (issue #554): run mode auto-quits when all jobs complete,
+// and View() only shows the scrolled window once content overflows the
+// viewport — the scrollback reprint must show the whole body so the
+// completed-run summary lands intact.
+func (m RunModel) FullView() string {
+	if m.err != nil {
+		return m.styles.Error.Render(fmt.Sprintf("Error: %v\n", m.err))
+	}
+	return m.renderHeader() + m.renderBody() + m.renderFooter()
+}
+
+// renderHeader renders the pinned run header: the repo/title line and the
+// updated/pushed line (with historical-averages status). Empty until run
+// info arrives.
+func (m RunModel) renderHeader() string {
+	if !m.runInfoLoaded {
+		return ""
+	}
 
 	var b strings.Builder
 
-	if m.runInfoLoaded {
-		header := m.styles.Header.Render(fmt.Sprintf("%s/%s: %s", m.owner, m.repo, m.runInfo.DisplayTitle))
-		utcTime := time.Now().UTC().Format("15:04:05 UTC")
-		timeSinceUpdate := time.Since(m.lastUpdate)
+	header := m.styles.Header.Render(fmt.Sprintf("%s/%s: %s", m.owner, m.repo, m.runInfo.DisplayTitle))
+	utcTime := time.Now().UTC().Format("15:04:05 UTC")
+	timeSinceUpdate := time.Since(m.lastUpdate)
 
-		var updatedLine string
-		if m.runInfo.HeadPushedTime != nil && !m.runInfo.HeadPushedTime.IsZero() {
-			timeSincePush := time.Since(m.runInfo.HeadPushedTime.Time)
-			updatedLine = fmt.Sprintf("Updated %s ago  •  Pushed %s ago",
-				timing.FormatDuration(timeSinceUpdate),
-				timing.FormatDuration(timeSincePush))
-		} else if m.runInfo.CreatedAt != nil && !m.runInfo.CreatedAt.IsZero() {
-			timeSinceCreate := time.Since(m.runInfo.CreatedAt.Time)
-			updatedLine = fmt.Sprintf("Updated %s ago  •  Created %s ago",
-				timing.FormatDuration(timeSinceUpdate),
-				timing.FormatDuration(timeSinceCreate))
-		} else {
-			updatedLine = fmt.Sprintf("Updated %s ago", timing.FormatDuration(timeSinceUpdate))
-		}
-
-		if !m.noAvg {
-			isFetching := m.avgFetchPending || len(m.pendingWorkflowFetch) > 0
-			if isFetching {
-				elapsed := time.Since(m.avgFetchStartTime)
-				updatedLine += m.styles.Running.Render(fmt.Sprintf("  •  Fetching historical averages... (%s)", timing.FormatDuration(elapsed)))
-			} else if m.avgFetchErr != nil {
-				updatedLine += m.styles.Queued.Render("  •  Historical averages unavailable")
-			} else if m.avgFetchLastDuration > 0 {
-				wfCount := len(m.fetchedWorkflowIDs)
-				updatedLine += m.styles.Info.Render(fmt.Sprintf("  •  Historical averages ready (%d workflows, %s)", wfCount, timing.FormatDuration(m.avgFetchLastDuration)))
-			}
-		}
-
-		fmt.Fprintf(&b, "%s %s\n", header, utcTime)
-		fmt.Fprintf(&b, "%s\n", updatedLine)
-		b.WriteString("\n")
+	var updatedLine string
+	if m.runInfo.HeadPushedTime != nil && !m.runInfo.HeadPushedTime.IsZero() {
+		timeSincePush := time.Since(m.runInfo.HeadPushedTime.Time)
+		updatedLine = fmt.Sprintf("Updated %s ago  •  Pushed %s ago",
+			timing.FormatDuration(timeSinceUpdate),
+			timing.FormatDuration(timeSincePush))
+	} else if m.runInfo.CreatedAt != nil && !m.runInfo.CreatedAt.IsZero() {
+		timeSinceCreate := time.Since(m.runInfo.CreatedAt.Time)
+		updatedLine = fmt.Sprintf("Updated %s ago  •  Created %s ago",
+			timing.FormatDuration(timeSinceUpdate),
+			timing.FormatDuration(timeSinceCreate))
+	} else {
+		updatedLine = fmt.Sprintf("Updated %s ago", timing.FormatDuration(timeSinceUpdate))
 	}
 
+	if !m.noAvg {
+		isFetching := m.avgFetchPending || len(m.pendingWorkflowFetch) > 0
+		if isFetching {
+			elapsed := time.Since(m.avgFetchStartTime)
+			updatedLine += m.styles.Running.Render(fmt.Sprintf("  •  Fetching historical averages... (%s)", timing.FormatDuration(elapsed)))
+		} else if m.avgFetchErr != nil {
+			updatedLine += m.styles.Queued.Render("  •  Historical averages unavailable")
+		} else if m.avgFetchLastDuration > 0 {
+			wfCount := len(m.fetchedWorkflowIDs)
+			updatedLine += m.styles.Info.Render(fmt.Sprintf("  •  Historical averages ready (%d workflows, %s)", wfCount, timing.FormatDuration(m.avgFetchLastDuration)))
+		}
+	}
+
+	fmt.Fprintf(&b, "%s %s\n", header, utcTime)
+	fmt.Fprintf(&b, "%s\n", updatedLine)
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+// renderBody renders the scrollable job table. Falls back to the
+// startup-phase text before any job appears.
+func (m RunModel) renderBody() string {
 	if len(m.jobs) == 0 {
-		return newAltScreenView(b.String() + m.renderRunStartupPhase())
+		return m.renderRunStartupPhase()
 	}
+
+	var b strings.Builder
 
 	widths := CalculateRunColumnWidths(m.jobs, m.jobAverages)
 
@@ -75,6 +111,23 @@ func (m RunModel) View() tea.View {
 	}
 
 	b.WriteString("\n")
+
+	return b.String()
+}
+
+// renderFooter renders the pinned rate-limit indicator and key hint, with
+// the vim-style scroll hints taking over when the body overflows the
+// viewport (issue #554). Empty during the startup phase, matching the view
+// before scrolling was added. The scrollable variant keeps the plain
+// hint's leading blank line so both variants occupy the same row count —
+// the viewport size computed in syncViewport must not depend on the
+// scroll state.
+func (m RunModel) renderFooter() string {
+	if len(m.jobs) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
 
 	// Two-tier rate-limit indicator: red under minRateLimitForFetch, yellow
 	// under rateWarningThreshold. Only render once we've actually received a
@@ -91,10 +144,16 @@ func (m RunModel) View() tea.View {
 	b.WriteString("\n")
 
 	if !m.quitting {
-		b.WriteString("\nPress q to quit\n")
+		if m.scrollable() {
+			b.WriteString("\n")
+			b.WriteString(m.scrollHint())
+			b.WriteString("\n")
+		} else {
+			b.WriteString("\nPress q to quit\n")
+		}
 	}
 
-	return newAltScreenView(b.String())
+	return b.String()
 }
 
 // renderRunStartupPhase shows a message while loading run info.

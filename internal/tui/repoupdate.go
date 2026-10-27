@@ -2,12 +2,10 @@ package tui
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/fini-net/gh-observer/internal/debug"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
@@ -40,8 +38,29 @@ func (m RepoModel) Init() tea.Cmd {
 	)
 }
 
-// Update dispatches messages to the appropriate handlers.
+// Update handles a message and then syncs the viewport on the model it
+// returns, so the body the viewport bakes always reflects the post-message
+// state. Centralizing the sync here means no message path can forget it.
+// The value/pointer split in the type switch matters: handlers with pointer
+// receivers return *RepoModel while inline paths return RepoModel by
+// value, and both the sync and the (possibly mutated) model must be the
+// one handed back to the caller. syncViewport is a no-op until the first
+// tea.WindowSizeMsg arrives.
 func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	switch v := model.(type) {
+	case RepoModel:
+		v.syncViewport()
+		return v, cmd
+	case *RepoModel:
+		v.syncViewport()
+		return v, cmd
+	}
+	return model, cmd
+}
+
+// update dispatches a message to the appropriate repo-mode handler.
+func (m RepoModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -49,17 +68,15 @@ func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
-		return m.handleScrollKey(msg)
+		return m, m.handleKey(msg)
 
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.syncViewport()
 		return m, nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		m.syncViewport()
 		return m, cmd
 
 	case RepoTickMsg:
@@ -79,62 +96,19 @@ func (m RepoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case RepoChecksUpdateMsg:
-		// The handlers return &m, so syncing m afterwards updates the returned model.
-		model, cmd := m.handleRepoChecksUpdate(msg)
-		m.syncViewport()
-		return model, cmd
+		return m.handleRepoChecksUpdate(msg)
 
 	case RepoRunsUpdateMsg:
-		model, cmd := m.handleRepoRunsUpdate(msg)
-		m.syncViewport()
-		return model, cmd
+		return m.handleRepoRunsUpdate(msg)
 	}
 
 	return m, nil
 }
 
-// handleScrollKey applies vim-style scroll keys to the body viewport.
-func (m RepoModel) handleScrollKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.height == 0 {
-		return m, nil
-	}
-
-	switch msg.String() {
-	case "G", "end":
-		m.pendingG = false
-		m.viewport.GotoBottom()
-		return m, nil
-	case "home":
-		m.pendingG = false
-		m.viewport.GotoTop()
-		return m, nil
-	case "g":
-		if m.pendingG {
-			m.viewport.GotoTop()
-		}
-		m.pendingG = !m.pendingG
-		return m, nil
-	}
-
-	m.pendingG = false
-	var cmd tea.Cmd
-	m.viewport, cmd = m.viewport.Update(msg)
-	return m, cmd
-}
-
 // syncViewport sizes the viewport to the space between the pinned header and
 // footer and refreshes its content. A no-op until the terminal size is known.
 func (m *RepoModel) syncViewport() {
-	if m.height == 0 {
-		return
-	}
-	// bubbletea clips long lines instead of wrapping them, so each line is one row.
-	header := lipgloss.Height(strings.TrimSuffix(m.renderHeader(), "\n"))
-	footer := lipgloss.Height(strings.TrimSuffix(m.renderFooter(), "\n"))
-	bodyHeight := max(m.height-header-footer, 1)
-	m.viewport.SetWidth(m.width)
-	m.viewport.SetHeight(bodyHeight)
-	m.viewport.SetContent(strings.TrimSuffix(m.renderBody(), "\n"))
+	m.sync(m.renderHeader(), m.renderBody(), m.renderFooter())
 }
 
 // handleRepoChecksUpdate applies fade-out filtering to PR checks and stores

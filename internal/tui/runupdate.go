@@ -58,8 +58,29 @@ func (m RunModel) Init() tea.Cmd {
 	)
 }
 
-// Update handles messages for run-watching mode.
+// Update handles a message and then syncs the viewport on the model it
+// returns, so the body the viewport bakes always reflects the post-message
+// state (issue #554). Centralizing the sync here means no message path can
+// forget it. The value/pointer split in the type switch matters: handlers
+// with pointer receivers return *RunModel while inline paths return
+// RunModel by value, and both the sync and the (possibly mutated) model
+// must be the one handed back to the caller. syncViewport is a no-op until
+// the first tea.WindowSizeMsg arrives.
 func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	switch v := model.(type) {
+	case RunModel:
+		v.syncViewport()
+		return v, cmd
+	case *RunModel:
+		v.syncViewport()
+		return v, cmd
+	}
+	return model, cmd
+}
+
+// update dispatches a message to the appropriate run-mode handler.
+func (m RunModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -67,6 +88,11 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
+		return m, m.handleKey(msg)
+
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		return m, nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -118,6 +144,13 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// syncViewport sizes the viewport to the space between the pinned header and
+// footer and refreshes its content (issue #554). A no-op until the terminal
+// size is known.
+func (m *RunModel) syncViewport() {
+	m.sync(m.renderHeader(), m.renderBody(), m.renderFooter())
 }
 
 // handleRunJobsUpdate processes job status updates.

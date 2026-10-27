@@ -11,55 +11,92 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// View renders the current state
+// View renders the current state: a pinned PR header, the scrollable checks
+// table, and a pinned footer (rate-limit indicator + key hint). Before the
+// first tea.WindowSizeMsg arrives (height == 0) all sections render
+// unclipped in a single string; once the terminal size is known, the body
+// scrolls inside a viewport between the pinned sections (issue #554).
 func (m Model) View() tea.View {
 	if m.err != nil {
 		return newAltScreenView(m.styles.Error.Render(fmt.Sprintf("Error: %v\n", m.err)))
 	}
+	if m.height == 0 {
+		return newAltScreenView(m.renderHeader() + m.renderBody() + m.renderFooter())
+	}
+	return newAltScreenView(m.composeView(m.renderHeader(), strings.TrimSuffix(m.renderFooter(), "\n")))
+}
+
+// FullView returns the complete, unclipped render. printFinalFrame uses it
+// at quit time (issue #554): PR mode auto-quits when all checks complete,
+// and View() only shows the scrolled window once content overflows the
+// viewport — the scrollback reprint must show the whole body so the
+// completed-run summary lands intact.
+func (m Model) FullView() string {
+	if m.err != nil {
+		return m.styles.Error.Render(fmt.Sprintf("Error: %v\n", m.err))
+	}
+	return m.renderHeader() + m.renderBody() + m.renderFooter()
+}
+
+// renderHeader renders the pinned PR header: the title line and the
+// updated/started line (with historical-averages status). Empty until PR
+// info arrives.
+func (m Model) renderHeader() string {
+	if m.prTitle == "" {
+		return ""
+	}
 
 	var b strings.Builder
 
-	if m.prTitle != "" {
-		prInfo := m.styles.Header.Render(fmt.Sprintf("PR #%d: %s", m.prNumber, m.prTitle))
-		utcTime := time.Now().UTC().Format("15:04:05 UTC")
-		timeSinceUpdate := time.Since(m.lastUpdate)
+	prInfo := m.styles.Header.Render(fmt.Sprintf("PR #%d: %s", m.prNumber, m.prTitle))
+	utcTime := time.Now().UTC().Format("15:04:05 UTC")
+	timeSinceUpdate := time.Since(m.lastUpdate)
 
-		var updatedLine string
-		if !m.cycleStartTime.IsZero() {
-			timeSinceStart := time.Since(m.cycleStartTime)
-			updatedLine = fmt.Sprintf("Updated %s ago  •  Started %s ago",
-				timing.FormatDuration(timeSinceUpdate),
-				timing.FormatDuration(timeSinceStart))
-		} else {
-			updatedLine = fmt.Sprintf("Updated %s ago", timing.FormatDuration(timeSinceUpdate))
-		}
-
-		// Add historical averages status
-		if !m.noAvg {
-			isFetching := m.avgFetchPending || len(m.pendingWorkflowFetch) > 0
-			if isFetching {
-				// Fetch in progress - show elapsed time
-				elapsed := time.Since(m.avgFetchStartTime)
-				updatedLine += m.styles.Running.Render(fmt.Sprintf("  •  Fetching historical averages... (%s)", timing.FormatDuration(elapsed)))
-			} else if m.avgFetchErr != nil {
-				// Fetch failed
-				updatedLine += m.styles.Queued.Render("  •  Historical averages unavailable")
-			} else if m.avgFetchLastDuration > 0 {
-				// Fetch succeeded - show workflow count and last fetch duration
-				wfCount := len(m.fetchedWorkflowIDs)
-				updatedLine += m.styles.Info.Render(fmt.Sprintf("  •  Historical averages ready (%d workflows, %s)", wfCount, timing.FormatDuration(m.avgFetchLastDuration)))
-			}
-		}
-
-		fmt.Fprintf(&b, "%s %s\n", prInfo, utcTime)
-		fmt.Fprintf(&b, "%s\n", updatedLine)
-
-		b.WriteString("\n")
+	var updatedLine string
+	if !m.cycleStartTime.IsZero() {
+		timeSinceStart := time.Since(m.cycleStartTime)
+		updatedLine = fmt.Sprintf("Updated %s ago  •  Started %s ago",
+			timing.FormatDuration(timeSinceUpdate),
+			timing.FormatDuration(timeSinceStart))
+	} else {
+		updatedLine = fmt.Sprintf("Updated %s ago", timing.FormatDuration(timeSinceUpdate))
 	}
 
+	// Add historical averages status
+	if !m.noAvg {
+		isFetching := m.avgFetchPending || len(m.pendingWorkflowFetch) > 0
+		if isFetching {
+			// Fetch in progress - show elapsed time
+			elapsed := time.Since(m.avgFetchStartTime)
+			updatedLine += m.styles.Running.Render(fmt.Sprintf("  •  Fetching historical averages... (%s)", timing.FormatDuration(elapsed)))
+		} else if m.avgFetchErr != nil {
+			// Fetch failed
+			updatedLine += m.styles.Queued.Render("  •  Historical averages unavailable")
+		} else if m.avgFetchLastDuration > 0 {
+			// Fetch succeeded - show workflow count and last fetch duration
+			wfCount := len(m.fetchedWorkflowIDs)
+			updatedLine += m.styles.Info.Render(fmt.Sprintf("  •  Historical averages ready (%d workflows, %s)", wfCount, timing.FormatDuration(m.avgFetchLastDuration)))
+		}
+	}
+
+	fmt.Fprintf(&b, "%s %s\n", prInfo, utcTime)
+	fmt.Fprintf(&b, "%s\n", updatedLine)
+
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+// renderBody renders the scrollable section: the checks table (with summary
+// lines and error-annotation boxes for failures), the synthetic Copilot
+// review row and its status line, and the waiting-for-more-checks block.
+// Falls back to the startup-phase text before any check appears.
+func (m Model) renderBody() string {
 	if len(m.checkRuns) == 0 {
-		return newAltScreenView(b.String() + m.renderStartupPhase())
+		return m.renderStartupPhase()
 	}
+
+	var b strings.Builder
 
 	widths := CalculateColumnWidths(m.checkRuns, m.cycleStartTime, m.jobAverages)
 
@@ -71,10 +108,10 @@ func (m Model) View() tea.View {
 	// zero mid-render — leading the widths calc and the rendered row to
 	// disagree on status.
 	//
-	// This call site is intentionally below the len(m.checkRuns)==0 early
-	// return above: during the Actions startup phase the Copilot row is not
+	// This call site is intentionally below the len(m.checkRuns)==0 startup
+	// branch above: during the Actions startup phase the Copilot row is not
 	// rendered (see the comment by renderCopilotStatusLine below for why
-	// that tradeoff is acceptable). Hoisting it above the early return would
+	// that tradeoff is acceptable). Hoisting it above the branch would
 	// resurface the row during startup but would also require re-evaluating
 	// the column-width path for an empty checkRuns slice.
 	copilotRow := m.buildCopilotCheckRun()
@@ -128,7 +165,7 @@ func (m Model) View() tea.View {
 	// visually next to the row it describes.
 	//
 	// Startup-phase tradeoff: this call site is below the
-	// len(m.checkRuns)==0 early return above, so during the Actions startup
+	// len(m.checkRuns)==0 startup branch above, so during the Actions startup
 	// phase (before any check appears, typically 30-90s after PR creation)
 	// NEITHER the synthetic Copilot row NOR this status line is rendered.
 	// That reopens a narrow window that an earlier revision (commit dd23bdd)
@@ -147,7 +184,7 @@ func (m Model) View() tea.View {
 	//     Copilot fetch.
 	// If user feedback changes the calculus, surface the status line from
 	// renderStartupPhase() (which IS reached during the startup phase) rather
-	// than hoisting this call above the early return, so the table geometry
+	// than hoisting this call above the branch, so the table geometry
 	// path is not perturbed for an empty checkRuns slice.
 	// renderCopilotStatusLine self-gates via copilotWaitStartTime and
 	// returns "" for terminal non-stale states.
@@ -177,6 +214,20 @@ func (m Model) View() tea.View {
 		b.WriteString("\n")
 	}
 
+	return b.String()
+}
+
+// renderFooter renders the pinned rate-limit indicator and key hint, with
+// the vim-style scroll hints taking over when the body overflows the
+// viewport (issue #554). Empty during the startup phase, matching the view
+// before scrolling was added.
+func (m Model) renderFooter() string {
+	if len(m.checkRuns) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+
 	// Two-tier rate-limit indicator: red under minRateLimitForFetch, yellow
 	// under rateWarningThreshold. Only render once we've actually received a
 	// response — before that, rateLimitRemaining is the Go zero value (0) and
@@ -192,10 +243,20 @@ func (m Model) View() tea.View {
 	b.WriteString("\n")
 
 	if !m.quitting {
-		b.WriteString("\nPress q to quit\n")
+		if m.scrollable() {
+			// The extra blank matches the "\nPress q to quit" variant's row
+			// count so the footer height — and therefore the viewport size
+			// computed in syncViewport — is stable across the scroll-state
+			// boundary instead of oscillating when content is right at it.
+			b.WriteString("\n")
+			b.WriteString(m.scrollHint())
+			b.WriteString("\n")
+		} else {
+			b.WriteString("\nPress q to quit\n")
+		}
 	}
 
-	return newAltScreenView(b.String())
+	return b.String()
 }
 
 // renderErrorBox displays error annotations for failed checks

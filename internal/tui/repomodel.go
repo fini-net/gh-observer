@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/viewport"
 	ghclient "github.com/fini-net/gh-observer/internal/github"
 )
 
@@ -58,11 +57,10 @@ type RepoModel struct {
 	refreshInterval time.Duration
 	styles          Styles
 
-	// Scrolling for dashboards taller than the terminal.
-	viewport viewport.Model
-	width    int
-	height   int
-	pendingG bool
+	// Scrolling for dashboards taller than the terminal. Embedded so the
+	// shared scrollState methods (scrollable, scrollHint, ...) promote onto
+	// RepoModel like they were its own.
+	scrollState
 
 	// Fade-out windows for completed checks/runs.
 	fadeSuccess time.Duration
@@ -112,21 +110,11 @@ func NewRepoModel(
 		lastUpdate:      time.Now(),
 		refreshInterval: refreshInterval,
 		styles:          styles,
-		viewport:        newRepoViewport(),
+		scrollState:     newScrollState(),
 		enableLinks:     enableLinks,
 		fadeSuccess:     fadeSuccess,
 		fadeFailure:     fadeFailure,
 	}
-}
-
-// newRepoViewport returns a viewport with vim-style vertical scroll keys.
-func newRepoViewport() viewport.Model {
-	vp := viewport.New()
-	vp.KeyMap.PageDown.SetKeys("pgdown", "space", "f", "ctrl+f")
-	vp.KeyMap.PageUp.SetKeys("pgup", "b", "ctrl+b")
-	vp.KeyMap.Left.SetEnabled(false)
-	vp.KeyMap.Right.SetEnabled(false)
-	return vp
 }
 
 // ExitCode returns the exit code for the program. Repo mode is persistent and
