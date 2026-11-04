@@ -143,7 +143,7 @@ main() {
 		return 0
 	fi
 
-	local desc="Automated GitHub workflow template: community standards, just recipes for PR lifecycle, AI reviews (Copilot/Claude),   and template sync system"
+	local desc="Automated GitHub workflow template: community standards, just recipes for PR lifecycle, AI reviews (Copilot/Claude), and template sync system"
 	local topics='"compliance", "github", "github-repository", "template", "template-generic-repo", "template-repository"'
 
 	# Case 1: missing description -> inserted inside [about], before blank line
