@@ -29,11 +29,12 @@ colors:
 presumed_averages:
   DCO: 1s
 
-# Copilot code review detection (issue #409). When enabled (default), the TUI
-# gates exit on Copilot review completion in PR mode, mirroring template-repo's
-# wait_for_copilot.sh. Copilot reviews don't appear in StatusCheckRollup, so
-# without this gh-observer would quit "green" while Copilot is still reviewing.
-# Set wait_for_copilot: false for repos that don't use Copilot.
+# Copilot code review detection (issue #409). Disabled by default (there's no
+# convenient way to test it); opt in with wait_for_copilot: true. When
+# enabled, the TUI gates exit on Copilot review completion in PR mode,
+# mirroring template-repo's wait_for_copilot.sh. Copilot reviews don't appear
+# in StatusCheckRollup, so without this gh-observer quits "green" while
+# Copilot may still be reviewing.
 #
 # Host capability (issue #442): at startup gh-observer checks whether the
 # Copilot reviewer app exists on the host at all. Hosts without it (e.g.
@@ -50,7 +51,7 @@ presumed_averages:
 # The synthetic Copilot row only appears once a poll has positively seen a
 # Copilot review request or review on the PR; until then a neutral
 # "Checking for Copilot review…" line shows instead.
-wait_for_copilot: true
+wait_for_copilot: false
 
 # Maximum total wall-clock time to wait for a Copilot review before giving up:
 # the Copilot row/spinner stops updating and gh-observer proceeds, regardless

@@ -234,7 +234,7 @@ Calls `internal/config/config.go` which:
    - `colors.queued: 8` (gray)
    - `enable_links: true`
    - `presumed_averages.DCO: 1s` (see [Presumed Averages](#historical-job-averages-internalgithubhistorygo))
-   - `wait_for_copilot: true` (see [Copilot Code Review Tracking](#copilot-code-review-tracking-issues-409-442-486))
+   - `wait_for_copilot: false` (see [Copilot Code Review Tracking](#copilot-code-review-tracking-issues-409-442-486))
    - `copilot_max_wait: 180s`
    - `copilot_poll_interval: 10s`
    - `copilot_initial_delay: 15s`
@@ -456,7 +456,7 @@ Start     Workflow/Job        ThisRun  HistAvg
 
 #### Step 6: Copilot Review Snapshot (issue #409, #442)
 
-When `wait_for_copilot` is enabled (the default), the snapshot ends with a Copilot review line. The host capability probe runs first — an incapable host (e.g. GitHub Enterprise Server without Copilot code review) prints a single explanatory line instead of querying for reviews that cannot exist there:
+When `wait_for_copilot` is enabled (opt-in; off by default), the snapshot ends with a Copilot review line. The host capability probe runs first — an incapable host (e.g. GitHub Enterprise Server without Copilot code review) prints a single explanatory line instead of querying for reviews that cannot exist there:
 
 ```go
 if waitForCopilot {
