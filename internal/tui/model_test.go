@@ -294,7 +294,7 @@ func TestSortCheckRunsStatusTieBreak(t *testing.T) {
 		{Name: "zulu", Status: "obscure"},
 		{Name: "alpha", Status: "obscure"},
 	}
-	SortCheckRuns(checks)
+	SortCheckRuns(checks, nil)
 	if checks[0].Name != "alpha" {
 		t.Errorf("SortCheckRuns()[0] = %q, want %q", checks[0].Name, "alpha")
 	}

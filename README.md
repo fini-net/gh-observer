@@ -48,7 +48,10 @@ slow?"
 - 🛡️ **Rate limits** - Backs off automatically when approaching API limits to
   avoid interruptions (refresh interval triples below 10 remaining)
 - 📊 **Historical averages** - Shows average runtime for each job based on
-  recent completed runs, so you know if things are taking longer than usual
+  recent completed runs, so you know if things are taking longer than usual;
+  once fetched, running jobs also sort by expected finish instead of elapsed
+  time, so the jobs due to finish first float to the top and stay put while
+  they run (until then, or with `--quick`, rows sort by elapsed time)
 - ⚡ **`--quick` mode** - Skip the historical averages fetch when you just want
   a fast snapshot
 - ✅ **CI-friendly** - Returns exit codes (0=success, 1=failure) for script

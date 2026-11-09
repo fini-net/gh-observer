@@ -355,11 +355,16 @@ func FormatRunJobAvg(job ghclient.WorkflowJobInfo, jobAverages map[string]time.D
 	return timing.FormatDuration(avg)
 }
 
-// SortRunJobs sorts jobs with the same criteria as SortCheckRuns.
-func SortRunJobs(jobs []ghclient.WorkflowJobInfo) {
+// SortRunJobs sorts jobs with the same criteria as SortCheckRuns, including
+// the historical-average banding for in_progress jobs (issue #574). See
+// sortKeyDuration in display.go for the band semantics.
+func SortRunJobs(jobs []ghclient.WorkflowJobInfo, jobAverages map[string]time.Duration) {
 	sort.Slice(jobs, func(i, j int) bool {
-		di := runSortKeyDuration(jobs[i])
-		dj := runSortKeyDuration(jobs[j])
+		bi, di := runSortKeyDuration(jobs[i], jobAverages)
+		bj, dj := runSortKeyDuration(jobs[j], jobAverages)
+		if bi != bj {
+			return bi < bj
+		}
 		if di != dj {
 			return di < dj
 		}
@@ -372,23 +377,37 @@ func SortRunJobs(jobs []ghclient.WorkflowJobInfo) {
 	})
 }
 
-// runSortKeyDuration returns a duration for sorting jobs.
-func runSortKeyDuration(job ghclient.WorkflowJobInfo) time.Duration {
+// runSortKeyDuration returns a two-part sort key for jobs, mirroring
+// sortKeyDuration in display.go (issue #574): band 0 for completed jobs
+// (final duration) and in_progress jobs with a historical average (average
+// duration), band 1 for in_progress jobs without one (elapsed runtime),
+// band 2 for queued/waiting/other statuses. An empty jobAverages keeps the
+// pre-#574 elapsed-runtime behavior.
+func runSortKeyDuration(job ghclient.WorkflowJobInfo, jobAverages map[string]time.Duration) (band int, duration time.Duration) {
 	switch job.Status {
 	case "completed":
 		d := timing.RunJobDuration(timestampToTimePtr(job.StartedAt), timestampToTimePtr(job.CompletedAt))
-		if d > 0 {
-			return d
+		if d < 0 {
+			d = 0
 		}
-		return 0
+		return 0, d
 	case "in_progress":
 		d := timing.RunJobRuntime(timestampToTimePtr(job.StartedAt))
-		if d > 0 {
-			return d
+		if d < 0 {
+			d = 0
 		}
-		return 0
+		if len(jobAverages) == 0 {
+			return 0, d
+		}
+		if avg, ok := jobAverages[job.Name]; ok {
+			if avg < 0 {
+				avg = 0
+			}
+			return 0, avg
+		}
+		return 1, d
 	default:
-		return time.Duration(1 << 62)
+		return 2, 0
 	}
 }
 
