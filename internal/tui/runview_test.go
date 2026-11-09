@@ -264,7 +264,7 @@ func TestSortRunJobs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			SortRunJobs(tt.jobs)
+			SortRunJobs(tt.jobs, nil)
 			if tt.jobs[0].Name != tt.wantName {
 				t.Errorf("SortRunJobs()[0] = %q, want %q", tt.jobs[0].Name, tt.wantName)
 			}
@@ -565,4 +565,62 @@ func TestNewRunModelExitCode(t *testing.T) {
 	if m.ExitCode() != 1 {
 		t.Errorf("ExitCode() = %d, want 1", m.ExitCode())
 	}
+}
+
+func TestSortRunJobsByAverage(t *testing.T) {
+	// Issue #574: run mode mirrors SortCheckRuns — in_progress jobs order by
+	// historical average once available, no-average running jobs follow the
+	// ones that have an average, and an empty/nil map keeps the elapsed
+	// runtime ordering.
+	now := time.Now()
+
+	newJobs := func() []ghclient.WorkflowJobInfo {
+		return []ghclient.WorkflowJobInfo{
+			{Name: "integration", Status: "in_progress", StartedAt: &github.Timestamp{Time: now.Add(-5 * time.Second)}},
+			{Name: "lint", Status: "in_progress", StartedAt: &github.Timestamp{Time: now.Add(-40 * time.Second)}},
+			{Name: "unit", Status: "completed", StartedAt: &github.Timestamp{Time: now.Add(-20 * time.Minute)}, CompletedAt: &github.Timestamp{Time: now.Add(-5 * time.Minute)}},
+			{Name: "deploy", Status: "queued"},
+		}
+	}
+	names := func(jobs []ghclient.WorkflowJobInfo) string {
+		parts := make([]string, len(jobs))
+		for i, j := range jobs {
+			parts[i] = j.Name
+		}
+		return strings.Join(parts, ",")
+	}
+
+	t.Run("averages present: running jobs ordered by historical average", func(t *testing.T) {
+		jobs := newJobs()
+		avgs := map[string]time.Duration{"integration": 12 * time.Minute, "lint": 30 * time.Second}
+		SortRunJobs(jobs, avgs)
+		if got, want := names(jobs), "lint,integration,unit,deploy"; got != want {
+			t.Errorf("order = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("partially present: no-average running job follows jobs with averages", func(t *testing.T) {
+		jobs := newJobs()
+		avgs := map[string]time.Duration{"lint": 30 * time.Second}
+		SortRunJobs(jobs, avgs)
+		if got, want := names(jobs), "lint,unit,integration,deploy"; got != want {
+			t.Errorf("order = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("nil map keeps pre-#574 elapsed ordering", func(t *testing.T) {
+		jobs := newJobs()
+		SortRunJobs(jobs, nil)
+		if got, want := names(jobs), "integration,lint,unit,deploy"; got != want {
+			t.Errorf("order = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("empty map behaves like nil", func(t *testing.T) {
+		jobs := newJobs()
+		SortRunJobs(jobs, map[string]time.Duration{})
+		if got, want := names(jobs), "integration,lint,unit,deploy"; got != want {
+			t.Errorf("order = %q, want %q", got, want)
+		}
+	})
 }

@@ -619,6 +619,36 @@ func TestJobAveragesPartialMsg(t *testing.T) {
 		}
 	})
 
+	t.Run("re-sorts running checks by merged averages (issue #574)", func(t *testing.T) {
+		m := makeModel()
+		m.pendingWorkflowFetch = map[int64]bool{456: true}
+		m.fetchedWorkflowIDs = make(map[int64]bool)
+		m.jobAverages = make(map[string]time.Duration)
+		m.avgFetchStartTime = time.Now().Add(-2 * time.Second)
+		now := time.Now()
+		// Pre-sorted in elapsed order: integration (5s elapsed) above
+		// lint (40s elapsed).
+		m.checkRuns = []ghclient.CheckRunInfo{
+			{Name: "integration", Status: "in_progress", StartedAt: ptrTime(now.Add(-5 * time.Second))},
+			{Name: "lint", Status: "in_progress", StartedAt: ptrTime(now.Add(-40 * time.Second))},
+		}
+
+		msg := JobAveragesPartialMsg{
+			WorkflowID: 456,
+			Averages: map[string]time.Duration{
+				"integration": 12 * time.Minute,
+				"lint":        30 * time.Second,
+			},
+		}
+		model, _ := m.Update(msg)
+		result := model.(Model)
+
+		if result.checkRuns[0].Name != "lint" || result.checkRuns[1].Name != "integration" {
+			t.Errorf("checkRuns order after merge = [%s, %s], want [lint, integration]",
+				result.checkRuns[0].Name, result.checkRuns[1].Name)
+		}
+	})
+
 	t.Run("sets avgFetchLastDuration when all fetches complete", func(t *testing.T) {
 		m := makeModel()
 		m.pendingWorkflowFetch = map[int64]bool{456: true}

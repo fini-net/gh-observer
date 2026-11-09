@@ -847,7 +847,9 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
     }
 
     m.checkRuns = msg.CheckRuns
-    SortCheckRuns(m.checkRuns)  // Sort by duration
+    // Presumed averages are injected before sorting so they feed the
+    // running-job ordering too (issue #574)
+    SortCheckRuns(m.checkRuns, m.jobAverages)  // Sort by expected finish
     // Adopt the GraphQL-sourced cycle start anchor on the first successful
     // poll where it is non-zero; preserve the last known value otherwise.
     if !msg.CycleStartTime.IsZero() {
@@ -992,15 +994,18 @@ if allChecksComplete(m.checkRuns) && canTrustCompletion(m) && copilotGateSatisfi
 
 The Copilot gate is deliberately **not** part of `allChecksComplete` — the synthetic review row never enters `m.checkRuns`, so sorting, timing, and completion logic remain untouched. It's a separate conjunct at the single call site that decides exit.
 
-### Check Sorting (`internal/tui/display.go:337-387`)
+### Check Sorting (`internal/tui/display.go:333-425`)
 
 ```go
-func SortCheckRuns(checks []ghclient.CheckRunInfo) {
+func SortCheckRuns(checks []ghclient.CheckRunInfo, jobAverages map[string]time.Duration) {
     sort.Slice(checks, func(i, j int) bool {
-        di := sortKeyDuration(checks[i])
-        dj := sortKeyDuration(checks[j])
+        bi, di := sortKeyDuration(checks[i], jobAverages)
+        bj, dj := sortKeyDuration(checks[j], jobAverages)
+        if bi != bj {
+            return bi < bj  // Lower band first
+        }
         if di != dj {
-            return di < dj  // Shortest duration first
+            return di < dj  // Shortest duration first within a band
         }
         si := statusPriority(checks[i].Status)
         sj := statusPriority(checks[j].Status)
@@ -1012,7 +1017,7 @@ func SortCheckRuns(checks []ghclient.CheckRunInfo) {
 }
 ```
 
-**Sorting Priority**: duration (shortest first) → status (in_progress first) → name (alphabetical). Queued jobs get a huge sort key (`1 << 62`) so they sink to the bottom.
+**Sorting Priority** (issue #574): band → duration → status (in_progress first) → name (alphabetical). `sortKeyDuration` returns a two-part key so running jobs order by expected finish once historical averages exist: band 0 holds completed jobs (final duration) and in_progress jobs with an average (average duration), interleaved; band 1 holds in_progress jobs without an average (elapsed runtime), so they follow every job with a known expectation; band 2 holds queued and unknown statuses, ordered by the status and name tiebreakers. While `jobAverages` is empty (the `historyFetchDelay` startup window, `--quick`, or a rate-limited fetch), in_progress rows keep the pre-#574 elapsed-runtime key in band 0, so behavior is unchanged — which is also why repo mode, which never fetches history, passes `nil`.
 
 ### Run-mode message loop (`internal/tui/runupdate.go`)
 
@@ -1744,10 +1749,10 @@ main.go runPRMode()
                 │
                 ├── [ChecksUpdateMsg received]
                 │   └── handleChecksUpdate()
-                │       ├── SortCheckRuns() by duration
+                │       ├── ApplyPresumedAverages() (DCO etc., before sort)
+                │       ├── SortCheckRuns() by expected finish (avg, #574)
                 │       ├── Adopt CycleStartTime anchor on first poll;
                 │       │   re-anchor Copilot budget to real cycle start
-                │       ├── ApplyPresumedAverages() (DCO etc.)
                 │       ├── Track peakCheckCount, firstCheckSeenAt
                 │       ├── Mark seenCheckKeys; new checks → re-discovery
                 │       ├── readyForHistory (10s delay or allComplete)
@@ -1778,6 +1783,7 @@ main.go runPRMode()
                 │   ├── Merge averages; cache per workflow (workflowAverages)
                 │   ├── Write AdvSec aliases into jobAverages
                 │   ├── Update: expectedCheckCount = len(jobAverages)
+                │   ├── Re-sort checkRuns by expected finish (avg, #574)
                 │   └── Last pending fetch → discovery complete; quit if checks done
                 │
                 ├── [spinner.TickMsg received]

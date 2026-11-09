@@ -330,14 +330,24 @@ func FormatDescription(description string, widths ColumnWidths) string {
 	return runewidth.Truncate(description, maxLen, "…")
 }
 
-// SortCheckRuns sorts check runs with three criteria:
-// Primary: ThisRun duration ascending (shortest first)
+// SortCheckRuns sorts check runs with three criteria (issue #574):
+// Primary: band, then duration ascending — completed jobs (final duration)
+// and in_progress jobs with a historical average (average duration) share
+// band 0, so the jobs expected to finish first float to the top and stay
+// put while they run; in_progress jobs without an average follow in band 1
+// keyed by elapsed runtime; queued and unknown statuses fall to band 2.
+// While jobAverages is empty (nil or no entries yet — the historyFetchDelay
+// startup window, --quick, or a rate-limited fetch), in_progress rows keep
+// their pre-#574 elapsed-runtime key in band 0, so behavior is unchanged.
 // Secondary: Status priority (in_progress > completed > queued > other)
 // Tertiary: Job name alphabetically
-func SortCheckRuns(checks []ghclient.CheckRunInfo) {
+func SortCheckRuns(checks []ghclient.CheckRunInfo, jobAverages map[string]time.Duration) {
 	sort.Slice(checks, func(i, j int) bool {
-		di := sortKeyDuration(checks[i])
-		dj := sortKeyDuration(checks[j])
+		bi, di := sortKeyDuration(checks[i], jobAverages)
+		bj, dj := sortKeyDuration(checks[j], jobAverages)
+		if bi != bj {
+			return bi < bj
+		}
 		if di != dj {
 			return di < dj
 		}
@@ -365,23 +375,45 @@ func statusPriority(status string) int {
 	}
 }
 
-// sortKeyDuration returns a duration for sorting: actual duration for completed/running,
-// 0 for unknown durations, and a large value for queued jobs (so they appear last).
-func sortKeyDuration(check ghclient.CheckRunInfo) time.Duration {
+// sortKeyDuration returns a two-part key for sorting: a band and a
+// duration. The band keeps the comparator a consistent total order while
+// in_progress rows switch from elapsed runtime to historical average
+// (issue #574): a running job with no average must sort after every
+// running job that has one, and no single duration value can express that
+// (averages can be arbitrarily large, elapsed times arbitrarily small —
+// keying both by duration alone would also be intransitive once completed
+// jobs mix in). Band 0: completed (final duration) and in_progress with an
+// average (average duration), interleaved so completed rows keep their
+// existing ordering. Band 1: in_progress without an average (elapsed
+// runtime, the pre-#574 key). Band 2: queued/waiting/other — equal keys,
+// so the status and name tiebreakers order them as before. An empty
+// jobAverages keeps every in_progress row in band 0 keyed by elapsed
+// runtime: exactly the pre-#574 behavior. Unknown or negative durations
+// clamp to 0, matching the previous key.
+func sortKeyDuration(check ghclient.CheckRunInfo, jobAverages map[string]time.Duration) (band int, duration time.Duration) {
 	switch check.Status {
 	case "completed":
 		d := timing.FinalDuration(check)
-		if d > 0 {
-			return d
+		if d < 0 {
+			d = 0
 		}
-		return 0
+		return 0, d
 	case "in_progress":
 		d := timing.Runtime(check)
-		if d > 0 {
-			return d
+		if d < 0 {
+			d = 0
 		}
-		return 0
+		if len(jobAverages) == 0 {
+			return 0, d
+		}
+		if avg, ok := jobAverages[check.Name]; ok {
+			if avg < 0 {
+				avg = 0
+			}
+			return 0, avg
+		}
+		return 1, d
 	default:
-		return time.Duration(1 << 62)
+		return 2, 0
 	}
 }

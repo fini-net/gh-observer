@@ -155,7 +155,9 @@ func (m RepoModel) renderPRGroup(b *strings.Builder, prNum int, prData PRViewDat
 		return
 	}
 
-	SortCheckRuns(merged)
+	// nil averages: repo mode has no historical averages, so running rows
+	// keep the elapsed-runtime ordering (issue #574).
+	SortCheckRuns(merged, nil)
 	widths := CalculateColumnWidths(merged, prData.CycleStartTime, nil)
 
 	for _, check := range merged {

@@ -382,6 +382,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			m.expectedCheckCount = len(m.jobAverages)
+
+			// Newly merged averages change the expected finish order of
+			// running jobs — re-sort so the reorder shows without waiting
+			// for the next poll (issue #574). Averages arrive per workflow,
+			// so rows settle as each partial message lands.
+			SortCheckRuns(m.checkRuns, m.jobAverages)
 		}
 
 		// Check if all workflow fetches are done
@@ -453,7 +459,14 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	}
 
 	m.checkRuns = msg.CheckRuns
-	SortCheckRuns(m.checkRuns)
+	// Inject presumed historical durations for external GitHub App checks
+	// (e.g. DCO) that have no Actions workflow run to fetch history for.
+	// This is idempotent — it only writes when the job name is absent from
+	// m.jobAverages, so real history fetched later always wins. Runs before
+	// SortCheckRuns so presumed averages also feed the running-job ordering
+	// (issue #574).
+	ghclient.ApplyPresumedAverages(m.jobAverages, m.checkRuns, m.presumedAverages, m.host)
+	SortCheckRuns(m.checkRuns, m.jobAverages)
 	// Adopt the GraphQL-sourced cycle start anchor on the first successful
 	// poll where it is non-zero. Subsequent polls overwrite with the same
 	// value; if a later poll returns zero (e.g. transient query shape
@@ -498,12 +511,6 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	m.fetchReceived = true
 	m.lastUpdate = time.Now()
 	m.err = nil
-
-	// Inject presumed historical durations for external GitHub App checks
-	// (e.g. DCO) that have no Actions workflow run to fetch history for. This
-	// is idempotent — it only writes when the job name is absent from
-	// m.jobAverages, so real history fetched later always wins.
-	ghclient.ApplyPresumedAverages(m.jobAverages, m.checkRuns, m.presumedAverages, m.host)
 
 	if len(msg.CheckRuns) > m.peakCheckCount {
 		m.peakCheckCount = len(msg.CheckRuns)

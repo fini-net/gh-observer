@@ -161,16 +161,17 @@ func (m *RunModel) handleRunJobsUpdate(msg RunJobsUpdateMsg) (tea.Model, tea.Cmd
 	}
 
 	m.jobs = msg.Jobs
-	SortRunJobs(m.jobs)
+	// Inject presumed historical durations for external GitHub App checks
+	// (e.g. DCO). Run mode jobs are almost always real Actions jobs, but we
+	// apply the same logic for consistency. Idempotent — real history wins.
+	// Runs before SortRunJobs so presumed averages also feed the running-job
+	// ordering (issue #574).
+	ghclient.ApplyPresumedAverages(m.jobAverages, ghclient.WorkflowJobInfoToCheckRuns(msg.Jobs), m.presumedAverages, m.host)
+	SortRunJobs(m.jobs, m.jobAverages)
 	m.rateLimitRemaining = msg.RateLimitRemaining
 	m.fetchReceived = true
 	m.lastUpdate = time.Now()
 	m.err = nil
-
-	// Inject presumed historical durations for external GitHub App checks
-	// (e.g. DCO). Run mode jobs are almost always real Actions jobs, but we
-	// apply the same logic for consistency. Idempotent — real history wins.
-	ghclient.ApplyPresumedAverages(m.jobAverages, ghclient.WorkflowJobInfoToCheckRuns(msg.Jobs), m.presumedAverages, m.host)
 
 	debug.Log("run jobs update", "count", len(msg.Jobs), "rate_limit_remaining", msg.RateLimitRemaining)
 
@@ -250,6 +251,11 @@ func (m *RunModel) handleRunJobAveragesPartial(msg RunJobAveragesPartialMsg) (te
 	if msg.Err == nil && msg.Averages != nil {
 		maps.Copy(m.jobAverages, msg.Averages)
 		m.workflowAverages[msg.WorkflowID] = msg.Averages
+
+		// Newly merged averages change the expected finish order of running
+		// jobs — re-sort so the reorder shows without waiting for the next
+		// poll (issue #574).
+		SortRunJobs(m.jobs, m.jobAverages)
 	}
 
 	if len(m.pendingWorkflowFetch) == 0 {

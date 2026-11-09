@@ -349,6 +349,31 @@ func TestRunUpdateRunJobAveragesPartial(t *testing.T) {
 		}
 	})
 
+	t.Run("re-sorts running jobs by merged averages (issue #574)", func(t *testing.T) {
+		m := makeRunModel()
+		m.avgFetchPending = true
+		m.avgFetchStartTime = time.Now()
+		m.pendingWorkflowFetch = map[int64]bool{77: true}
+		now := time.Now()
+		// Pre-sorted in elapsed order: integration (5s elapsed) above
+		// lint (40s elapsed).
+		m.jobs = []ghclient.WorkflowJobInfo{
+			{Name: "integration", Status: "in_progress", StartedAt: &github.Timestamp{Time: now.Add(-5 * time.Second)}},
+			{Name: "lint", Status: "in_progress", StartedAt: &github.Timestamp{Time: now.Add(-40 * time.Second)}},
+		}
+
+		newModel, _ := m.Update(RunJobAveragesPartialMsg{
+			WorkflowID: 77,
+			Averages:   map[string]time.Duration{"integration": 12 * time.Minute, "lint": 30 * time.Second},
+		})
+		rm := runModelFrom(t, newModel)
+
+		if rm.jobs[0].Name != "lint" || rm.jobs[1].Name != "integration" {
+			t.Errorf("jobs order after merge = [%s, %s], want [lint, integration]",
+				rm.jobs[0].Name, rm.jobs[1].Name)
+		}
+	})
+
 	t.Run("error result clears pending error only on last fetch", func(t *testing.T) {
 		m := makeRunModel()
 		m.avgFetchPending = true
@@ -596,37 +621,77 @@ func TestRunJobSortKeyDuration(t *testing.T) {
 			StartedAt:   &github.Timestamp{Time: now.Add(-2 * time.Minute)},
 			CompletedAt: &github.Timestamp{Time: now.Add(-1 * time.Minute)},
 		}
-		if d := runSortKeyDuration(job); d != time.Minute {
-			t.Errorf("runSortKeyDuration() = %v, want 1m", d)
+		band, d := runSortKeyDuration(job, nil)
+		if band != 0 || d != time.Minute {
+			t.Errorf("runSortKeyDuration() = (%d, %v), want (0, 1m)", band, d)
 		}
 	})
 
 	t.Run("completed missing timestamps yields zero", func(t *testing.T) {
-		if d := runSortKeyDuration(ghclient.WorkflowJobInfo{Status: "completed"}); d != 0 {
-			t.Errorf("runSortKeyDuration() = %v, want 0", d)
+		band, d := runSortKeyDuration(ghclient.WorkflowJobInfo{Status: "completed"}, nil)
+		if band != 0 || d != 0 {
+			t.Errorf("runSortKeyDuration() = (%d, %v), want (0, 0)", band, d)
 		}
 	})
 
-	t.Run("in_progress with startedAt", func(t *testing.T) {
+	t.Run("in_progress with startedAt, nil averages keys elapsed in band 0", func(t *testing.T) {
 		job := ghclient.WorkflowJobInfo{
 			Status:    "in_progress",
 			StartedAt: &github.Timestamp{Time: now.Add(-90 * time.Second)},
 		}
-		if d := runSortKeyDuration(job); d <= 0 {
-			t.Errorf("runSortKeyDuration() = %v, want positive", d)
+		band, d := runSortKeyDuration(job, nil)
+		if band != 0 || d <= 0 {
+			t.Errorf("runSortKeyDuration() = (%d, %v), want (0, positive)", band, d)
 		}
 	})
 
 	t.Run("in_progress missing startedAt yields zero", func(t *testing.T) {
-		if d := runSortKeyDuration(ghclient.WorkflowJobInfo{Status: "in_progress"}); d != 0 {
-			t.Errorf("runSortKeyDuration() = %v, want 0", d)
+		band, d := runSortKeyDuration(ghclient.WorkflowJobInfo{Status: "in_progress"}, nil)
+		if band != 0 || d != 0 {
+			t.Errorf("runSortKeyDuration() = (%d, %v), want (0, 0)", band, d)
 		}
 	})
 
-	t.Run("queued yields large sentinel", func(t *testing.T) {
-		d := runSortKeyDuration(ghclient.WorkflowJobInfo{Status: "queued"})
-		if d < time.Hour {
-			t.Errorf("runSortKeyDuration(queued) = %v, want large sentinel", d)
+	t.Run("queued falls to band 2", func(t *testing.T) {
+		band, d := runSortKeyDuration(ghclient.WorkflowJobInfo{Status: "queued"}, nil)
+		if band != 2 || d != 0 {
+			t.Errorf("runSortKeyDuration(queued) = (%d, %v), want (2, 0)", band, d)
+		}
+	})
+
+	t.Run("in_progress with average keys band 0 by average (issue #574)", func(t *testing.T) {
+		job := ghclient.WorkflowJobInfo{
+			Status:    "in_progress",
+			Name:      "build",
+			StartedAt: &github.Timestamp{Time: now.Add(-90 * time.Second)},
+		}
+		band, d := runSortKeyDuration(job, map[string]time.Duration{"build": 12 * time.Minute})
+		if band != 0 || d != 12*time.Minute {
+			t.Errorf("runSortKeyDuration() = (%d, %v), want (0, 12m)", band, d)
+		}
+	})
+
+	t.Run("in_progress without average keys band 1 by elapsed (issue #574)", func(t *testing.T) {
+		job := ghclient.WorkflowJobInfo{
+			Status:    "in_progress",
+			Name:      "new-job",
+			StartedAt: &github.Timestamp{Time: now.Add(-90 * time.Second)},
+		}
+		band, d := runSortKeyDuration(job, map[string]time.Duration{"build": time.Minute})
+		if band != 1 || d <= 0 || d >= 2*time.Minute {
+			t.Errorf("runSortKeyDuration() = (%d, %v), want (1, ~90s elapsed)", band, d)
+		}
+	})
+
+	t.Run("empty averages map keeps pre-#574 elapsed key in band 0", func(t *testing.T) {
+		job := ghclient.WorkflowJobInfo{
+			Status:    "in_progress",
+			Name:      "build",
+			StartedAt: &github.Timestamp{Time: now.Add(-90 * time.Second)},
+		}
+		band, d := runSortKeyDuration(job, map[string]time.Duration{})
+		if band != 0 || d <= 0 || d >= 2*time.Minute {
+			t.Errorf("runSortKeyDuration() = (%d, %v), want (0, ~90s elapsed)", band, d)
 		}
 	})
 }

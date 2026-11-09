@@ -151,7 +151,10 @@ func (m *RepoModel) handleRepoChecksUpdate(msg RepoChecksUpdateMsg) (tea.Model, 
 
 	for prNum, prData := range msg.PRData {
 		checkRuns := prData.CheckRuns
-		SortCheckRuns(checkRuns)
+		// Repo mode never fetches workflow history (no HistAvg column), so
+		// there are no averages to sort by — nil keeps in_progress rows on
+		// the elapsed-runtime ordering (issue #574).
+		SortCheckRuns(checkRuns, nil)
 
 		var visible []ghclient.CheckRunInfo
 		for _, cr := range checkRuns {

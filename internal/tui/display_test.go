@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -414,4 +415,67 @@ func TestFormatDescriptionCJK(t *testing.T) {
 	if got != want {
 		t.Errorf("FormatDescription() = %q, want %q", got, want)
 	}
+}
+
+func TestSortCheckRunsByAverage(t *testing.T) {
+	// Issue #574: once historical averages are available, in_progress rows
+	// order by expected finish (average duration) instead of elapsed runtime,
+	// with no-average running jobs following the ones that have an average.
+	now := time.Now()
+
+	// A slow integration suite that just started, a lint job nearing its
+	// (short) expected finish, a unit job that completed in 15m, and a
+	// queued deploy. Under the pre-#574 elapsed ordering the fresh
+	// integration floats to the top because it started last.
+	newChecks := func() []ghclient.CheckRunInfo {
+		return []ghclient.CheckRunInfo{
+			{Name: "integration", Status: "in_progress", StartedAt: ptrTime(now.Add(-5 * time.Second))},
+			{Name: "lint", Status: "in_progress", StartedAt: ptrTime(now.Add(-40 * time.Second))},
+			{Name: "unit", Status: "completed", StartedAt: ptrTime(now.Add(-20 * time.Minute)), CompletedAt: ptrTime(now.Add(-5 * time.Minute))},
+			{Name: "deploy", Status: "queued"},
+		}
+	}
+	names := func(checks []ghclient.CheckRunInfo) string {
+		parts := make([]string, len(checks))
+		for i, c := range checks {
+			parts[i] = c.Name
+		}
+		return strings.Join(parts, ",")
+	}
+
+	t.Run("averages present: running jobs ordered by historical average", func(t *testing.T) {
+		checks := newChecks()
+		avgs := map[string]time.Duration{"integration": 12 * time.Minute, "lint": 30 * time.Second}
+		SortCheckRuns(checks, avgs)
+		if got, want := names(checks), "lint,integration,unit,deploy"; got != want {
+			t.Errorf("order = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("partially present: no-average running job follows jobs with averages", func(t *testing.T) {
+		checks := newChecks()
+		avgs := map[string]time.Duration{"lint": 30 * time.Second}
+		SortCheckRuns(checks, avgs)
+		// integration has no average: band 1, after the completed unit job
+		// despite having the smallest elapsed runtime.
+		if got, want := names(checks), "lint,unit,integration,deploy"; got != want {
+			t.Errorf("order = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("nil map keeps pre-#574 elapsed ordering", func(t *testing.T) {
+		checks := newChecks()
+		SortCheckRuns(checks, nil)
+		if got, want := names(checks), "integration,lint,unit,deploy"; got != want {
+			t.Errorf("order = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("empty map behaves like nil", func(t *testing.T) {
+		checks := newChecks()
+		SortCheckRuns(checks, map[string]time.Duration{})
+		if got, want := names(checks), "integration,lint,unit,deploy"; got != want {
+			t.Errorf("order = %q, want %q", got, want)
+		}
+	})
 }
