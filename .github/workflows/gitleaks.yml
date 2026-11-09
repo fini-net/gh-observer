@@ -16,6 +16,15 @@ permissions: {}
 jobs:
   gitleaks-scan:
     name: gitleaks
+    # Skip secret scanning for bot dependency-bump PRs (dependabot, renovate)
+    if: |
+      github.event_name != 'pull_request' ||
+      (
+        github.event.pull_request.user.login != 'dependabot[bot]' &&
+        github.event.pull_request.user.login != 'dependabot-preview[bot]' &&
+        github.event.pull_request.user.login != 'renovate[bot]' &&
+        github.event.pull_request.user.login != 'renovate-preview[bot]'
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: read
