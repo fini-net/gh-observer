@@ -479,3 +479,137 @@ func TestSortCheckRunsByAverage(t *testing.T) {
 		}
 	})
 }
+
+func TestSortKeyDuration(t *testing.T) {
+	// Direct unit twin of TestRunJobSortKeyDuration (run mode): the two
+	// helpers are documented mirrors, so they get mirrored tests to make
+	// any divergence visible. The negative-duration clamps in particular
+	// are unit-level behavior the order-level SortCheckRuns tests can't
+	// observe: a clamped key of 0 and an unclamped negative key often
+	// produce the same order, so only calling the helper can prove the
+	// clamp ran.
+	now := time.Now()
+
+	t.Run("completed with duration", func(t *testing.T) {
+		check := ghclient.CheckRunInfo{
+			Status:      "completed",
+			StartedAt:   ptrTime(now.Add(-2 * time.Minute)),
+			CompletedAt: ptrTime(now.Add(-1 * time.Minute)),
+		}
+		band, d := sortKeyDuration(check, nil)
+		if band != 0 || d != time.Minute {
+			t.Errorf("sortKeyDuration() = (%d, %v), want (0, 1m)", band, d)
+		}
+	})
+
+	t.Run("completed missing timestamps yields zero", func(t *testing.T) {
+		band, d := sortKeyDuration(ghclient.CheckRunInfo{Status: "completed"}, nil)
+		if band != 0 || d != 0 {
+			t.Errorf("sortKeyDuration() = (%d, %v), want (0, 0)", band, d)
+		}
+	})
+
+	t.Run("completed with negative final duration clamps to zero", func(t *testing.T) {
+		// clock skew: a completed check whose CompletedAt predates its
+		// StartedAt would otherwise key band 0 by a negative duration
+		// and sort before every on-time completed check.
+		check := ghclient.CheckRunInfo{
+			Status:      "completed",
+			StartedAt:   ptrTime(now),
+			CompletedAt: ptrTime(now.Add(-2 * time.Minute)),
+		}
+		band, d := sortKeyDuration(check, nil)
+		if band != 0 || d != 0 {
+			t.Errorf("sortKeyDuration() = (%d, %v), want (0, 0)", band, d)
+		}
+	})
+
+	t.Run("in_progress with startedAt, nil averages keys elapsed in band 0", func(t *testing.T) {
+		check := ghclient.CheckRunInfo{
+			Status:    "in_progress",
+			StartedAt: ptrTime(now.Add(-90 * time.Second)),
+		}
+		band, d := sortKeyDuration(check, nil)
+		if band != 0 || d <= 0 {
+			t.Errorf("sortKeyDuration() = (%d, %v), want (0, positive)", band, d)
+		}
+	})
+
+	t.Run("in_progress missing startedAt yields zero", func(t *testing.T) {
+		band, d := sortKeyDuration(ghclient.CheckRunInfo{Status: "in_progress"}, nil)
+		if band != 0 || d != 0 {
+			t.Errorf("sortKeyDuration() = (%d, %v), want (0, 0)", band, d)
+		}
+	})
+
+	t.Run("in_progress with future startedAt clamps runtime to zero", func(t *testing.T) {
+		// clock skew: a check whose start timestamp lands in the future
+		// yields a negative time.Since; clamping keeps it at 0 instead
+		// of keying it before checks that started first.
+		check := ghclient.CheckRunInfo{
+			Status:    "in_progress",
+			StartedAt: ptrTime(now.Add(2 * time.Minute)),
+		}
+		band, d := sortKeyDuration(check, nil)
+		if band != 0 || d != 0 {
+			t.Errorf("sortKeyDuration() = (%d, %v), want (0, 0)", band, d)
+		}
+	})
+
+	t.Run("queued falls to band 2", func(t *testing.T) {
+		band, d := sortKeyDuration(ghclient.CheckRunInfo{Status: "queued"}, nil)
+		if band != 2 || d != 0 {
+			t.Errorf("sortKeyDuration(queued) = (%d, %v), want (2, 0)", band, d)
+		}
+	})
+
+	t.Run("in_progress with average keys band 0 by average (issue #574)", func(t *testing.T) {
+		check := ghclient.CheckRunInfo{
+			Status:    "in_progress",
+			Name:      "build",
+			StartedAt: ptrTime(now.Add(-90 * time.Second)),
+		}
+		band, d := sortKeyDuration(check, map[string]time.Duration{"build": 12 * time.Minute})
+		if band != 0 || d != 12*time.Minute {
+			t.Errorf("sortKeyDuration() = (%d, %v), want (0, 12m)", band, d)
+		}
+	})
+
+	t.Run("in_progress with negative average clamps to zero", func(t *testing.T) {
+		// a corrupt negative average must not key the job before every
+		// on-time job in band 0 - the clamp leaves it at 0.
+		check := ghclient.CheckRunInfo{
+			Status:    "in_progress",
+			Name:      "build",
+			StartedAt: ptrTime(now.Add(-90 * time.Second)),
+		}
+		band, d := sortKeyDuration(check, map[string]time.Duration{"build": -5 * time.Minute})
+		if band != 0 || d != 0 {
+			t.Errorf("sortKeyDuration() = (%d, %v), want (0, 0)", band, d)
+		}
+	})
+
+	t.Run("in_progress without average keys band 1 by elapsed (issue #574)", func(t *testing.T) {
+		check := ghclient.CheckRunInfo{
+			Status:    "in_progress",
+			Name:      "new-job",
+			StartedAt: ptrTime(now.Add(-90 * time.Second)),
+		}
+		band, d := sortKeyDuration(check, map[string]time.Duration{"build": time.Minute})
+		if band != 1 || d <= 0 || d >= 2*time.Minute {
+			t.Errorf("sortKeyDuration() = (%d, %v), want (1, ~90s elapsed)", band, d)
+		}
+	})
+
+	t.Run("empty averages map keeps pre-#574 elapsed key in band 0", func(t *testing.T) {
+		check := ghclient.CheckRunInfo{
+			Status:    "in_progress",
+			Name:      "build",
+			StartedAt: ptrTime(now.Add(-90 * time.Second)),
+		}
+		band, d := sortKeyDuration(check, map[string]time.Duration{})
+		if band != 0 || d <= 0 || d >= 2*time.Minute {
+			t.Errorf("sortKeyDuration() = (%d, %v), want (0, ~90s elapsed)", band, d)
+		}
+	})
+}
