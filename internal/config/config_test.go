@@ -349,8 +349,8 @@ func TestLoad_CopilotDefaults(t *testing.T) {
 		t.Fatalf("Load() returned error: %v", err)
 	}
 
-	if !cfg.WaitForCopilot {
-		t.Errorf("WaitForCopilot = %v, want true", cfg.WaitForCopilot)
+	if cfg.WaitForCopilot {
+		t.Errorf("WaitForCopilot = %v, want false", cfg.WaitForCopilot)
 	}
 	if cfg.CopilotMaxWait != 180*time.Second {
 		t.Errorf("CopilotMaxWait = %v, want 180s", cfg.CopilotMaxWait)
@@ -372,7 +372,7 @@ func TestLoad_CopilotCustom(t *testing.T) {
 		t.Fatalf("failed to create config dir: %v", err)
 	}
 
-	configContent := `wait_for_copilot: false
+	configContent := `wait_for_copilot: true
 copilot_max_wait: 300s
 copilot_poll_interval: 5s
 copilot_initial_delay: 30s
@@ -387,8 +387,8 @@ copilot_initial_delay: 30s
 		t.Fatalf("Load() returned error: %v", err)
 	}
 
-	if cfg.WaitForCopilot {
-		t.Errorf("WaitForCopilot = %v, want false", cfg.WaitForCopilot)
+	if !cfg.WaitForCopilot {
+		t.Errorf("WaitForCopilot = %v, want true", cfg.WaitForCopilot)
 	}
 	if cfg.CopilotMaxWait != 300*time.Second {
 		t.Errorf("CopilotMaxWait = %v, want 300s", cfg.CopilotMaxWait)

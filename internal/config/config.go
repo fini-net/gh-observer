@@ -27,8 +27,9 @@ type Config struct {
 	PresumedAverages    map[string]string `mapstructure:"presumed_averages"`
 
 	// Copilot code review detection (issue #409). When wait_for_copilot is
-	// true (default), the TUI gates exit on Copilot review completion in PR
-	// mode. The timing parameters mirror template-repo's wait_for_copilot.sh.
+	// true (opt-in; default false since it has no convenient test path), the
+	// TUI gates exit on Copilot review completion in PR mode. The timing
+	// parameters mirror template-repo's wait_for_copilot.sh.
 	WaitForCopilot       bool          `mapstructure:"wait_for_copilot"`
 	CopilotMaxWait       time.Duration `mapstructure:"copilot_max_wait"`
 	CopilotPollInterval  time.Duration `mapstructure:"copilot_poll_interval"`
@@ -49,7 +50,7 @@ func Load() (*Config, error) {
 	v.SetDefault("colors.queued", 8)   // Gray
 	v.SetDefault("enable_links", true)
 	v.SetDefault("presumed_averages.DCO", "1s")
-	v.SetDefault("wait_for_copilot", true)
+	v.SetDefault("wait_for_copilot", false)
 	v.SetDefault("copilot_max_wait", "180s")
 	v.SetDefault("copilot_poll_interval", "10s")
 	v.SetDefault("copilot_initial_delay", "15s")
