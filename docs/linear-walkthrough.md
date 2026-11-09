@@ -848,8 +848,9 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 
     m.checkRuns = msg.CheckRuns
     // Presumed averages are injected before sorting so they feed the
-    // running-job ordering too (issue #574)
-    SortCheckRuns(m.checkRuns, m.jobAverages)  // Sort by expected finish
+    // running-job ordering too; sortAverages gates on real history arrival
+    // (issue #574)
+    SortCheckRuns(m.checkRuns, m.sortAverages())  // Sort by expected finish
     // Adopt the GraphQL-sourced cycle start anchor on the first successful
     // poll where it is non-zero; preserve the last known value otherwise.
     if !msg.CycleStartTime.IsZero() {
@@ -1017,7 +1018,7 @@ func SortCheckRuns(checks []ghclient.CheckRunInfo, jobAverages map[string]time.D
 }
 ```
 
-**Sorting Priority** (issue #574): band → duration → status (in_progress first) → name (alphabetical). `sortKeyDuration` returns a two-part key so running jobs order by expected finish once historical averages exist: band 0 holds completed jobs (final duration) and in_progress jobs with an average (average duration), interleaved; band 1 holds in_progress jobs without an average (elapsed runtime), so they follow every job with a known expectation; band 2 holds queued and unknown statuses, ordered by the status and name tiebreakers. While `jobAverages` is empty (the `historyFetchDelay` startup window, `--quick`, or a rate-limited fetch), in_progress rows keep the pre-#574 elapsed-runtime key in band 0, so behavior is unchanged — which is also why repo mode, which never fetches history, passes `nil`.
+**Sorting Priority** (issue #574): band → duration → status (in_progress first) → name (alphabetical). `sortKeyDuration` returns a two-part key so running jobs order by expected finish once historical averages exist: band 0 holds completed jobs (final duration) and in_progress jobs with an average (average duration), interleaved; band 1 holds in_progress jobs without an average (elapsed runtime), so they follow every job with a known expectation; band 2 holds queued and unknown statuses, ordered by the status and name tiebreakers. Callers pass `nil` to keep the elapsed ordering — repo mode always does, and `Model.sortAverages`/`RunModel.sortAverages` do until real history lands (`m.workflowAverages` non-empty), so the `historyFetchDelay` startup window, `--quick`, and rate-limited or errored fetches behave exactly as before #574; presumed averages (DCO) are injected into `m.jobAverages` on the first poll and only start influencing order once real history activates the gate.
 
 ### Run-mode message loop (`internal/tui/runupdate.go`)
 
@@ -1750,7 +1751,8 @@ main.go runPRMode()
                 ├── [ChecksUpdateMsg received]
                 │   └── handleChecksUpdate()
                 │       ├── ApplyPresumedAverages() (DCO etc., before sort)
-                │       ├── SortCheckRuns() by expected finish (avg, #574)
+                │       ├── SortCheckRuns() by expected finish (avg, #574;
+                │       │   gated nil until real history — sortAverages())
                 │       ├── Adopt CycleStartTime anchor on first poll;
                 │       │   re-anchor Copilot budget to real cycle start
                 │       ├── Track peakCheckCount, firstCheckSeenAt

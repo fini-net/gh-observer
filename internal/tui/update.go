@@ -386,8 +386,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Newly merged averages change the expected finish order of
 			// running jobs — re-sort so the reorder shows without waiting
 			// for the next poll (issue #574). Averages arrive per workflow,
-			// so rows settle as each partial message lands.
-			SortCheckRuns(m.checkRuns, m.jobAverages)
+			// so rows settle as each partial message lands. workflowAverages
+			// now holds this workflow, so sortAverages returns the map.
+			SortCheckRuns(m.checkRuns, m.sortAverages())
 		}
 
 		// Check if all workflow fetches are done
@@ -451,6 +452,24 @@ func markChecksSeen(checkRuns []ghclient.CheckRunInfo, seen map[string]bool) {
 	}
 }
 
+// sortAverages returns the averages SortCheckRuns should key in_progress
+// rows on: nil until real workflow history has arrived, then the full
+// m.jobAverages (presumed entries included). Presumed averages (DCO) are
+// injected into m.jobAverages on the very first poll, so gating the sort on
+// "map non-empty" alone would activate average-based banding during the
+// startup window, and issue #574 requires the elapsed ordering until
+// history actually lands. m.workflowAverages only gains entries from
+// JobAveragesPartialMsg, which makes it the "real history arrived" signal:
+// --quick, a rate-limited or errored fetch, and the first historyFetchDelay
+// window all leave it empty, and the sort falls back to elapsed runtime.
+// The HistAvg column still shows presumed values from m.jobAverages.
+func (m *Model) sortAverages() map[string]time.Duration {
+	if len(m.workflowAverages) == 0 {
+		return nil
+	}
+	return m.jobAverages
+}
+
 // handleChecksUpdate processes check run updates and returns the updated model.
 func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	if msg.Err != nil {
@@ -464,9 +483,9 @@ func (m *Model) handleChecksUpdate(msg ChecksUpdateMsg) (tea.Model, tea.Cmd) {
 	// This is idempotent — it only writes when the job name is absent from
 	// m.jobAverages, so real history fetched later always wins. Runs before
 	// SortCheckRuns so presumed averages also feed the running-job ordering
-	// (issue #574).
+	// once real history has activated it (issue #574).
 	ghclient.ApplyPresumedAverages(m.jobAverages, m.checkRuns, m.presumedAverages, m.host)
-	SortCheckRuns(m.checkRuns, m.jobAverages)
+	SortCheckRuns(m.checkRuns, m.sortAverages())
 	// Adopt the GraphQL-sourced cycle start anchor on the first successful
 	// poll where it is non-zero. Subsequent polls overwrite with the same
 	// value; if a later poll returns zero (e.g. transient query shape

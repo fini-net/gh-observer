@@ -336,9 +336,10 @@ func FormatDescription(description string, widths ColumnWidths) string {
 // band 0, so the jobs expected to finish first float to the top and stay
 // put while they run; in_progress jobs without an average follow in band 1
 // keyed by elapsed runtime; queued and unknown statuses fall to band 2.
-// While jobAverages is empty (nil or no entries yet — the historyFetchDelay
-// startup window, --quick, or a rate-limited fetch), in_progress rows keep
-// their pre-#574 elapsed-runtime key in band 0, so behavior is unchanged.
+// While jobAverages is empty, in_progress rows keep their pre-#574
+// elapsed-runtime key in band 0, so callers that pass nil (repo mode) or a
+// gated map (Model.sortAverages — the historyFetchDelay startup window,
+// --quick, or a rate-limited/errored fetch) keep the old ordering.
 // Secondary: Status priority (in_progress > completed > queued > other)
 // Tertiary: Job name alphabetically
 func SortCheckRuns(checks []ghclient.CheckRunInfo, jobAverages map[string]time.Duration) {

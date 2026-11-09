@@ -136,7 +136,7 @@ Actions are the operations each actor performs within the system.
 
 | Action | Purpose |
 | ------ | ------- |
-| Sort check runs | Primary by band then duration ascending — completed (final duration) and in_progress with a historical average (average duration) share band 0, in_progress without an average follows in band 1 by elapsed runtime, queued last (issue #574); secondary by status priority (in_progress > completed > queued), tertiary alphabetically |
+| Sort check runs | Primary by band then duration ascending — completed (final duration) and in_progress with a historical average (average duration) share band 0, in_progress without an average follows in band 1 by elapsed runtime, queued last (issue #574; gated on real history arrival — see `Model.sortAverages`); secondary by status priority (in_progress > completed > queued), tertiary alphabetically |
 | Format check name | Renders "WorkflowName / JobName" or "AppName / JobName" depending on available metadata |
 | Build hyperlinks | Wraps check names in OSC 8 terminal hyperlinks when `enable_links` is true |
 | Align columns | Calculates and pads column widths for tabular display |

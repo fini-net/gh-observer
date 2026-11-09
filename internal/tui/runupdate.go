@@ -153,6 +153,20 @@ func (m *RunModel) syncViewport() {
 	m.sync(m.renderHeader(), m.renderBody(), m.renderFooter())
 }
 
+// sortAverages returns the averages SortRunJobs should key in_progress jobs
+// on: nil until real workflow history has arrived, then the full
+// m.jobAverages (presumed entries included). Mirrors Model.sortAverages in
+// update.go: m.workflowAverages only gains entries from
+// RunJobAveragesPartialMsg, so --quick, a rate-limited or errored fetch, and
+// the window before history lands all keep the pre-#574 elapsed ordering.
+// The HistAvg column still shows presumed values from m.jobAverages.
+func (m *RunModel) sortAverages() map[string]time.Duration {
+	if len(m.workflowAverages) == 0 {
+		return nil
+	}
+	return m.jobAverages
+}
+
 // handleRunJobsUpdate processes job status updates.
 func (m *RunModel) handleRunJobsUpdate(msg RunJobsUpdateMsg) (tea.Model, tea.Cmd) {
 	if msg.Err != nil {
@@ -165,9 +179,9 @@ func (m *RunModel) handleRunJobsUpdate(msg RunJobsUpdateMsg) (tea.Model, tea.Cmd
 	// (e.g. DCO). Run mode jobs are almost always real Actions jobs, but we
 	// apply the same logic for consistency. Idempotent — real history wins.
 	// Runs before SortRunJobs so presumed averages also feed the running-job
-	// ordering (issue #574).
+	// ordering once real history has activated it (issue #574).
 	ghclient.ApplyPresumedAverages(m.jobAverages, ghclient.WorkflowJobInfoToCheckRuns(msg.Jobs), m.presumedAverages, m.host)
-	SortRunJobs(m.jobs, m.jobAverages)
+	SortRunJobs(m.jobs, m.sortAverages())
 	m.rateLimitRemaining = msg.RateLimitRemaining
 	m.fetchReceived = true
 	m.lastUpdate = time.Now()
@@ -254,8 +268,9 @@ func (m *RunModel) handleRunJobAveragesPartial(msg RunJobAveragesPartialMsg) (te
 
 		// Newly merged averages change the expected finish order of running
 		// jobs — re-sort so the reorder shows without waiting for the next
-		// poll (issue #574).
-		SortRunJobs(m.jobs, m.jobAverages)
+		// poll (issue #574). workflowAverages now holds this workflow, so
+		// sortAverages returns the map.
+		SortRunJobs(m.jobs, m.sortAverages())
 	}
 
 	if len(m.pendingWorkflowFetch) == 0 {

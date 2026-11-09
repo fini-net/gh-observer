@@ -2392,3 +2392,61 @@ func TestFetchCheckRunsCmdError(t *testing.T) {
 		t.Error("ChecksUpdateMsg.Err = nil, want the fetch error")
 	}
 }
+
+func TestPresumedAveragesSortGate(t *testing.T) {
+	// Claude review of PR #578, issue 1: presumed averages (DCO) land in
+	// jobAverages on the first poll, but they must not activate
+	// average-based ordering before real workflow history arrives — the
+	// startup window keeps the pre-#574 elapsed ordering. Once real history
+	// lands, presumed values participate like any other average.
+	now := time.Now()
+	names := func(checks []ghclient.CheckRunInfo) string {
+		parts := make([]string, len(checks))
+		for i, c := range checks {
+			parts[i] = c.Name
+		}
+		return strings.Join(parts, ",")
+	}
+	// DCO is an external app check (off-site DetailsURL, no workflow IDs),
+	// so ApplyPresumedAverages adopts the configured 1s for it. Elapsed
+	// ordering would be build (30s) < DCO (4m) < unit (5m final).
+	checks := []ghclient.CheckRunInfo{
+		{Name: "DCO", AppName: "DCO", DetailsURL: "https://probot.github.io/apps/dco/",
+			Status: "in_progress", StartedAt: ptrTime(now.Add(-4 * time.Minute))},
+		{Name: "build", Status: "in_progress", StartedAt: ptrTime(now.Add(-30 * time.Second))},
+		{Name: "unit", Status: "completed", StartedAt: ptrTime(now.Add(-10 * time.Minute)), CompletedAt: ptrTime(now.Add(-5 * time.Minute))},
+	}
+
+	m := makeModel()
+	m.presumedAverages = map[string]time.Duration{"DCO": time.Second}
+
+	// handleChecksUpdate has a pointer receiver and returns *Model (see the
+	// value/pointer split note on Model.Update).
+	updated, _ := m.handleChecksUpdate(ChecksUpdateMsg{CheckRuns: checks, RateLimitRemaining: 5000})
+	result := updated.(*Model)
+
+	// The presumed average was injected for the external DCO check (the
+	// HistAvg column shows it)...
+	if result.jobAverages["DCO"] != time.Second {
+		t.Errorf("jobAverages[DCO] = %v, want presumed 1s", result.jobAverages["DCO"])
+	}
+	// ...but with no real history yet the sort stays elapsed-ascending:
+	// presumed values alone must not open the average-based gate.
+	if got := names(result.checkRuns); got != "build,DCO,unit" {
+		t.Errorf("startup order = %q, want %q", got, "build,DCO,unit")
+	}
+
+	// Real history arrives for build; workflowAverages becomes non-empty
+	// and the sort keys on averages — including DCO's presumed 1s. The
+	// partial message is handled inline in update(), which returns Model
+	// by value.
+	model2, _ := result.Update(JobAveragesPartialMsg{
+		WorkflowID: 456,
+		Averages:   map[string]time.Duration{"build": 2 * time.Minute},
+	})
+	result2 := model2.(Model)
+
+	if got := names(result2.checkRuns); got != "DCO,build,unit" {
+		t.Errorf("post-history order = %q, want %q", got, "DCO,build,unit")
+	}
+}
