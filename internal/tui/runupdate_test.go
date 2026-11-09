@@ -694,4 +694,47 @@ func TestRunJobSortKeyDuration(t *testing.T) {
 			t.Errorf("runSortKeyDuration() = (%d, %v), want (0, ~90s elapsed)", band, d)
 		}
 	})
+
+	t.Run("completed with negative duration clamps to zero", func(t *testing.T) {
+		// clock skew: a completed job whose CompletedAt predates its
+		// StartedAt would otherwise key band 0 by a negative duration
+		// and sort before every on-time completed job.
+		job := ghclient.WorkflowJobInfo{
+			Status:      "completed",
+			StartedAt:   &github.Timestamp{Time: now},
+			CompletedAt: &github.Timestamp{Time: now.Add(-2 * time.Minute)},
+		}
+		band, d := runSortKeyDuration(job, nil)
+		if band != 0 || d != 0 {
+			t.Errorf("runSortKeyDuration() = (%d, %v), want (0, 0)", band, d)
+		}
+	})
+
+	t.Run("in_progress with future startedAt clamps runtime to zero", func(t *testing.T) {
+		// clock skew: a job whose start timestamp lands in the future
+		// yields a negative time.Since; clamping keeps it at 0 instead
+		// of keying it before jobs that started first.
+		job := ghclient.WorkflowJobInfo{
+			Status:    "in_progress",
+			StartedAt: &github.Timestamp{Time: now.Add(2 * time.Minute)},
+		}
+		band, d := runSortKeyDuration(job, nil)
+		if band != 0 || d != 0 {
+			t.Errorf("runSortKeyDuration() = (%d, %v), want (0, 0)", band, d)
+		}
+	})
+
+	t.Run("in_progress with negative average clamps to zero", func(t *testing.T) {
+		// a corrupt negative average must not key the job before every
+		// on-time job in band 0 - the clamp leaves it at 0.
+		job := ghclient.WorkflowJobInfo{
+			Status:    "in_progress",
+			Name:      "build",
+			StartedAt: &github.Timestamp{Time: now.Add(-90 * time.Second)},
+		}
+		band, d := runSortKeyDuration(job, map[string]time.Duration{"build": -5 * time.Minute})
+		if band != 0 || d != 0 {
+			t.Errorf("runSortKeyDuration() = (%d, %v), want (0, 0)", band, d)
+		}
+	})
 }
