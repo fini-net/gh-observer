@@ -283,6 +283,13 @@ func TestResolveRepoArgInvalidValue(t *testing.T) {
 // jj detector's sync.Once cache walks up from it.
 func chdirToGitRepo(t *testing.T, remote string) {
 	t.Helper()
+	// Neutralize external git config: `git remote get-url` applies
+	// url.<base>.insteadOf rewrites, so a developer's SSH↔HTTPS or
+	// proxy rewrite could change what the configured remote resolves
+	// to. These tests assert the remote's own host/owner/repo, so
+	// point global config at /dev/null and skip system config.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	dir := t.TempDir()
 	if out, err := exec.Command("git", "init", dir).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
@@ -552,6 +559,12 @@ func captureStdout(t *testing.T, fn func()) string {
 		_, _ = io.Copy(&buf, r) // blocks until w is closed
 		captured <- buf.String()
 	}()
+
+	// The deferred close covers the panic/Goexit path: without it the
+	// reader goroutine would block on io.Copy forever. On the normal
+	// path the explicit close below wins and this second close is a
+	// harmless ErrClosed.
+	defer func() { _ = w.Close() }()
 
 	fn()
 
@@ -1017,9 +1030,10 @@ func TestRunRunSnapshotAllJobsPass(t *testing.T) {
 	if !pushedAgeRE.MatchString(out) {
 		t.Errorf("output missing 'Pushed <n>s ago' from the GraphQL lookup, got:\n%s", out)
 	}
-	// The REST head_commit fallback would render the 2h committer date;
-	// its absence is the negative half of the same contract.
-	if strings.Contains(out, "2h") {
+	// The REST head_commit fallback would render the 2h committer date
+	// in the pushed line. Scoped to "Pushed 2h" so an unrelated 2h
+	// duration elsewhere in the table can't false-fail this check.
+	if strings.Contains(out, "Pushed 2h") {
 		t.Errorf("GraphQL pushedDate must win over the REST head_commit fallback, got:\n%s", out)
 	}
 	for _, name := range []string{"build", "lint", "e2e"} {
@@ -1183,6 +1197,12 @@ func captureStderr(t *testing.T, fn func()) string {
 		_, _ = io.Copy(&buf, r) // blocks until w is closed
 		captured <- buf.String()
 	}()
+
+	// The deferred close covers the panic/Goexit path: without it the
+	// reader goroutine would block on io.Copy forever. On the normal
+	// path the explicit close below wins and this second close is a
+	// harmless ErrClosed.
+	defer func() { _ = w.Close() }()
 
 	fn()
 
