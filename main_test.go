@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -974,6 +975,12 @@ func TestRunRunSnapshotNoJobs(t *testing.T) {
 	})
 }
 
+// pushedAgeRE matches the run header's pushed-age line at second scale
+// ("Pushed 31s ago"), tolerant of elapsed test-time drift. The point is
+// the source — the GraphQL lookup's freshly-pushed date — not the exact
+// age, so a literal "30s" assertion would flake by a second.
+var pushedAgeRE = regexp.MustCompile(`Pushed \d+s ago`)
+
 func TestRunRunSnapshotAllJobsPass(t *testing.T) {
 	now := time.Now()
 	run := fakeRun{
@@ -1004,11 +1011,14 @@ func TestRunRunSnapshotAllJobsPass(t *testing.T) {
 	if !strings.Contains(out, "owner/repo: Add widgets (#42)") {
 		t.Errorf("output missing run header, got:\n%s", out)
 	}
-	if !strings.Contains(out, "Pushed ") {
-		t.Errorf("output missing 'Pushed X ago' from the GraphQL lookup, got:\n%s", out)
+	// The age varies by elapsed test time, so match the seconds-scale
+	// format rather than a literal age: the invariant is the source (the
+	// GraphQL lookup's ~30s-old pushedDate), not the exact value.
+	if !pushedAgeRE.MatchString(out) {
+		t.Errorf("output missing 'Pushed <n>s ago' from the GraphQL lookup, got:\n%s", out)
 	}
-	// The exact age varies by elapsed test time; the invariant is the
-	// source: GraphQL's ~30s-old pushedDate, not the 2h REST fallback.
+	// The REST head_commit fallback would render the 2h committer date;
+	// its absence is the negative half of the same contract.
 	if strings.Contains(out, "2h") {
 		t.Errorf("GraphQL pushedDate must win over the REST head_commit fallback, got:\n%s", out)
 	}
