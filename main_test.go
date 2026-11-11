@@ -280,7 +280,10 @@ func TestResolveRepoArgInvalidValue(t *testing.T) {
 // non-empty) in a temp dir and chdirs there for the test's duration,
 // restoring the original working directory on cleanup. Never combine
 // with t.Parallel(): the working directory is process-global, and the
-// jj detector's sync.Once cache walks up from it.
+// jj detector's sync.Once cache walks up from it. And since it shells
+// out to the real git binary, never combine with the fakeGh*OnPath
+// helpers: those narrow PATH to a stub dir containing only gh, and a
+// git lookup would fail as a confusing "executable file not found".
 func chdirToGitRepo(t *testing.T, remote string) {
 	t.Helper()
 	// Neutralize external git config: `git remote get-url` applies
