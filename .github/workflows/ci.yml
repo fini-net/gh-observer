@@ -41,8 +41,15 @@ jobs:
         # the upload can't authenticate there - skip the doomed attempt;
         # same-repo PRs (incl. Renovate) and pushes to main still run
         if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && github.actor != 'dependabot[bot]'
+        # fail_ci_if_error: a broken upload (codecov.io outage, etc) reds
+        # the CI / go-test check so gh observer reports it and the README
+        # badge can't silently go stale; it does not block merging - main's
+        # required status checks are only govulncheck, Checkov, and
+        # gitleaks - but if CI ever joins that list, a codecov.io outage
+        # would then block merges
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: coverage.out
           use_oidc: true
+          fail_ci_if_error: true
           disable_search: true
