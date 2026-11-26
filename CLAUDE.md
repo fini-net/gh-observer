@@ -39,7 +39,7 @@ The TUI and live GitHub API interactions are tested manually via `just build` ag
 - `just cast-uncloned-repo [url]` - Record the remote-PR scenario to `.cache/uncloned-repo.cast` (default: the nautilus URL the README documents)
 - `just gif <target> [speed] [cast]` - Re-render one README GIF; targets `merged-pr2` (1x), `uncloned-repo` (1x), `active-pr` (2x), `descriptions2` (10x); `active-pr` pulls the newest `.cache/pr*.cast` recording, `descriptions2` the newest one showing super-linter; casts sourced from `.cache/` are archived to `docs/` next to their GIF (headless recordings borrow the committed cast's theme), and `docs/dev-process.gif` (template asset) is never touched
 
-CI (`ci.yml`) also uploads the coverage profile to [codecov.io/gh/fini-net/gh-observer](https://codecov.io/gh/fini-net/gh-observer) (README badge). The upload token is the **org-level** secret `ORG_CODECOV_TOKEN` - it lives in fini-net org Settings → Secrets and variables → Actions, *not* in this repo's settings, so don't go hunting for it there.
+CI (`ci.yml`) also uploads the coverage profile to [codecov.io/gh/fini-net/gh-observer](https://codecov.io/gh/fini-net/gh-observer) (README badge). The upload authenticates with a short-lived GitHub OIDC token (codecov action `use_oidc: true`, job-level `id-token: write` permission) — no static token secret is involved, so don't go hunting for the retired org-level `ORG_CODECOV_TOKEN` secret in fini-net Settings → Secrets and variables → Actions.
 
 ### Code quality
 
