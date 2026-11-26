@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write # mint the OIDC token for the codecov upload below
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@aebdcf6156ab6691adf63218240e476564a1ed4c # v2.23.0
@@ -30,19 +31,18 @@ jobs:
       - name: Run tests
         run: go test ./... -covermode=atomic -coverprofile=coverage.out
 
-      # publishes the coverage report that the README badge links to; requires
-      # the ORG_CODECOV_TOKEN secret - an org-level secret (fini-net Settings
-      # -> Secrets and variables -> Actions), not a repo-level one - because
-      # codecov no longer supports tokenless uploads from CI pushes
+      # publishes the coverage report that the README badge links to,
+      # authenticating with a short-lived GitHub OIDC token (audience
+      # codecov.io) instead of a long-lived static upload secret
       - name: Upload coverage to Codecov
-        # fork PRs and Dependabot PRs don't get secrets (GitHub treats
-        # Dependabot pull_request runs like forks even though its branches
-        # live in this repo), so the upload can't authenticate there -
-        # skip the doomed attempt; same-repo PRs (incl. Renovate) and
-        # pushes to main still run
+        # fork PRs and Dependabot PRs can't mint OIDC tokens (GitHub won't
+        # grant id-token: write there - it treats Dependabot pull_request
+        # runs like forks even though its branches live in this repo), so
+        # the upload can't authenticate there - skip the doomed attempt;
+        # same-repo PRs (incl. Renovate) and pushes to main still run
         if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && github.actor != 'dependabot[bot]'
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: coverage.out
-          token: ${{ secrets.ORG_CODECOV_TOKEN }}
+          use_oidc: true
           disable_search: true
