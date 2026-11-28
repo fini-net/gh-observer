@@ -3,7 +3,7 @@ module github.com/fini-net/gh-observer
 go 1.27.4
 
 require (
-	charm.land/bubbles/v2 v2.2.1
+	charm.land/bubbles/v2 v2.2.2
 	charm.land/bubbletea/v2 v2.1.2
 	charm.land/lipgloss/v2 v2.1.1
 	github.com/google/go-github/v93 v93.0.0
@@ -34,7 +34,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
-	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/rivo/uniseg v0.4.8-0.20261110175422-3a370411ca06 // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
 	github.com/shurcooL/graphql v0.0.0-20240915155400-7ee5256398cf // indirect
 	github.com/spf13/afero v1.15.0 // indirect
